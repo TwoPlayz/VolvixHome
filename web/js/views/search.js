@@ -60,7 +60,10 @@ Spin.views = Spin.views || {};
       html += section('Albums', '<div class="grid">' + list.map(function (a) { return S.albumCard(a); }).join('') + '</div>', all && r.albums.length > 12 ? 'albums' : null);
     }
     if (show('playlists') && r.playlists.length) html += section('Playlists', '<div class="grid">' + r.playlists.map(S.playlistCard).join('') + '</div>');
-    return html || S.emptyState('search', 'No results for "' + ui.q + '"', 'Check the spelling, or try fewer words.');
+    if (html) return html;
+    // with Lidarr, music you don't have yet is listed right below, so a quiet line is enough
+    if (S.lidarr && S.lidarr.canRequest && ui.q.trim().length >= 2) return '<p class="search-none">Nothing in your library for "' + S.esc(ui.q) + '".</p>';
+    return S.emptyState('search', 'No results for "' + ui.q + '"', 'Check the spelling, or try fewer words.');
   }
 
   S.views.search = {
@@ -75,11 +78,21 @@ Spin.views = Spin.views || {};
         '<div class="search-filters"><div class="chips" role="radiogroup" aria-label="Result type">' + TYPES.map(function (t) {
           return '<button class="chip' + (ui.type === t[0] ? ' active' : '') + '" data-type="' + t[0] + '" role="radio" aria-checked="' + (ui.type === t[0]) + '">' + t[1] + '</button>';
         }).join('') + '</div></div>' +
-        '<div data-results>' + results() + '</div>';
+        '<div data-results>' + results() + '</div>' +
+        // music you don't have yet, found through Lidarr
+        '<div data-get-music></div>';
 
       const input = S.$('.search-input', root);
       const clear = S.$('.search-clear', root);
+      let lidarrTimer = null;
+      function lookFurther() {
+        clearTimeout(lidarrTimer);
+        const host = S.$('[data-get-music]', root);
+        if (!S.lidarr || !S.lidarr.canRequest || ui.q.trim().length < 2 || (ui.type !== 'all' && ui.type !== 'albums' && ui.type !== 'artists')) { if (host) host.innerHTML = ''; return; }
+        lidarrTimer = setTimeout(function () { S.getMusic.searchInto(host, ui.q.trim()); }, 600);
+      }
       function update() {
+        lookFurther();
         S.$('[data-results]', root).innerHTML = results();
         clear.hidden = !ui.q;
         S.$$('[data-type]', root).forEach(function (c) { if (c.classList.contains('chip')) { c.classList.toggle('active', c.dataset.type === ui.type); c.setAttribute('aria-checked', c.dataset.type === ui.type); } });
@@ -92,6 +105,7 @@ Spin.views = Spin.views || {};
         if (ty) { ui.type = ty.dataset.type; update(); if (ty.classList.contains('see-all')) S.$('#main').scrollTop = 0; }
       };
       if (!('ontouchstart' in window)) input.focus();
+      lookFurther();
     }
   };
 })(window.Spin);

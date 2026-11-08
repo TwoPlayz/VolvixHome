@@ -7,7 +7,7 @@
   const SCRIPTS = [
     'js/ui.js', 'js/data.js', 'js/store.js', 'js/router.js', 'js/components.js', 'js/player.js', 'js/playlists.js',
     'js/nowplaying.js', 'js/views/home.js', 'js/views/search.js', 'js/views/library.js', 'js/views/album.js',
-    'js/views/artist.js', 'js/views/playlist.js', 'js/views/account.js', 'js/app.js'
+    'js/views/artist.js', 'js/views/playlist.js', 'js/views/account.js', 'js/views/requests.js', 'js/app.js'
   ];
 
   const app = document.getElementById('app');
@@ -79,7 +79,7 @@
   function start() {
     get('/api/me').then(function (me) {
       return Promise.all([get('/api/library'), get('/api/me/data').catch(function () { return null; })]).then(function (r) {
-        window.VH = { user: me.user, catalog: r[0], userdata: r[1] };
+        window.VH = { user: me.user, lidarr: me.lidarr || {}, catalog: r[0], userdata: r[1] };
         app.innerHTML = '';
         loadScripts(SCRIPTS, function () { /* app.js starts itself */ });
       });

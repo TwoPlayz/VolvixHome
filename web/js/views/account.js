@@ -71,6 +71,43 @@ Spin.views = Spin.views || {};
         '</form>');
   }
 
+  /* ---------- Lidarr (admin) ---------- */
+  let lidarr = null;
+  function select(name, value, options, empty) {
+    return '<select class="input" name="' + name + '">' + (empty ? '<option value="">' + empty + '</option>' : '') + options.map(function (o) {
+      return '<option value="' + S.esc(o[0]) + '"' + (String(o[0]) === String(value) ? ' selected' : '') + '>' + S.esc(o[1]) + '</option>';
+    }).join('') + '</select>';
+  }
+  function lidarrGroup() {
+    if (!S.data.me.admin) return '';
+    if (!lidarr) {
+      S.server.json('GET', '/api/lidarr').then(function (r) { lidarr = r; S.app.refresh(); }).catch(function () {});
+      return group('Lidarr', '<p class="set-hint">Loading…</p>', { id: 'lidarr' });
+    }
+    const s = lidarr.settings || {};
+    const L = lidarr.lidarr;
+    const hook = location.origin + (s.hookPath || '');
+    return group('Lidarr',
+      '<form class="set-form" data-form="lidarr" novalidate>' +
+        (lidarr.configured
+          ? (lidarr.error ? '<p class="auth-error">' + S.esc(lidarr.error) + '</p>' : '<p class="gm-ok">' + S.icon('check', 15) + 'Connected to Lidarr ' + S.esc(L && L.version || '') + '</p>')
+          : '<p class="set-hint">Connect Lidarr to search for music you don\'t have and add it to this server automatically. Lidarr finds and downloads it with the sources you set up there.</p>') +
+        '<label class="field"><span class="label">Lidarr address</span><input class="input" name="url" value="' + S.esc(s.url || '') + '" placeholder="http://lidarr:8686" autocomplete="off" spellcheck="false"></label>' +
+        '<label class="field"><span class="label">API key</span><input class="input" name="apiKey" type="password" autocomplete="off" placeholder="' + (s.apiKeySet ? 'Saved (leave empty to keep it)' : 'Lidarr → Settings → General → API Key') + '"></label>' +
+        (L ? '<label class="field"><span class="label">Add music to</span>' + select('rootFolder', s.rootFolder, L.rootFolders.map(function (r) { return [r.path, r.path]; })) + '<span class="hint">Your music folder in Lidarr. Volvix Home should read the same folder.</span></label>' +
+          '<label class="field"><span class="label">Quality profile</span>' + select('qualityProfileId', s.qualityProfileId, L.qualityProfiles.map(function (p) { return [p.id, p.name]; })) + '</label>' +
+          '<label class="field"><span class="label">Metadata profile</span>' + select('metadataProfileId', s.metadataProfileId, L.metadataProfiles.map(function (p) { return [p.id, p.name]; })) + '</label>' +
+          '<label class="check"><input type="checkbox" name="everyoneCanRequest"' + (s.everyoneCanRequest !== false ? ' checked' : '') + '> <span>Everyone in the household can request music (otherwise only admins)</span></label>' : '') +
+        '<p class="auth-error" hidden></p>' +
+        '<div class="set-actions"><button class="btn btn-primary" type="submit">' + (lidarr.configured ? 'Save' : 'Connect') + '</button>' +
+          (lidarr.configured ? '<button class="btn btn-ghost" type="button" data-act="lidarr-off">Disconnect</button>' : '') + '</div>' +
+      '</form>' +
+      (lidarr.configured ? row('New music right away', 'In Lidarr → Settings → Connect, add a <strong>Webhook</strong> with this URL and turn on <em>On Release Import</em>. Otherwise new albums appear within ' + 15 + ' minutes.',
+        '<button class="btn btn-secondary btn-sm" data-copy="' + S.esc(hook) + '">' + S.icon('copy', 14) + 'Copy URL</button>', { icon: 'download' }) +
+        '<p class="hook-url"><code>' + S.esc(hook) + '</code></p>' : ''),
+      { id: 'lidarr', sub: 'Get music you don\'t have yet.' });
+  }
+
   /* ---------- Settings ---------- */
   let status = null;
   function settingsTab() {
@@ -84,6 +121,7 @@ Spin.views = Spin.views || {};
           S.data.me.admin ? '<button class="btn btn-secondary btn-sm" data-act="rescan"' + (status && status.scanning ? ' disabled' : '') + '>Look for new music</button>' : '', { icon: 'library' }) +
         row('New music', 'The server checks the music folder every 15 minutes. Reload to see what\'s new.', '<button class="btn btn-ghost btn-sm" data-act="reload">Reload</button>', { icon: 'download' }),
         { id: 'library' }) +
+      lidarrGroup() +
       group('About', row('Volvix Home', status ? 'Version ' + status.version : '', '', { icon: 'disc' }));
   }
 
@@ -107,6 +145,9 @@ Spin.views = Spin.views || {};
         const act = e.target.closest('[data-act]');
         if (act) {
           if (act.dataset.act === 'logout') S.server.logout();
+          else if (act.dataset.act === 'lidarr-off') {
+            S.server.json('PUT', '/api/lidarr', { url: '' }).then(function (r) { lidarr = r; S.toast('Lidarr disconnected'); S.app.refresh(); });
+          }
           else if (act.dataset.act === 'reload') location.reload();
           else if (act.dataset.act === 'rescan') {
             S.server.json('POST', '/api/library/rescan').then(function () {
@@ -122,6 +163,12 @@ Spin.views = Spin.views || {};
               }, 1500);
             }).catch(function (x) { S.toast(x.message, 'x'); });
           }
+          return;
+        }
+        const copy = e.target.closest('[data-copy]');
+        if (copy) {
+          (navigator.clipboard ? navigator.clipboard.writeText(copy.dataset.copy) : Promise.reject()).then(function () { S.toast('Copied', 'check'); })
+            .catch(function () { S.toast('Select the URL below and copy it', 'copy'); });
           return;
         }
         const rm = e.target.closest('[data-remove-user]');
@@ -151,6 +198,18 @@ Spin.views = Spin.views || {};
         if (form.dataset.form === 'password') {
           S.server.json('POST', '/api/me/password', { current: f.get('current'), new: f.get('new') })
             .then(function () { form.reset(); done(); S.toast('Password changed', 'check'); }).catch(fail);
+        } else if (form.dataset.form === 'lidarr') {
+          S.server.json('PUT', '/api/lidarr', {
+            url: f.get('url') || '', apiKey: f.get('apiKey') || '', rootFolder: f.get('rootFolder') || '',
+            qualityProfileId: Number(f.get('qualityProfileId') || 0), metadataProfileId: Number(f.get('metadataProfileId') || 0),
+            everyoneCanRequest: f.has('everyoneCanRequest') ? true : !form.querySelector('[name=everyoneCanRequest]')
+          }).then(function (r) {
+            const first = !lidarr || !lidarr.configured;
+            lidarr = r; done();
+            S.toast(first ? 'Lidarr connected' : 'Saved', 'check');
+            // the Requests tab and Get buttons appear after a reload
+            if (first) setTimeout(function () { location.reload(); }, 900); else S.app.refresh();
+          }).catch(fail);
         } else if (form.dataset.form === 'add-user') {
           S.server.json('POST', '/api/users', { name: f.get('name'), username: f.get('username'), password: f.get('password'), admin: !!f.get('admin') })
             .then(function (r) { users = null; S.toast(r.user.name + ' can sign in as @' + r.user.username, 'check'); S.app.refresh(); }).catch(fail);

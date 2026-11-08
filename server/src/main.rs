@@ -11,23 +11,27 @@
 //!   VH_WEB_DIR          the web app               (default ./web, else /app/web)
 //!   VH_PORT             port                      (default 4747)
 //!   VH_RESCAN_MINUTES   look for new music every N minutes, 0 = off (default 15)
+//!   VH_LIDARR_URL       Lidarr address, e.g. http://lidarr:8686 (or set it in the app: Settings → Lidarr)
+//!   VH_LIDARR_API_KEY   Lidarr API key
 
 mod auth;
 mod library;
+mod lidarr;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tower::ServiceExt;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -64,6 +68,9 @@ struct AppState {
     cfg: Config,
     lib: RwLock<Library>,
     accounts: Mutex<Accounts>,
+    lidarr: Mutex<lidarr::Settings>,
+    requests: Mutex<Vec<lidarr::Request>>,
+    http: lidarr::Client,
 }
 type Shared = Arc<AppState>;
 
@@ -188,7 +195,10 @@ async fn logout(State(st): State<Shared>, headers: HeaderMap) -> Response {
 
 async fn me(State(st): State<Shared>, headers: HeaderMap) -> Response {
     match signed_in(&st, &headers) {
-        Ok((_, user)) => Json(json!({ "user": PublicUser::from(&user) })).into_response(),
+        Ok((_, user)) => {
+            let l = st.lidarr.lock().unwrap();
+            Json(json!({ "user": PublicUser::from(&user), "lidarr": { "configured": l.configured(), "canRequest": l.configured() && can_request(&user, &l) } })).into_response()
+        }
         Err(r) => r,
     }
 }
@@ -334,6 +344,306 @@ async fn cover(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<Stri
     }
 }
 
+/* ---------------- Lidarr ---------------- */
+
+fn can_request(user: &User, l: &lidarr::Settings) -> bool {
+    user.admin || l.everyone_can_request
+}
+
+/// letters and digits only, lowercase: "The Velvet Room (Deluxe)" ~ "thevelvetroomdeluxe"
+fn norm(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
+}
+
+/// Is this album (or artist) already in the library?
+fn on_server(st: &AppState, title: Option<&str>, artist: &str) -> Option<String> {
+    let lib = st.lib.read().unwrap();
+    let a = norm(artist);
+    match title {
+        Some(t) => {
+            let t = norm(t);
+            lib.catalog.albums.iter().find(|x| norm(&x.artist) == a && (norm(&x.title) == t || norm(&x.title).starts_with(&t))).map(|x| x.id.clone())
+        }
+        None => lib.catalog.artists.iter().find(|x| norm(&x.name) == a).map(|x| x.name.clone()),
+    }
+}
+
+async fn lidarr_status(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let s = st.lidarr.lock().unwrap().clone();
+    let mut out = json!({ "configured": s.configured(), "canRequest": s.configured() && can_request(&user, &s) });
+    if user.admin {
+        out["settings"] = json!({
+            "url": s.url, "apiKeySet": !s.api_key.is_empty(), "rootFolder": s.root_folder,
+            "qualityProfileId": s.quality_profile_id, "metadataProfileId": s.metadata_profile_id,
+            "everyoneCanRequest": s.everyone_can_request,
+            "hookPath": format!("/api/hooks/lidarr?token={}", s.hook_token)
+        });
+        if s.configured() {
+            match st.http.overview(&s).await {
+                Ok(o) => out["lidarr"] = o,
+                Err(e) => out["error"] = json!(e),
+            }
+        }
+    }
+    Json(out).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LidarrConfig {
+    url: String,
+    #[serde(default)]
+    api_key: String,
+    #[serde(default)]
+    root_folder: String,
+    #[serde(default)]
+    quality_profile_id: i64,
+    #[serde(default)]
+    metadata_profile_id: i64,
+    #[serde(default = "default_true")]
+    everyone_can_request: bool,
+}
+fn default_true() -> bool {
+    true
+}
+
+/// Save Lidarr's address and key, but only after Lidarr answers with them.
+async fn lidarr_config(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<LidarrConfig>) -> Response {
+    if let Err(r) = admin(&st, &headers) {
+        return r;
+    }
+    let mut s = st.lidarr.lock().unwrap().clone();
+    let mut url = body.url.trim().trim_end_matches('/').to_string();
+    if url.is_empty() {
+        // turning it off
+        s.url.clear();
+        s.api_key.clear();
+        s.save(&st.cfg.data_dir);
+        *st.lidarr.lock().unwrap() = s;
+        return lidarr_status(State(st), headers).await;
+    }
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        url = format!("http://{url}");
+    }
+    s.url = url;
+    if !body.api_key.trim().is_empty() {
+        s.api_key = body.api_key.trim().to_string();
+    }
+    s.root_folder = body.root_folder;
+    s.quality_profile_id = body.quality_profile_id;
+    s.metadata_profile_id = body.metadata_profile_id;
+    s.everyone_can_request = body.everyone_can_request;
+    let s = match st.http.defaults(&s).await {
+        Ok(s) => s,
+        Err(e) => return error(StatusCode::BAD_REQUEST, &e),
+    };
+    s.save(&st.cfg.data_dir);
+    *st.lidarr.lock().unwrap() = s;
+    lidarr_status(State(st), headers).await
+}
+
+async fn lidarr_search(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let s = st.lidarr.lock().unwrap().clone();
+    if !can_request(&user, &s) {
+        return error(StatusCode::FORBIDDEN, "Ask an admin to get music for you.");
+    }
+    let term = q.get("term").map(|t| t.trim().to_string()).unwrap_or_default();
+    if term.chars().count() < 2 {
+        return Json(json!({ "artists": [], "albums": [] })).into_response();
+    }
+    let enc: String = term.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+    let (artist_path, album_path) = (format!("artist/lookup?term={enc}"), format!("album/lookup?term={enc}"));
+    let (artists, albums) = tokio::join!(st.http.get(&s, &artist_path), st.http.get(&s, &album_path));
+    let (artists, albums) = match (artists, albums) {
+        (Err(e), _) | (_, Err(e)) => return error(StatusCode::BAD_GATEWAY, &e),
+        (Ok(a), Ok(b)) => (a, b),
+    };
+    let requested: Vec<String> = st.requests.lock().unwrap().iter().map(|r| r.foreign_id.clone()).collect();
+    let artists: Vec<Value> = artists.as_array().cloned().unwrap_or_default().iter().take(6).map(|a| {
+        let name = a["artistName"].as_str().unwrap_or("");
+        let id = a["foreignArtistId"].as_str().unwrap_or("");
+        json!({
+            "foreignId": id, "name": name, "type": a["artistType"], "disambiguation": a["disambiguation"],
+            "image": lidarr::image(a, &["poster", "fanart", "banner"]),
+            "inLidarr": lidarr::in_lidarr(a), "monitored": a["monitored"].as_bool().unwrap_or(false) && lidarr::in_lidarr(a),
+            "onServer": on_server(&st, None, name), "requested": requested.iter().any(|r| r == id)
+        })
+    }).collect();
+    let albums: Vec<Value> = albums.as_array().cloned().unwrap_or_default().iter().take(16).map(|a| {
+        let title = a["title"].as_str().unwrap_or("");
+        let artist = a["artist"]["artistName"].as_str().unwrap_or("");
+        let id = a["foreignAlbumId"].as_str().unwrap_or("");
+        json!({
+            "foreignId": id, "title": title, "artist": artist, "year": lidarr::year(a), "type": a["albumType"],
+            "image": lidarr::image(a, &["cover", "disc"]),
+            "inLidarr": lidarr::in_lidarr(a), "monitored": a["monitored"].as_bool().unwrap_or(false) && lidarr::in_lidarr(a),
+            "onServer": on_server(&st, Some(title), artist), "requested": requested.iter().any(|r| r == id)
+        })
+    }).collect();
+    Json(json!({ "artists": artists, "albums": albums })).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WantIt {
+    kind: String,
+    foreign_id: String,
+}
+
+/// Ask Lidarr to get an album (or everything by an artist) and remember who asked.
+async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<WantIt>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let s = st.lidarr.lock().unwrap().clone();
+    if !can_request(&user, &s) {
+        return error(StatusCode::FORBIDDEN, "Ask an admin to get music for you.");
+    }
+    let s = match st.http.defaults(&s).await {
+        Ok(s) => s,
+        Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
+    };
+    let id = body.foreign_id.trim();
+    let kind = body.kind.as_str();
+    let found = match kind {
+        "album" => st.http.get(&s, &format!("album/lookup?term=lidarr:{id}")).await,
+        "artist" => st.http.get(&s, &format!("artist/lookup?term=lidarr:{id}")).await,
+        _ => return error(StatusCode::BAD_REQUEST, "kind must be album or artist"),
+    };
+    let item = match found.map(|v| v.as_array().and_then(|a| a.first().cloned())) {
+        Ok(Some(v)) => v,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "Lidarr couldn't find that any more."),
+        Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
+    };
+
+    let result = if kind == "album" {
+        if lidarr::in_lidarr(&item) {
+            // already known to Lidarr: make sure it's wanted, then search for it now
+            let album_id = item["id"].as_i64().unwrap_or(0);
+            match st.http.put(&s, "album/monitor", &json!({ "albumIds": [album_id], "monitored": true })).await {
+                Ok(_) => st.http.post(&s, "command", &json!({ "name": "AlbumSearch", "albumIds": [album_id] })).await,
+                Err(e) => Err(e),
+            }
+        } else {
+            let mut album = item.clone();
+            album["monitored"] = json!(true);
+            album["addOptions"] = json!({ "searchForNewAlbum": true });
+            // the artist is added too if Lidarr doesn't have them yet, but only this album is wanted
+            album["artist"] = lidarr::artist_body(&item["artist"], &s, false);
+            st.http.post(&s, "album", &album).await
+        }
+    } else if lidarr::in_lidarr(&item) {
+        st.http.post(&s, "command", &json!({ "name": "ArtistSearch", "artistId": item["id"] })).await
+    } else {
+        st.http.post(&s, "artist", &lidarr::artist_body(&item, &s, true)).await
+    };
+    if let Err(e) = result {
+        return error(StatusCode::BAD_GATEWAY, &e);
+    }
+
+    let req = lidarr::Request {
+        kind: kind.to_string(),
+        foreign_id: id.to_string(),
+        title: if kind == "album" { item["title"].as_str() } else { item["artistName"].as_str() }.unwrap_or("").to_string(),
+        artist: if kind == "album" { item["artist"]["artistName"].as_str() } else { item["artistName"].as_str() }.unwrap_or("").to_string(),
+        image: if kind == "album" { lidarr::image(&item, &["cover"]) } else { lidarr::image(&item, &["poster", "fanart"]) },
+        year: lidarr::year(&item),
+        by: user.name.clone(),
+        by_id: user.id.clone(),
+        at: auth::now(),
+    };
+    {
+        let mut list = st.requests.lock().unwrap();
+        list.retain(|r| r.foreign_id != req.foreign_id);
+        list.insert(0, req.clone());
+        list.truncate(300);
+        lidarr::save_requests(&st.cfg.data_dir, &list);
+    }
+    Json(json!({ "request": req })).into_response()
+}
+
+/// What Lidarr is downloading right now.
+async fn lidarr_queue(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    let s = st.lidarr.lock().unwrap().clone();
+    if !s.configured() {
+        return Json(json!({ "items": [] })).into_response();
+    }
+    let q = match st.http.get(&s, "queue?page=1&pageSize=100&includeArtist=true&includeAlbum=true").await {
+        Ok(q) => q,
+        Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
+    };
+    let records = q["records"].as_array().cloned().unwrap_or_default();
+    // Lidarr lists one record per release; fold them into one row per album
+    let mut items: Vec<Value> = Vec::new();
+    for r in records {
+        let album_id = r["album"]["foreignAlbumId"].as_str().unwrap_or("").to_string();
+        let size = r["size"].as_f64().unwrap_or(0.0);
+        let left = r["sizeleft"].as_f64().unwrap_or(0.0);
+        let progress = if size > 0.0 { ((size - left) / size).clamp(0.0, 1.0) } else { 0.0 };
+        let state = r["trackedDownloadState"].as_str().or_else(|| r["status"].as_str()).unwrap_or("queued").to_string();
+        let message = r["statusMessages"].as_array().and_then(|m| m.first()).and_then(|m| m["messages"].get(0)).and_then(|m| m.as_str())
+            .or_else(|| r["errorMessage"].as_str()).map(String::from);
+        if let Some(existing) = items.iter_mut().find(|i| i["foreignAlbumId"] == album_id && !album_id.is_empty()) {
+            existing["progress"] = json!((existing["progress"].as_f64().unwrap_or(0.0) + progress) / 2.0);
+            continue;
+        }
+        items.push(json!({
+            "foreignAlbumId": album_id,
+            "title": r["album"]["title"].as_str().or_else(|| r["title"].as_str()).unwrap_or(""),
+            "artist": r["artist"]["artistName"].as_str().unwrap_or(""),
+            "image": lidarr::image(&r["album"], &["cover"]),
+            "progress": progress, "timeLeft": r["timeleft"], "state": state,
+            "status": r["trackedDownloadStatus"].as_str().unwrap_or("ok"), "message": message
+        }));
+    }
+    Json(json!({ "items": items })).into_response()
+}
+
+/// Everything that's been requested, with where it stands.
+async fn lidarr_requests(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    let list = st.requests.lock().unwrap().clone();
+    let out: Vec<Value> = list.iter().map(|r| {
+        let here = if r.kind == "album" { on_server(&st, Some(&r.title), &r.artist) } else { on_server(&st, None, &r.artist) };
+        let mut v = serde_json::to_value(r).unwrap_or(Value::Null);
+        v["onServer"] = json!(here);
+        v
+    }).collect();
+    Json(json!({ "requests": out })).into_response()
+}
+
+/// Lidarr → Settings → Connect → Webhook: on import, look for the new music right away.
+async fn lidarr_hook(State(st): State<Shared>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let token = st.lidarr.lock().unwrap().hook_token.clone();
+    let given = q.get("token").cloned().unwrap_or_default();
+    // compare without stopping at the first difference
+    let same = token.len() == given.len() && token.bytes().zip(given.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0;
+    if token.is_empty() || !same {
+        return error(StatusCode::UNAUTHORIZED, "Bad token.");
+    }
+    // Lidarr may send several events for one import; a short delay folds them into one scan
+    let s = st.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        start_scan(s);
+    });
+    StatusCode::NO_CONTENT.into_response()
+}
+
 /* ---------------- scanning ---------------- */
 
 fn start_scan(st: Shared) {
@@ -366,6 +676,9 @@ async fn main() {
     }
     let st: Shared = Arc::new(AppState {
         accounts: Mutex::new(Accounts::load(&cfg.data_dir)),
+        lidarr: Mutex::new(lidarr::Settings::load(&cfg.data_dir)),
+        requests: Mutex::new(lidarr::load_requests(&cfg.data_dir)),
+        http: lidarr::Client::new(),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });
@@ -396,6 +709,12 @@ async fn main() {
         .route("/api/library/rescan", post(rescan))
         .route("/api/stream/{id}", get(stream))
         .route("/api/cover/{id}", get(cover))
+        .route("/api/lidarr", get(lidarr_status).put(lidarr_config))
+        .route("/api/lidarr/search", get(lidarr_search))
+        .route("/api/lidarr/request", post(lidarr_request))
+        .route("/api/lidarr/queue", get(lidarr_queue))
+        .route("/api/lidarr/requests", get(lidarr_requests))
+        .route("/api/hooks/lidarr", post(lidarr_hook).put(lidarr_hook))
         .with_state(st.clone());
 
     // everything else is the web app (single page: unknown paths get index.html)

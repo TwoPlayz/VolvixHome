@@ -8,7 +8,7 @@ window.Spin.views = window.Spin.views || {};
     { route: '/home', label: 'Home', icon: 'home' },
     { route: '/search', label: 'Search', icon: 'search' },
     { route: '/library', label: 'Your Library', short: 'Library', icon: 'library' }
-  ];
+  ].concat(window.VH && window.VH.lidarr && window.VH.lidarr.configured ? [{ route: '/requests', label: 'Requests', icon: 'download' }] : []);
 
   let shellMounted = false;
   const appEl = document.getElementById('app');
@@ -133,7 +133,7 @@ window.Spin.views = window.Spin.views || {};
   }
 
   /* ---------- back: in-app history, so Back never leaves the app ---------- */
-  const ROOTS = ['/home', '/search', '/library'];
+  const ROOTS = ['/home', '/search', '/library', '/requests'];
   const trail = [];
   function track(path) {
     if (trail[trail.length - 1] === path) return;
@@ -227,6 +227,7 @@ window.Spin.views = window.Spin.views || {};
   S.router.add('/album/:id', S.views.album);
   S.router.add('/artist/:slug', S.views.artist);
   S.router.add('/playlist/:id', S.views.playlist);
+  S.router.add('/requests', S.views.requests);
   S.router.add('/account/:tab', S.views.account);
   S.router.add('/account', { render: function () { S.router.replace('/account/profile'); S.app.render('/account/profile'); } });
   // old sign-in link: you're already signed in

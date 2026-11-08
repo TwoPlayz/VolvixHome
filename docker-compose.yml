@@ -5,6 +5,8 @@
 #   2. docker compose up -d
 #   3. Open http://<server>:4747 and create the admin account. Add your household under Account → Household.
 #   4. Open Lidarr at http://<server>:8686 and set its root folder to /music.
+#   5. In Volvix Home: Settings → Lidarr, paste Lidarr's API key (Lidarr → Settings → General), then copy the
+#      webhook URL it shows into Lidarr → Settings → Connect → Webhook (On Release Import).
 services:
   volvix-home:
     image: ghcr.io/twoplayz/volvix-home:latest   # or build it yourself: comment this out and keep "build"
@@ -13,7 +15,9 @@ services:
     ports:
       - "4747:4747"
     environment:
-      - VH_RESCAN_MINUTES=15        # how often to look for music Lidarr added
+      - VH_RESCAN_MINUTES=15        # how often to look for new music (Lidarr's webhook makes it instant)
+      - VH_LIDARR_URL=http://lidarr:8686
+      # - VH_LIDARR_API_KEY=...     # or paste it in the app: Settings → Lidarr
     volumes:
       - ./config/volvix-home:/data  # accounts, playlists, settings
       - /path/to/music:/music:ro    # your music library

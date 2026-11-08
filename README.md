@@ -12,6 +12,10 @@ and on phones.
 - **Household accounts:** the first person to open a new server becomes the admin, and the admin
   adds everyone else. Music is shared; playlists, history and settings are personal and follow you
   to every device.
+- **Get more music with Lidarr:** search shows albums and artists you don't have yet, with a
+  **Get** button. Lidarr finds and downloads them with the sources you've set up there. The
+  Requests page shows progress and who asked, and new albums appear as soon as Lidarr imports them
+  (webhook). An admin can limit requests to admins.
 - **Original quality:** files are streamed untouched (FLAC, ALAC, WAV, MP3, AAC, OGG/Opus). The app
   shows the real format, bit depth and sample rate.
 
@@ -34,6 +38,8 @@ arm64, so it runs on most NAS boxes and on a Raspberry Pi.
 | `VH_DATA_DIR` | `/data` | accounts, playlists, settings |
 | `VH_PORT` | `4747` | |
 | `VH_RESCAN_MINUTES` | `15` | how often to look for new music, `0` = only on start or on demand |
+| `VH_LIDARR_URL` | | e.g. `http://lidarr:8686` (or set it in Settings → Lidarr) |
+| `VH_LIDARR_API_KEY` | | Lidarr → Settings → General → API Key |
 
 To reach it from outside your home, put it behind a reverse proxy with HTTPS (Caddy, Nginx Proxy
 Manager, Tailscale…). Sessions use an HttpOnly cookie.
@@ -63,11 +69,15 @@ VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run
 | `GET /api/library`, `POST /api/library/rescan` | catalog; rescan (admin) |
 | `GET /api/stream/{trackId}` | audio, with HTTP Range for seeking |
 | `GET /api/cover/{albumId}` | album art |
+| `GET/PUT /api/lidarr` | Lidarr status; connect and choose folder/profiles (admin) |
+| `GET /api/lidarr/search?term=` | artists and albums Lidarr can get, marked if already in the library |
+| `POST /api/lidarr/request` | `{kind: album or artist, foreignId}`: ask Lidarr to get it |
+| `GET /api/lidarr/queue`, `GET /api/lidarr/requests` | downloads in progress; who requested what |
+| `POST /api/hooks/lidarr?token=` | Lidarr's webhook: rescan after an import |
 
 ## Roadmap
 
 1. ~~Core: library, streaming, accounts, Docker~~
-2. **Lidarr:** search for an artist or album, send it to Lidarr, see it download, and it appears
-   automatically.
+2. ~~**Lidarr:** search, request, progress, appears automatically~~
 3. **SoundCloud streaming** in the same player.
 4. **Apps:** the Windows and iPhone shells from Volvix, pointed at your server.
