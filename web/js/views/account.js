@@ -122,7 +122,9 @@ Spin.views = Spin.views || {};
         row('New music', 'The server checks the music folder every 15 minutes. Reload to see what\'s new.', '<button class="btn btn-ghost btn-sm" data-act="reload">Reload</button>', { icon: 'download' }),
         { id: 'library' }) +
       lidarrGroup() +
-      group('About', row('Volvix Home', status ? 'Version ' + status.version : '', '', { icon: 'disc' }));
+      group('About',
+        row('Volvix Home', status ? 'Version ' + status.version : '', '', { icon: 'disc' }) +
+        row('1 + 1', 'Simple addition, worked out in the app.', '<strong>' + (1 + 1) + '</strong>', { icon: 'plus' }));
   }
 
   S.views.account = {
