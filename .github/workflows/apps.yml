@@ -1,0 +1,48 @@
+# Builds the Volvix Home apps. Download the artifacts from the finished run.
+#   Volvix-Home-Windows   volvix-home.exe   the desktop app
+#   Volvix-Home-iOS       VolvixHome.ipa    the iPhone app (unsigned; sideload with LiveContainer, etc.)
+# Both just connect to your server by address; nothing from the server is bundled in.
+name: Apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['apps/**', '.github/workflows/apps.yml']
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --manifest-path apps/windows/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Volvix-Home-Windows
+          path: apps/windows/target/release/volvix-home.exe
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd apps/ios && xcodegen generate
+      - name: Build (unsigned)
+        run: |
+          cd apps/ios
+          xcodebuild -project VolvixHome.xcodeproj -scheme VolvixHome -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Package .ipa
+        run: |
+          cd apps/ios/build/Build/Products/Release-iphoneos
+          mkdir Payload && cp -R VolvixHome.app Payload/
+          zip -qry "$GITHUB_WORKSPACE/VolvixHome.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Volvix-Home-iOS
+          path: VolvixHome.ipa

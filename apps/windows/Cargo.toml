@@ -1,0 +1,26 @@
+[package]
+name = "volvix-home-app"
+version = "0.1.0"
+edition = "2021"
+description = "Volvix Home for Windows: a desktop window onto your Volvix Home server."
+publish = false
+
+[[bin]]
+name = "volvix-home"
+path = "src/main.rs"
+
+[dependencies]
+wry = "0.57"
+tao = "0.37"
+serde_json = "1"
+dirs = "5"
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

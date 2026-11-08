@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect to Volvix Home</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0b0d; --surface: #161619; --border: #2a2a30; --text: #f4f4f6; --text-2: #a0a0ab; --accent: #e5484d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+    background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  .card { width: min(400px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px 28px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 19px; margin-bottom: 18px; }
+  .brand svg { width: 30px; height: 30px; }
+  .tag { margin-left: 2px; padding: 1px 6px; border-radius: 5px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.01em; }
+  p.sub { margin: 0 0 20px; color: var(--text-2); font-size: 14px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  input { width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--border); background: #0f0f12; color: var(--text); font: inherit; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+  .hint { margin: 6px 0 0; font-size: 12px; color: #6f6f78; }
+  button { width: 100%; margin-top: 18px; padding: 12px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .msg { margin: 14px 0 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; display: none; }
+  .msg.err { display: block; color: #ffb4b4; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .foot { margin-top: 16px; font-size: 12px; color: #6f6f78; text-align: center; }
+</style>
+</head>
+<body>
+  <form class="card" id="f" novalidate>
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#E5484D"/><circle cx="16" cy="16" r="9.5" fill="none" stroke="#000" stroke-opacity=".22"/><circle cx="16" cy="16" r="3.5" fill="#111"/></svg>
+      <span>Volvix Home<span class="tag">App</span></span>
+    </div>
+    <h1>Connect to your server</h1>
+    <p class="sub">Enter the address of your Volvix Home server. Ask whoever set it up if you're not sure.</p>
+    <label for="url">Server address</label>
+    <input id="url" type="text" inputmode="url" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.10:4747">
+    <p class="hint">For example http://volvix.lan:4747, or a web address if it's set up for the internet.</p>
+    <div class="msg err" id="msg"></div>
+    <button type="submit" id="go">Connect</button>
+    <p class="foot">Your family runs this server at home. Nothing is sent anywhere else.</p>
+  </form>
+  <script>
+    var input = document.getElementById('url'), msg = document.getElementById('msg'), go = document.getElementById('go');
+    // the app injects the last address (window.VH_SAVED_SERVER) so it's prefilled
+    if (window.VH_SAVED_SERVER) input.value = window.VH_SAVED_SERVER;
+    input.focus();
+
+    function normalize(v) {
+      v = (v || '').trim().replace(/\/+$/, '');
+      if (!v) return '';
+      if (!/^https?:\/\//i.test(v)) v = 'http://' + v;
+      return v;
+    }
+    document.getElementById('f').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var base = normalize(input.value);
+      if (!base) { input.focus(); return; }
+      msg.classList.remove('err'); msg.textContent = '';
+      go.disabled = true; go.textContent = 'Connecting…';
+      // no-cors reach test: resolves if the server answers at all, rejects if it can't be reached
+      var done = false;
+      var timer = setTimeout(function () { if (!done) fail('That took too long. Check the address and that the server is on.'); }, 8000);
+      fetch(base + '/api/status', { mode: 'no-cors', cache: 'no-store' }).then(function () {
+        if (done) return; done = true; clearTimeout(timer);
+        if (window.ipc && window.ipc.postMessage) {
+          // the app saves the address, then opens the server (so it's remembered before we navigate)
+          window.ipc.postMessage(JSON.stringify({ type: 'connect', url: base }));
+        } else {
+          location.href = base + '/';
+        }
+      }).catch(function () { if (!done) { done = true; clearTimeout(timer); fail('Couldn’t reach a server there. Check the address.'); } });
+      function fail(text) { go.disabled = false; go.textContent = 'Connect'; msg.textContent = text; msg.classList.add('err'); }
+    });
+  </script>
+</body>
+</html>

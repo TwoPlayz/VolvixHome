@@ -2,3 +2,8 @@ server/target/
 data/
 config/
 *.tmp
+
+# app build output
+apps/windows/target/
+apps/ios/build/
+apps/ios/VolvixHome.xcodeproj/

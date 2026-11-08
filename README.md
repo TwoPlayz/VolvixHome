@@ -46,6 +46,23 @@ arm64, so it runs on most NAS boxes and on a Raspberry Pi.
 To reach it from outside your home, put it behind a reverse proxy with HTTPS (Caddy, Nginx Proxy
 Manager, Tailscale…). Sessions use an HttpOnly cookie.
 
+## Apps
+
+Native apps for Windows and iPhone. They don't bundle anything from the server — each just asks for your
+server's address once, remembers it, and opens your library. They never open your browser or leave your
+server.
+
+- **Windows** (`apps/windows`, Rust + WebView2): download `volvix-home.exe` from the Apps workflow
+  and run it. First launch asks for the address (e.g. `http://volvix.lan:4747`). Ctrl+Shift+S reopens
+  the connect screen to switch servers.
+- **iPhone** (`apps/ios`, Swift + WKWebView): built by CI as an unsigned `VolvixHome.ipa`; install it
+  with LiveContainer, SideStore/AltStore or Sideloadly. First launch asks for the address. Audio keeps
+  playing in the background.
+
+Both are built by GitHub Actions (`.github/workflows/apps.yml`) — run the **Apps** workflow and download
+`Volvix-Home-Windows` and `Volvix-Home-iOS`. To build the Windows app yourself:
+`cargo build --release --manifest-path apps/windows/Cargo.toml`.
+
 ## Develop
 
 ```sh
@@ -81,4 +98,4 @@ VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run
 
 1. ~~Core: library, streaming, accounts, Docker~~
 2. ~~**Lidarr:** search, request, progress, appears automatically~~
-3. **Apps:** the Windows and iPhone shells from Volvix, pointed at your server.
+3. ~~**Apps:** Windows and iPhone, pointed at your server~~

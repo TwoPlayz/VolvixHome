@@ -1,0 +1,59 @@
+# XcodeGen spec for the Volvix Home iPhone app. CI builds an unsigned .ipa (.github/workflows/apps.yml).
+#
+#   cd apps/ios && xcodegen generate   # creates VolvixHome.xcodeproj
+#
+# This app connects to YOUR server over your home network (usually plain http), so it allows
+# non-HTTPS loads. It's sideloaded for your household, not shipped on the App Store.
+name: VolvixHome
+options:
+  bundleIdPrefix: app.volvix
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+
+targets:
+  VolvixHome:
+    type: application
+    platform: iOS
+    sources:
+      - path: VolvixHome
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.volvix.home
+        PRODUCT_NAME: VolvixHome
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+    info:
+      path: VolvixHome/Info.plist
+      properties:
+        CFBundleDisplayName: Volvix Home
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+          UIImageRespectsSafeAreaInsets: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiresFullScreen: true
+        ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes:
+          - audio
+        NSLocalNetworkUsageDescription: "Volvix Home connects to your music server on your home network."
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+
+schemes:
+  VolvixHome:
+    build:
+      targets:
+        VolvixHome: all
