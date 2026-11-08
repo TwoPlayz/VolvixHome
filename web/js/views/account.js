@@ -122,7 +122,10 @@ Spin.views = Spin.views || {};
         row('New music', 'The server checks the music folder every 15 minutes. Reload to see what\'s new.', '<button class="btn btn-ghost btn-sm" data-act="reload">Reload</button>', { icon: 'download' }),
         { id: 'library' }) +
       lidarrGroup() +
-      group('About', row('Volvix Home', status ? 'Version ' + status.version : '', '', { icon: 'disc' }));
+      group('About',
+        row('Volvix Home', status ? 'Version ' + status.version : '', '', { icon: 'disc' }) +
+        // only inside the Windows / iPhone apps: go back to the screen where you enter a server address
+        (window.VOLVIX_NATIVE ? row('Server', location.host, '<button class="btn btn-secondary btn-sm" data-act="switch-server">Switch server</button>', { icon: 'devices' }) : ''));
   }
 
   S.views.account = {
@@ -145,6 +148,11 @@ Spin.views = Spin.views || {};
         const act = e.target.closest('[data-act]');
         if (act) {
           if (act.dataset.act === 'logout') S.server.logout();
+          else if (act.dataset.act === 'switch-server') {
+            // iPhone: tell the app; Windows: open the app's built-in connect page
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.volvixhome) window.webkit.messageHandlers.volvixhome.postMessage('disconnect');
+            else location.href = 'http://vh.localhost/connect.html';
+          }
           else if (act.dataset.act === 'lidarr-off') {
             S.server.json('PUT', '/api/lidarr', { url: '' }).then(function (r) { lidarr = r; S.toast('Lidarr disconnected'); S.app.refresh(); });
           }

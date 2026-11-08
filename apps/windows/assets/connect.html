@@ -44,7 +44,9 @@
   <script>
     var input = document.getElementById('url'), msg = document.getElementById('msg'), go = document.getElementById('go');
     // the app injects the last address (window.VH_SAVED_SERVER) so it's prefilled
-    if (window.VH_SAVED_SERVER) input.value = window.VH_SAVED_SERVER;
+    // prefill: the address saved when the app started, else the last one this page connected to
+    var last = ''; try { last = localStorage.getItem('vh.lastServer') || ''; } catch (e) {}
+    input.value = window.VH_SAVED_SERVER || last;
     input.focus();
 
     function normalize(v) {
@@ -64,6 +66,7 @@
       var timer = setTimeout(function () { if (!done) fail('That took too long. Check the address and that the server is on.'); }, 8000);
       fetch(base + '/api/status', { mode: 'no-cors', cache: 'no-store' }).then(function () {
         if (done) return; done = true; clearTimeout(timer);
+        try { localStorage.setItem('vh.lastServer', base); } catch (e) {}
         if (window.ipc && window.ipc.postMessage) {
           // the app saves the address, then opens the server (so it's remembered before we navigate)
           window.ipc.postMessage(JSON.stringify({ type: 'connect', url: base }));

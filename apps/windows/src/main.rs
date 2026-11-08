@@ -110,7 +110,7 @@ fn main() -> wry::Result<()> {
     let init = format!(
         "window.VOLVIX_NATIVE = {{ app: 'windows', version: '{}' }};\n\
          window.VH_SAVED_SERVER = {saved};\n\
-         window.addEventListener('keydown', function (e) {{ if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {{ e.preventDefault(); location.href = '{CONNECT_URL}'; }} }});",
+         window.addEventListener('keydown', function (e) {{ if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {{ e.preventDefault(); location.href = 'http://vh.localhost/connect.html'; }} }});",
         env!("CARGO_PKG_VERSION"),
         saved = serde_json::to_string(&saved_for_script).unwrap_or_else(|_| "\"\"".into())
     );
