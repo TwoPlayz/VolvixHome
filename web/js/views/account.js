@@ -29,14 +29,14 @@ Spin.views = Spin.views || {};
   }
 
   const TABS = function () {
-    return [['profile', 'Profile', 'user']].concat(S.data.me.admin ? [['household', 'Household', 'family']] : []).concat([['settings', 'Settings', 'settings']]);
+    return [['profile', 'Profile', 'user']].concat(S.data.me.admin ? [['people', 'People', 'family']] : []).concat([['settings', 'Settings', 'settings']]);
   };
 
   /* ---------- Profile ---------- */
   function profileTab() {
     const me = S.data.me;
     return group('You',
-      row(S.avatar(me, 48) + '<span class="set-who"><span>' + S.esc(me.name) + '</span><em>@' + S.esc(me.username) + (me.admin ? ' · admin' : '') + '</em></span>', '', '')) +
+      row(S.avatar(me, 48) + '<span class="set-who"><span>' + S.esc(me.name) + '</span><em>' + (me.admin ? 'Admin' : 'Member') + '</em></span>', '', '')) +
       group('Password',
         '<form class="set-form" data-form="password" novalidate>' +
           field('Current password', 'current', 'password') +
@@ -57,13 +57,13 @@ Spin.views = Spin.views || {};
     return group('People on this server',
       users.map(function (u) {
         const me = u.id === S.data.me.serverId;
-        return row(S.avatar({ id: u.id, name: u.name }, 36) + '<span class="set-who"><span>' + S.esc(u.name) + (me ? ' (you)' : '') + '</span><em>@' + S.esc(u.username) + (u.admin ? ' · admin' : '') + '</em></span>', '',
+        return row(S.avatar({ id: u.id, name: u.name }, 36) + '<span class="set-who"><span>' + S.esc(u.name) + (me ? ' (you)' : '') + '</span><em>' + (u.admin ? 'Admin' : 'Member') + '</em></span>', '',
           me ? '' : '<button class="btn btn-ghost btn-sm" data-remove-user="' + u.id + '" data-name="' + S.esc(u.name) + '">Remove</button>');
       }).join(''),
       { sub: 'Everyone shares the same music. Playlists, play history and settings are personal.' }) +
       group('Add someone',
         '<form class="set-form" data-form="add-user" novalidate>' +
-          field('Name', 'name') + field('Username', 'username', 'text', 'They sign in with this.') +
+          field('Name', 'name', 'text', 'They sign in with this name.') +
           field('Password', 'password', 'password', 'At least 8 characters. They can change it under Account.') +
           '<label class="check"><input type="checkbox" name="admin"> <span>Admin (can add people and rescan the library)</span></label>' +
           '<p class="auth-error" hidden></p>' +
@@ -94,7 +94,9 @@ Spin.views = Spin.views || {};
           : '<p class="set-hint">Connect Lidarr to search for music you don\'t have and add it to this server automatically. Lidarr finds and downloads it with the sources you set up there.</p>') +
         '<label class="field"><span class="label">Lidarr address</span><input class="input" name="url" value="' + S.esc(s.url || '') + '" placeholder="http://lidarr:8686" autocomplete="off" spellcheck="false"></label>' +
         '<label class="field"><span class="label">API key</span><input class="input" name="apiKey" type="password" autocomplete="off" placeholder="' + (s.apiKeySet ? 'Saved (leave empty to keep it)' : 'Lidarr → Settings → General → API Key') + '"></label>' +
-        (L ? '<label class="field"><span class="label">Add music to</span>' + select('rootFolder', s.rootFolder, L.rootFolders.map(function (r) { return [r.path, r.path]; })) + '<span class="hint">Your music folder in Lidarr. Volvix Home should read the same folder.</span></label>' +
+        (L ? '<label class="field"><span class="label">Add music to</span>' + select('rootFolder', s.rootFolder, L.rootFolders.map(function (r) { return [r.path, r.path]; })) +
+          '<span class="hint">Lidarr saves downloads here, and Volvix reads your music folder (Settings → Library). They have to be the same place.' +
+          (folder && s.rootFolder && !samePath(folder.path, s.rootFolder) ? ' <strong>Right now they differ</strong> (Volvix reads ' + S.esc(folder.path) + '). That\'s fine if one is just the other\'s name inside Docker; otherwise change one of them.' : '') + '</span></label>' +
           '<label class="field"><span class="label">Quality profile</span>' + select('qualityProfileId', s.qualityProfileId, L.qualityProfiles.map(function (p) { return [p.id, p.name]; })) + '</label>' +
           '<label class="field"><span class="label">Metadata profile</span>' + select('metadataProfileId', s.metadataProfileId, L.metadataProfiles.map(function (p) { return [p.id, p.name]; })) + '</label>' +
           '<label class="check"><input type="checkbox" name="everyoneCanRequest"' + (s.everyoneCanRequest !== false ? ' checked' : '') + '> <span>Everyone in the household can request music (otherwise only admins)</span></label>' : '') +
@@ -108,15 +110,63 @@ Spin.views = Spin.views || {};
       { id: 'lidarr', sub: 'Get music you don\'t have yet.' });
   }
 
+  /* ---------- Music folder (admin) ---------- */
+  let folder = null;
+  function samePath(a, b) {
+    const n = function (p) { return String(p || '').split('\\').join('/').replace(/\/+$/, '').toLowerCase(); };
+    return n(a) === n(b);
+  }
+  /** Wait for the server to finish scanning, then reload so the new music shows. */
+  function reloadWhenScanned() {
+    const poll = setInterval(function () {
+      S.server.json('GET', '/api/status').then(function (s) {
+        if (!s.scanning) { clearInterval(poll); S.toast(s.albums + ' albums found', 'check'); setTimeout(function () { location.reload(); }, 900); }
+      }).catch(function () {});
+    }, 1200);
+  }
+  /** Pick the music folder by browsing the server's folders (so no one has to type a path). */
+  function pickFolder() {
+    let current = '';
+    const m = S.modal({
+      title: 'Choose your music folder',
+      body: '<p class="modal-text">Pick the folder that holds your music (the one Lidarr saves to). Volvix looks inside it, including subfolders.</p><div class="fb" data-fb><p class="set-hint">Loading…</p></div>',
+      actions: [
+        { label: 'Cancel' },
+        { label: 'Use this folder', kind: 'primary', onClick: function (close) {
+          S.server.json('PUT', '/api/library/folder', { path: current }).then(function (r) {
+            close(); folder = null; S.toast('Using ' + r.path, 'check'); S.app.refresh(); reloadWhenScanned();
+          }).catch(function (x) { S.toast(x.message, 'x'); });
+        } }
+      ]
+    });
+    const host = function () { return m.el.querySelector('[data-fb]'); };
+    function show(path) {
+      S.server.json('GET', '/api/library/browse' + (path ? '?path=' + encodeURIComponent(path) : '')).then(function (r) {
+        current = r.path;
+        host().innerHTML =
+          '<div class="fb-path">' + S.icon('library', 15) + '<span>' + S.esc(r.path) + '</span></div>' +
+          '<div class="fb-note">' + (r.songsHere ? S.icon('check', 14) + r.songsHere + ' song' + (r.songsHere === 1 ? '' : 's') + ' directly in this folder' : 'No songs directly in this folder (subfolders count too)') + '</div>' +
+          '<div class="fb-list">' + (r.parent ? '<button class="fb-row" data-dir="' + S.esc(r.parent) + '">' + S.icon('arrowUp', 15) + '<span>Up one level</span></button>' : '') +
+            r.dirs.map(function (d) { return '<button class="fb-row" data-dir="' + S.esc(d.path) + '">' + S.icon('library', 15) + '<span>' + S.esc(d.name) + '</span></button>'; }).join('') +
+            (!r.dirs.length ? '<p class="set-hint">No folders in here.</p>' : '') + '</div>';
+      }).catch(function (x) { host().innerHTML = '<p class="auth-error">' + S.esc(x.message) + '</p>'; });
+    }
+    m.el.addEventListener('click', function (e) { const b = e.target.closest('[data-dir]'); if (b) show(b.dataset.dir); });
+    show('');
+  }
+
   /* ---------- Settings ---------- */
   let status = null;
   function settingsTab() {
     const st = S.store.state;
     if (!status) S.server.json('GET', '/api/status').then(function (s) { status = s; S.app.refresh(); }).catch(function () {});
+    if (!folder && S.data.me.admin) S.server.json('GET', '/api/library/folder').then(function (f) { folder = f; S.app.refresh(); }).catch(function () {});
     return group('Appearance',
         row('Theme', st.theme === 'system' ? 'Matches your device\'s light or dark setting.' : 'Always ' + st.theme + '.',
           seg('theme', st.theme, [['system', 'System', 'monitor'], ['dark', 'Dark', 'moon'], ['light', 'Light', 'sun']]), { icon: 'sun' })) +
       group('Library',
+        (S.data.me.admin ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
+          '<button class="btn btn-secondary btn-sm" data-act="pick-folder">Change</button>', { icon: 'library' }) : '') +
         row('Music on this server', status ? status.albums + ' albums · ' + status.tracks + ' songs' + (status.scanning ? ' · looking for new music…' : '') : '…',
           S.data.me.admin ? '<button class="btn btn-secondary btn-sm" data-act="rescan"' + (status && status.scanning ? ' disabled' : '') + '>Look for new music</button>' : '', { icon: 'library' }) +
         row('New music', 'The server checks the music folder every 15 minutes. Reload to see what\'s new.', '<button class="btn btn-ghost btn-sm" data-act="reload">Reload</button>', { icon: 'download' }),
@@ -139,7 +189,7 @@ Spin.views = Spin.views || {};
             return '<a class="acct-tab' + (t[0] === tab[0] ? ' active' : '') + '" href="#/account/' + t[0] + '"' + (t[0] === tab[0] ? ' aria-current="page"' : '') + '>' +
               S.icon(t[2], 18) + '<span>' + t[1] + '</span></a>';
           }).join('') + '</nav>' +
-          '<div class="acct-body">' + (tab[0] === 'household' ? householdTab() : tab[0] === 'settings' ? settingsTab() : profileTab()) + '</div>' +
+          '<div class="acct-body">' + (tab[0] === 'people' ? householdTab() : tab[0] === 'settings' ? settingsTab() : profileTab()) + '</div>' +
         '</div>';
 
       root.onclick = function (e) {
@@ -148,6 +198,7 @@ Spin.views = Spin.views || {};
         const act = e.target.closest('[data-act]');
         if (act) {
           if (act.dataset.act === 'logout') S.server.logout();
+          else if (act.dataset.act === 'pick-folder') pickFolder();
           else if (act.dataset.act === 'switch-server') {
             // iPhone: tell the app; Windows: open the app's built-in connect page
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.volvixhome) window.webkit.messageHandlers.volvixhome.postMessage('disconnect');
@@ -219,8 +270,8 @@ Spin.views = Spin.views || {};
             if (first) setTimeout(function () { location.reload(); }, 900); else S.app.refresh();
           }).catch(fail);
         } else if (form.dataset.form === 'add-user') {
-          S.server.json('POST', '/api/users', { name: f.get('name'), username: f.get('username'), password: f.get('password'), admin: !!f.get('admin') })
-            .then(function (r) { users = null; S.toast(r.user.name + ' can sign in as @' + r.user.username, 'check'); S.app.refresh(); }).catch(fail);
+          S.server.json('POST', '/api/users', { name: f.get('name'), password: f.get('password'), admin: !!f.get('admin') })
+            .then(function (r) { users = null; S.toast(r.user.name + ' can now sign in', 'check'); S.app.refresh(); }).catch(fail);
         }
       };
     }

@@ -14,12 +14,7 @@ struct ConnectView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     RecordMark().frame(width: 30, height: 30)
-                    Text("Volvix Home").font(.system(size: 19, weight: .heavy))
-                    Text("APP").font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color(red: 0.9, green: 0.28, blue: 0.3).opacity(0.16))
-                        .foregroundColor(Color(red: 0.9, green: 0.28, blue: 0.3))
-                        .clipShape(Capsule())
+                    Text("Volvix").font(.system(size: 19, weight: .heavy))
                 }
                 .padding(.bottom, 4)
 

@@ -30,16 +30,15 @@
   /** Sign-in, or first-run setup (creates the admin account). */
   function authScreen(setup, serverName) {
     hideSplash();
-    document.title = (setup ? 'Set up' : 'Sign in') + ' · Volvix Home';
+    document.title = (setup ? 'Set up' : 'Sign in') + ' · Volvix';
     app.innerHTML =
       '<div class="vh-auth"><form class="vh-auth-card" novalidate>' +
-        '<div class="vh-auth-brand">' + LOGO + '<span>Volvix Home</span></div>' +
+        '<div class="vh-auth-brand">' + LOGO + '<span>Volvix</span></div>' +
         '<h1>' + (setup ? 'Set up your server' : 'Welcome back') + '</h1>' +
         '<p class="vh-auth-sub">' + (setup
           ? 'Create the admin account. You can add everyone else in your household afterwards.'
           : 'Sign in to ' + esc(serverName || 'your music') + '.') + '</p>' +
-        (setup ? '<label class="field"><span class="label">Your name</span><input class="input" name="name" autocomplete="name" required></label>' : '') +
-        '<label class="field"><span class="label">Username</span><input class="input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>' +
+        '<label class="field"><span class="label">' + (setup ? 'Your name' : 'Name') + '</span><input class="input" name="name" autocomplete="' + (setup ? 'name' : 'username') + '" autocapitalize="words" spellcheck="false" required></label>' +
         '<label class="field"><span class="label">Password</span><input class="input" name="password" type="password" autocomplete="' + (setup ? 'new-password' : 'current-password') + '" required>' +
           (setup ? '<span class="hint">At least 8 characters.</span>' : '') + '</label>' +
         '<p class="auth-error" hidden></p>' +
@@ -54,7 +53,7 @@
       const f = new FormData(form);
       const btn = form.querySelector('button[type=submit]');
       btn.disabled = true; err.hidden = true;
-      post(setup ? '/api/setup' : '/api/login', { name: f.get('name') || '', username: f.get('username'), password: f.get('password') })
+      post(setup ? '/api/setup' : '/api/login', { name: f.get('name') || '', password: f.get('password') })
         .then(function () { start(); })
         .catch(function (x) { err.textContent = x.message; err.hidden = false; btn.disabled = false; });
     });
@@ -62,7 +61,7 @@
 
   function failScreen(message) {
     hideSplash();
-    app.innerHTML = '<div class="vh-auth"><div class="vh-auth-card"><div class="vh-auth-brand">' + LOGO + '<span>Volvix Home</span></div>' +
+    app.innerHTML = '<div class="vh-auth"><div class="vh-auth-card"><div class="vh-auth-brand">' + LOGO + '<span>Volvix</span></div>' +
       '<h1>Can\'t reach your server</h1><p class="vh-auth-sub">' + esc(message) + '</p>' +
       '<button class="btn btn-primary btn-block" onclick="location.reload()">Try again</button></div></div>';
   }

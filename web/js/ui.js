@@ -129,6 +129,8 @@ window.Spin = window.Spin || {};
     shelf: '<path d="M3 20h18M5 20V6M9 20V9M13 20V4M17.5 20l-2.5-12 3-.6 2.4 12"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     import: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+    heart: '<path d="M12 20.5s-7.5-4.8-9.6-9.4C1 8 2.9 4.6 6.2 4.6c1.9 0 3.4 1 4.3 2.4L12 9l1.5-2c.9-1.4 2.4-2.4 4.3-2.4 3.3 0 5.2 3.4 3.8 6.5-2.1 4.6-9.6 9.4-9.6 9.4z"/>',
+    heartFill: '<path fill="currentColor" d="M12 20.5s-7.5-4.8-9.6-9.4C1 8 2.9 4.6 6.2 4.6c1.9 0 3.4 1 4.3 2.4L12 9l1.5-2c.9-1.4 2.4-2.4 4.3-2.4 3.3 0 5.2 3.4 3.8 6.5-2.1 4.6-9.6 9.4-9.6 9.4z"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/>',
     grip: '<g ' + F + '><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></g>',
     cart: '<path d="M3 4h2l2.2 10.2a1 1 0 0 0 1 .8h8.9a1 1 0 0 0 1-.8L20 8H6.2"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>',
@@ -172,7 +174,7 @@ window.Spin = window.Spin || {};
   };
 
   S.brand = function (size) {
-    return '<span class="brand">' + S.logoMark(size) + '<span>Volvix</span><span class="brand-tag">Home</span></span>';
+    return '<span class="brand">' + S.logoMark(size) + '<span>Volvix</span></span>';
   };
 
   S.appleLogo = function (size) {
@@ -204,6 +206,10 @@ window.Spin = window.Spin || {};
 
   /** 2×2 mosaic of the first four distinct album covers in a playlist (Spotify-style). */
   S.playlistCover = function (playlist, extraClass) {
+    // Liked Songs has its own cover: a heart on a red-to-purple wash
+    if (playlist && playlist.liked) {
+      return '<div class="cover cover--liked ' + (extraClass || '') + '" aria-hidden="true">' + S.icon('heartFill', 40) + '</div>';
+    }
     const albums = [];
     (playlist.tracks || []).forEach(function (entry) {
       const t = S.data.track(entry.id || entry);

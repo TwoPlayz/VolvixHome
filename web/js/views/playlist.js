@@ -69,7 +69,7 @@ Spin.views = Spin.views || {};
           '<div class="album-cover">' + S.playlistCover(pl) + '</div>' +
           '<div class="album-info">' +
             '<div class="eyebrow">' + (pl.collaborative ? 'Collaborative playlist' : 'Playlist') + '</div>' +
-            '<h1 class="album-title">' + (isOwner ? '<button class="title-btn" data-edit title="Edit details">' + S.esc(pl.name) + '</button>' : S.esc(pl.name)) + '</h1>' +
+            '<h1 class="album-title">' + (isOwner && !pl.liked ? '<button class="title-btn" data-edit title="Edit details">' + S.esc(pl.name) + '</button>' : S.esc(pl.name)) + '</h1>' +
             (pl.description ? '<p class="pl-desc">' + S.esc(pl.description) + '</p>' : '') +
             '<div class="album-meta pl-meta">' +
               (pl.collaborative ? people(pl) : S.avatar(owner, 24)) +
@@ -131,7 +131,7 @@ Spin.views = Spin.views || {};
         else if (t.closest('[data-pl-share]')) S.pl.shareDialog(pl.id);
         else if (t.closest('[data-pl-follow]')) S.pl.toggleFollow(pl.id);
         else if (t.closest('[data-pl-invite]')) S.pl.inviteDialog(pl.id);
-        else if (t.closest('[data-edit]')) { if (isOwner) S.pl.editDialog(pl.id); }
+        else if (t.closest('[data-edit]')) { if (isOwner && !pl.liked) S.pl.editDialog(pl.id); }
         else if (t.closest('[data-add-track]')) {
           const id = t.closest('[data-add-track]').dataset.addTrack;
           const keepQ = addUi.q;
@@ -143,7 +143,7 @@ Spin.views = Spin.views || {};
         else if (t.closest('[data-pl-more]')) {
           const btn = t.closest('[data-pl-more]');
           const items = [];
-          if (isOwner) {
+          if (isOwner && !pl.liked) {
             items.push({ label: 'Edit details', icon: 'settings', onClick: function () { S.pl.editDialog(pl.id); } });
           }
           if (!isOwner) {
@@ -152,7 +152,7 @@ Spin.views = Spin.views || {};
             items.push({ label: 'Go to ' + owner.name.split(' ')[0] + '\'s profile', icon: 'user', onClick: function () { S.router.go('/user/' + owner.id); } });
           }
           if (ids.length) items.push({ label: 'Add to queue', icon: 'queue', onClick: function () { S.player.addToQueue(ids); } });
-          if (isOwner) {
+          if (isOwner && !pl.liked) {
             items.push({ sep: true });
             items.push({ label: 'Delete playlist', icon: 'x', danger: true, onClick: function () { S.pl.deleteDialog(pl.id); } });
           }

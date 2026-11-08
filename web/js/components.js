@@ -116,7 +116,7 @@ window.Spin = window.Spin || {};
         (opts.showAlbum ? '<a class="c-album" href="#/album/' + album.id + '">' + S.esc(album.title) + '</a>' : '') +
         (opts.addedBy ? '<span class="c-added">' + (adder ? S.avatar(adder, 22) + '<span>' + S.esc(adder.id === 'u_me' ? 'You' : adder.name.split(' ')[0]) + '</span>' : '') + '</span>' : '') +
         '<span class="c-dur">' + S.fmtTime(t.duration) + '</span>' +
-        '<span class="c-act">' + S.addButton(id, 'row-add') +
+        '<span class="c-act">' + S.likeButton(id, 'row-like', 16) + S.addButton(id, 'row-add') +
           (opts.playlistId ? '<span class="drag-handle" data-drag title="Drag to reorder" aria-hidden="true">' + S.icon('grip', 18) + '</span>' : '') +
           '<button class="row-more" data-track-menu="' + id + '" aria-label="More options for ' + S.esc(t.title) + '">' + S.icon('more', 18) + '</button></span>' +
       '</div>';
@@ -217,6 +217,8 @@ window.Spin = window.Spin || {};
       if (pl) S.player.play(pl.tracks.map(function (x) { return x.id; }), 0, { type: 'playlist', id: pl.id, name: pl.name });
       return;
     }
+    const likeBtn = e.target.closest('[data-like]');
+    if (likeBtn) { e.preventDefault(); e.stopPropagation(); if (likeBtn.dataset.like) S.pl.toggleLike(likeBtn.dataset.like); return; }
     const menuBtn = e.target.closest('[data-track-menu]');
     if (menuBtn) { e.stopPropagation(); trackMenu(menuBtn, menuBtn.dataset.trackMenu); return; }
 
@@ -238,6 +240,14 @@ window.Spin = window.Spin || {};
     const row = e.target.closest && e.target.closest('.track[data-track-id]');
     if (row && e.target === row) activateRow(row); // Enter on a link/button inside the row does its own thing
   });
+
+  /** Heart: like / unlike a song (adds or removes it in Liked Songs). */
+  S.likeButton = function (id, cls, size) {
+    const liked = S.pl && S.pl.isLiked(id);
+    const label = liked ? 'Remove from Liked Songs' : 'Add to Liked Songs';
+    return '<button class="like-btn' + (cls ? ' ' + cls : '') + (liked ? ' on' : '') + '" data-like="' + id + '" data-size="' + (size || 16) + '" aria-pressed="' + (liked ? 'true' : 'false') +
+      '" aria-label="' + label + '" title="' + label + '">' + S.icon(liked ? 'heartFill' : 'heart', size || 16) + '</button>';
+  };
 
   /** Small round "+" that opens Add to playlist for one or more songs. */
   S.addButton = function (ids, cls) {

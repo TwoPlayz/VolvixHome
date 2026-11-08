@@ -67,6 +67,7 @@ impl Config {
 
 struct AppState {
     cfg: Config,
+    music_dir: RwLock<PathBuf>,
     lib: RwLock<Library>,
     accounts: Mutex<Accounts>,
     lidarr: Mutex<lidarr::Settings>,
@@ -140,6 +141,8 @@ async fn status(State(st): State<Shared>) -> Response {
 
 #[derive(Deserialize)]
 struct NewAccount {
+    /// optional now: derived from the name
+    #[serde(default)]
     username: String,
     #[serde(default)]
     name: String,
@@ -165,6 +168,10 @@ async fn setup(State(st): State<Shared>, Json(body): Json<NewAccount>) -> Respon
 
 #[derive(Deserialize)]
 struct Login {
+    /// the person's name (the older "username" field still works)
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
     username: String,
     password: String,
 }
@@ -172,7 +179,8 @@ struct Login {
 async fn login(State(st): State<Shared>, Json(body): Json<Login>) -> Response {
     let found = {
         let accounts = st.accounts.lock().unwrap();
-        accounts.find(&body.username).filter(|u| auth::verify_password(&body.password, &u.hash)).cloned()
+        let who = if body.name.trim().is_empty() { &body.username } else { &body.name };
+        accounts.find(who).filter(|u| auth::verify_password(&body.password, &u.hash)).cloned()
     };
     match found {
         Some(user) => {
@@ -181,7 +189,7 @@ async fn login(State(st): State<Shared>, Json(body): Json<Login>) -> Response {
         }
         None => {
             tokio::time::sleep(Duration::from_millis(400)).await; // slow down guessing
-            error(StatusCode::UNAUTHORIZED, "Username or password is incorrect.")
+            error(StatusCode::UNAUTHORIZED, "Name or password is incorrect.")
         }
     }
 }
@@ -657,6 +665,97 @@ async fn lidarr_hook(State(st): State<Shared>, Query(q): Query<HashMap<String, S
     StatusCode::NO_CONTENT.into_response()
 }
 
+/* ---------------- music folder ---------------- */
+
+fn music_dir_file(cfg: &Config) -> PathBuf {
+    cfg.data_dir.join("library.json")
+}
+
+/// The folder an admin picked in Settings, else VH_MUSIC_DIR, else /music.
+fn load_music_dir(cfg: &Config) -> PathBuf {
+    std::fs::read_to_string(music_dir_file(cfg)).ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["musicDir"].as_str().map(PathBuf::from))
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| cfg.music_dir.clone())
+}
+
+fn count_audio_here(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir).map(|rd| rd.filter_map(|e| e.ok()).filter(|e| {
+        e.path().extension().and_then(|x| x.to_str()).map(|x| library::AUDIO.contains(&x.to_lowercase().as_str())).unwrap_or(false)
+    }).count()).unwrap_or(0)
+}
+
+async fn library_folder(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    if let Err(r) = admin(&st, &headers) {
+        return r;
+    }
+    let path = st.music_dir.read().unwrap().clone();
+    Json(json!({
+        "path": path.display().to_string(), "exists": path.is_dir(),
+        "default": st.cfg.music_dir.display().to_string(),
+        "isDefault": path == st.cfg.music_dir
+    })).into_response()
+}
+
+#[derive(Deserialize)]
+struct FolderBody {
+    #[serde(default)]
+    path: String,
+}
+
+/// Choose the music folder (empty = back to the default), then look for music in it.
+async fn set_library_folder(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<FolderBody>) -> Response {
+    if let Err(r) = admin(&st, &headers) {
+        return r;
+    }
+    let chosen = body.path.trim();
+    let path = if chosen.is_empty() { st.cfg.music_dir.clone() } else { PathBuf::from(chosen) };
+    if !path.is_dir() {
+        return error(StatusCode::BAD_REQUEST, "That folder doesn't exist on the server.");
+    }
+    if std::fs::read_dir(&path).is_err() {
+        return error(StatusCode::BAD_REQUEST, "The server isn't allowed to read that folder.");
+    }
+    let saved = if chosen.is_empty() { json!({}) } else { json!({ "musicDir": path.display().to_string() }) };
+    let file = music_dir_file(&st.cfg);
+    let tmp = file.with_extension("json.tmp");
+    if std::fs::write(&tmp, saved.to_string()).and_then(|_| std::fs::rename(&tmp, &file)).is_err() {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't save the setting.");
+    }
+    *st.music_dir.write().unwrap() = path.clone();
+    start_scan(st.clone());
+    Json(json!({ "path": path.display().to_string(), "isDefault": path == st.cfg.music_dir, "scanning": true })).into_response()
+}
+
+/// List the folders on the server so an admin can pick the music folder without typing a path.
+async fn browse_folders(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = admin(&st, &headers) {
+        return r;
+    }
+    let mut dir = q.get("path").map(|p| PathBuf::from(p.trim())).filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| st.music_dir.read().unwrap().clone());
+    // a path that no longer exists falls back to the nearest folder above it
+    while !dir.is_dir() {
+        match dir.parent() {
+            Some(p) if p != dir => dir = p.to_path_buf(),
+            _ => { dir = PathBuf::from("/"); break; }
+        }
+    }
+    let mut dirs: Vec<(String, String)> = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|e| e.ok()).filter_map(|e| {
+        let name = e.file_name().to_string_lossy().to_string();
+        (e.path().is_dir() && !name.starts_with('.')).then(|| (name, e.path().display().to_string()))
+    }).collect()).unwrap_or_default();
+    dirs.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    dirs.truncate(500);
+    Json(json!({
+        "path": dir.display().to_string(),
+        "parent": dir.parent().filter(|p| *p != dir.as_path()).map(|p| p.display().to_string()),
+        "dirs": dirs.iter().map(|(n, p)| json!({ "name": n, "path": p })).collect::<Vec<_>>(),
+        "songsHere": count_audio_here(&dir)
+    })).into_response()
+}
+
 /* ---------------- scanning ---------------- */
 
 fn start_scan(st: Shared) {
@@ -668,10 +767,11 @@ fn start_scan(st: Shared) {
         lib.scanning = true;
     }
     tokio::task::spawn_blocking(move || {
-        let fresh = library::scan(&st.cfg.music_dir);
+        let dir = st.music_dir.read().unwrap().clone();
+        let fresh = library::scan(&dir);
         let (a, t) = (fresh.catalog.albums.len(), fresh.catalog.tracks.len());
         *st.lib.write().unwrap() = fresh;
-        println!("library: {a} albums, {t} tracks in {}", st.cfg.music_dir.display());
+        println!("library: {a} albums, {t} tracks in {}", dir.display());
     });
 }
 
@@ -684,10 +784,12 @@ async fn main() {
             std::process::exit(1);
         }
     }
-    if !cfg.music_dir.exists() {
-        eprintln!("warning: music folder {} doesn't exist yet (set VH_MUSIC_DIR)", cfg.music_dir.display());
+    let music_dir = load_music_dir(&cfg);
+    if !music_dir.exists() {
+        eprintln!("warning: music folder {} doesn't exist yet (choose one in Settings, or set VH_MUSIC_DIR)", music_dir.display());
     }
     let st: Shared = Arc::new(AppState {
+        music_dir: RwLock::new(music_dir.clone()),
         accounts: Mutex::new(Accounts::load(&cfg.data_dir)),
         lidarr: Mutex::new(lidarr::Settings::load(&cfg.data_dir)),
         requests: Mutex::new(lidarr::load_requests(&cfg.data_dir)),
@@ -721,6 +823,8 @@ async fn main() {
         .route("/api/users/{id}", delete(remove_user))
         .route("/api/library", get(get_library))
         .route("/api/library/rescan", post(rescan))
+        .route("/api/library/folder", get(library_folder).put(set_library_folder))
+        .route("/api/library/browse", get(browse_folders))
         .route("/api/stream/{id}", get(stream))
         .route("/api/cover/{id}", get(cover))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))
@@ -744,7 +848,7 @@ async fn main() {
         }
     };
     println!("Volvix Home {VERSION} on http://{addr}  (music: {}, data: {}, web: {})",
-        cfg.music_dir.display(), cfg.data_dir.display(), cfg.web_dir.display());
+        music_dir.display(), cfg.data_dir.display(), cfg.web_dir.display());
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;

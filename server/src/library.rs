@@ -12,7 +12,7 @@ use lofty::tag::{Accessor, ItemKey};
 use serde::Serialize;
 use walkdir::WalkDir;
 
-const AUDIO: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wv", "ape"];
+pub const AUDIO: &[&str] = &["mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wv", "ape"];
 const LOSSLESS: &[&str] = &["flac", "wav", "aif", "aiff", "wv", "ape"];
 const COVER_FILES: &[&str] = &["cover.jpg", "cover.jpeg", "cover.png", "folder.jpg", "folder.png", "front.jpg", "front.png", "album.jpg"];
 

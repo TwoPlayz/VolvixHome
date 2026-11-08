@@ -35,7 +35,7 @@ window.Spin.views = window.Spin.views || {};
           '<div class="sidebar-foot">' +
             '<button class="user-chip" data-action="account-menu" aria-label="Account menu" aria-haspopup="menu">' + S.avatar(me, 32) +
               '<span class="user-chip-text"><span class="user-chip-name">' + S.esc(me.name) + '</span>' +
-              '<span class="user-chip-plan">@' + S.esc(me.username) + (me.admin ? ' · admin' : '') + '</span></span>' + S.icon('more', 18) + '</button>' +
+              '<span class="user-chip-plan">' + (me.admin ? 'Admin' : 'Member') + '</span></span>' + S.icon('more', 18) + '</button>' +
           '</div>' +
         '</aside>' +
 
@@ -68,6 +68,7 @@ window.Spin.views = window.Spin.views || {};
         '<div class="player-art" data-p="art">' + S.icon('disc', 22) + '</div>' +
         '<div class="player-meta"><div class="player-title" data-p="title">Not playing</div>' +
         '<div class="player-sub" data-p="sub">Pick something from your library</div></div>' +
+        '<button class="ctrl like-btn player-like" data-p="like" data-like="" data-size="18" aria-label="Add to Liked Songs" title="Add to Liked Songs" hidden>' + S.icon('heart', 18) + '</button>' +
         '<button class="ctrl player-add" data-p="add" data-add-current aria-label="Add to playlist" title="Add to playlist" hidden>' + S.icon('plus', 18) + '</button>' +
       '</div>' +
       '<div class="player-center">' +
@@ -100,7 +101,7 @@ window.Spin.views = window.Spin.views || {};
     host.innerHTML = S.store.state.playlists.map(function (pl) {
       return '<a class="playlist-link" href="#/playlist/' + pl.id + '" data-route="/playlist/' + pl.id + '">' +
         S.playlistCover(pl, 'thumb') +
-        '<span class="pl-text"><span class="pl-name">' + S.esc(pl.name) + '</span><span class="pl-sub">Playlist · ' + pl.tracks.length + ' songs</span></span></a>';
+        '<span class="pl-text"><span class="pl-name">' + S.esc(pl.name) + '</span><span class="pl-sub">Playlist · ' + pl.tracks.length + (pl.tracks.length === 1 ? ' song' : ' songs') + '</span></span></a>';
     }).join('') || '<p class="pl-empty">Create your first playlist with +</p>';
     setActive(S.router.current());
   }
@@ -121,10 +122,10 @@ window.Spin.views = window.Spin.views || {};
   function accountMenu(anchor) {
     const me = S.data.me;
     S.popover(anchor, {
-      header: '<div class="menu-user">' + S.avatar(me, 40) + '<div><div class="menu-name">' + S.esc(me.name) + '</div><div class="menu-sub">@' + S.esc(me.username) + '</div></div></div>',
+      header: '<div class="menu-user">' + S.avatar(me, 40) + '<div><div class="menu-name">' + S.esc(me.name) + '</div><div class="menu-sub">' + (me.admin ? 'Admin' : 'Member') + '</div></div></div>',
       items: [
         { label: 'Account', icon: 'user', onClick: function () { S.router.go('/account/profile'); } },
-        me.admin ? { label: 'Household', icon: 'family', onClick: function () { S.router.go('/account/household'); } } : null,
+        me.admin ? { label: 'People', icon: 'family', onClick: function () { S.router.go('/account/people'); } } : null,
         { label: 'Settings', icon: 'settings', onClick: function () { S.router.go('/account/settings'); } },
         { sep: true },
         { label: 'Sign out', icon: 'logout', onClick: function () { S.server.logout(); } }
@@ -196,7 +197,7 @@ window.Spin.views = window.Spin.views || {};
       if (!opts || !opts.keepScroll) S.$('#main').scrollTop = 0;
       track(path);
       const h1 = view.querySelector('h1');
-      document.title = (h1 ? h1.textContent + ' · ' : '') + 'Volvix Home';
+      document.title = (h1 ? h1.textContent + ' · ' : '') + 'Volvix';
     },
     /** Re-render the current screen in place (after data changes), keeping scroll position. */
     refresh: function () {

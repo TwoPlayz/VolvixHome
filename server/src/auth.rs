@@ -92,21 +92,49 @@ impl Accounts {
         write("sessions.json", serde_json::to_string_pretty(&self.sessions).unwrap_or_default());
     }
 
+    /// A slug of the name that no one else is using.
+    fn free_username(&self, name: &str) -> String {
+        let mut slug: String = name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        slug = slug.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+        if slug.len() < 2 {
+            slug = "user".into();
+        }
+        let mut candidate = slug.clone();
+        let mut n = 2;
+        while self.users.iter().any(|u| u.username == candidate) {
+            candidate = format!("{slug}{n}");
+            n += 1;
+        }
+        candidate
+    }
+
     pub fn needs_setup(&self) -> bool {
         self.users.is_empty()
     }
 
-    pub fn find(&self, username: &str) -> Option<&User> {
-        let u = username.trim().to_lowercase();
-        self.users.iter().find(|x| x.username == u)
+    /// Sign-in is by name (the household's first names); the short internal username also works.
+    pub fn find(&self, who: &str) -> Option<&User> {
+        let u = who.trim().to_lowercase();
+        if u.is_empty() {
+            return None;
+        }
+        self.users.iter().find(|x| x.username == u || x.name.trim().to_lowercase() == u)
     }
 
     pub fn by_id(&self, id: &str) -> Option<&User> {
         self.users.iter().find(|x| x.id == id)
     }
 
+    /// username is optional: when empty it's made from the name (\Sam Patel\ -> \sam-patel\, then \sam-patel2\…).
     pub fn create(&mut self, username: &str, name: &str, password: &str, admin: bool) -> Result<User, String> {
-        let username = username.trim().to_lowercase();
+        let name = name.trim();
+        if name.chars().count() < 2 {
+            return Err("Please enter a name (2 or more letters).".into());
+        }
+        if self.find(name).is_some() {
+            return Err("Someone in your household already has that name.".into());
+        }
+        let username = if username.trim().is_empty() { self.free_username(name) } else { username.trim().to_lowercase() };
         if username.len() < 2 || !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-') {
             return Err("Usernames use letters, numbers, dots, dashes or underscores (2 or more).".into());
         }
@@ -114,7 +142,7 @@ impl Accounts {
             return Err("Passwords need at least 8 characters.".into());
         }
         if self.find(&username).is_some() {
-            return Err("That username is taken.".into());
+            return Err("Someone in your household already has that name.".into());
         }
         let user = User {
             id: format!("u{}", random_hex(6)),
@@ -188,6 +216,27 @@ mod tests {
     }
 
     #[test]
+    fn sign_in_by_name_without_a_username() {
+        let dir = std::env::temp_dir().join(format!("vh-test-{}", random_hex(4)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut a = Accounts::load(&dir);
+        let sam = a.create("", "Sam Patel", "password1", true).unwrap();
+        assert_eq!(sam.username, "sam-patel");
+        // found by name in any case, or by the internal username
+        assert_eq!(a.find("sam patel").unwrap().id, sam.id);
+        assert_eq!(a.find("  SAM PATEL ").unwrap().id, sam.id);
+        assert_eq!(a.find("sam-patel").unwrap().id, sam.id);
+        // names are unique, ignoring case
+        assert!(a.create("", "sam PATEL", "password1", false).is_err());
+        // first names that slug the same still get their own account
+        let a2 = a.create("", "Sam-Patel!", "password1", false);
+        assert!(a2.is_ok() && a2.unwrap().username == "sam-patel2");
+        assert!(a.create("", "X", "password1", false).is_err(), "name too short");
+        assert!(a.find("").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn accounts_rules() {
         let dir = std::env::temp_dir().join(format!("vh-test-{}", random_hex(4)));
         std::fs::create_dir_all(&dir).unwrap();
@@ -195,7 +244,7 @@ mod tests {
         assert!(a.needs_setup());
         let admin = a.create("Justin", "Justin", "password1", true).unwrap();
         assert_eq!(admin.username, "justin");
-        assert!(a.create("justin", "x", "password1", false).is_err(), "duplicate");
+        assert!(a.create("justin", "x", "password1", false).is_err(), "duplicate / too short");
         assert!(a.create("kid", "Kid", "short", false).is_err(), "short password");
         let kid = a.create("kid", "Kid", "password2", false).unwrap();
         let t = a.start_session(&kid.id);

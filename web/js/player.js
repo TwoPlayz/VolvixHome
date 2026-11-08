@@ -326,6 +326,8 @@ window.Spin = window.Spin || {};
       ? '<a href="#/album/' + album.id + '">' + S.esc(t.title) + '</a>'
       : 'Not playing';
     S.$('[data-p="sub"]').innerHTML = t ? S.artistLink(t.artist) : 'Pick something from your library';
+    const like = S.$('[data-p="like"]');
+    if (like) { like.hidden = !t; like.dataset.like = t ? t.id : ''; }
     const add = S.$('[data-p="add"]');
     if (add) {
       add.hidden = !t;
@@ -365,6 +367,7 @@ window.Spin = window.Spin || {};
     renderProgress();
     renderQueue();
     saveResume(true);
+    if (S.pl && S.pl.syncHearts) S.pl.syncHearts();
     if (S.markPlaying) S.markPlaying();
     S.player.hooks.forEach(function (fn) { fn(); });
   }

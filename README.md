@@ -9,8 +9,12 @@ and on phones.
   or the files themselves.
 - **Real playback:** queue (drag to reorder), shuffle, repeat, seeking, and lock screen and media-key
   controls. You come back to where you left off.
-- **Household accounts:** the first person to open a new server becomes the admin, and the admin
-  adds everyone else. Music is shared; playlists, history and settings are personal and follow you
+- **Household accounts:** sign in with just your name and a password (no username). The first person to
+  open a new server becomes the admin, and the admin adds everyone else (Account → People).
+- **Liked Songs:** a heart on the player, Now Playing and every song row adds or removes the song in one
+  built-in Liked Songs playlist.
+- **Music folder:** admins pick it under Settings → Library by browsing the server's folders (or set
+  `VH_MUSIC_DIR`). Lidarr should save to the same folder. Music is shared; playlists, history and settings are personal and follow you
   to every device.
 - **Get more music with Lidarr:** search (powered by MusicBrainz) shows songs, albums and artists
   you don't have yet. A song offers **Get the single** and **Get the album**; albums and artists have

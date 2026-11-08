@@ -54,6 +54,7 @@ window.Spin = window.Spin || {};
       '<div class="np-meta">' +
         '<div class="np-text"><div class="np-title">' + S.albumLink(album, t.title) + '</div>' +
           '<div class="np-artist">' + S.artistLink(t.artist) + '</div></div>' +
+        S.likeButton(t.id, 'np-add np-like', 22) +
         '<button class="add-pl np-add' + (inPl ? ' on' : '') + '" data-add-pl="' + t.id + '" aria-label="Add to playlist" title="Add to playlist">' + S.icon(inPl ? 'check' : 'plus', 22) + '</button>' +
       '</div>' +
       '<div class="np-progress">' +

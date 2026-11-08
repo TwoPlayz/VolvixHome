@@ -19,6 +19,7 @@ window.Spin = window.Spin || {};
     S.app.refresh();
   }
 
+  const LIKED_ID = 'pl_liked';
   function newId() { return 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
   function lockedNote(ids) {
@@ -69,14 +70,54 @@ window.Spin = window.Spin || {};
         owner: 'u_me', collaborative: !!data.collaborative, collaborators: [],
         tracks: (trackIds || []).map(function (id) { return { id: id, addedBy: 'u_me' }; })
       };
-      commit(function (s) { s.playlists.unshift(pl); });
+      // new playlists go under Liked Songs, which stays first
+      commit(function (s) { s.playlists.splice(s.playlists.some(function (p) { return p.liked; }) ? 1 : 0, 0, pl); });
       return pl;
     },
     update: function (id, patch) {
       commit(function () { Object.assign(get(id), patch); });
     },
     remove: function (id) {
+      if (id === LIKED_ID) return; // Liked Songs is built in
       commit(function (s) { s.playlists = s.playlists.filter(function (p) { return p.id !== id; }); });
+    },
+
+    /* ----- Liked Songs: one built-in playlist, filled by the heart button ----- */
+    liked: function () { return list().find(function (p) { return p.id === LIKED_ID; }) || null; },
+    isLiked: function (trackId) {
+      const p = S.pl.liked();
+      return !!p && p.tracks.some(function (t) { return t.id === trackId; });
+    },
+    /** Like / unlike a song. The newest like goes on top. */
+    toggleLike: function (trackId) {
+      if (!trackId || !S.data.track(trackId)) return;
+      const on = !S.pl.isLiked(trackId);
+      S.store.update(function (s) {
+        let p = s.playlists.find(function (x) { return x.id === LIKED_ID; });
+        if (!p) {
+          p = { id: LIKED_ID, name: 'Liked Songs', description: 'Songs you\'ve liked.', owner: 'u_me', collaborative: false, collaborators: [], liked: true, tracks: [] };
+          s.playlists.unshift(p);
+        }
+        if (on) p.tracks.unshift({ id: trackId, addedBy: 'u_me' });
+        else p.tracks = p.tracks.filter(function (t) { return t.id !== trackId; });
+      });
+      S.app.refreshSidebar();
+      S.pl.syncHearts();
+      // if the Liked Songs page is open, its list changes too
+      if (/^\/playlist\/pl_liked/.test(S.router.current())) S.app.refresh();
+      S.toast(on ? 'Added to Liked Songs' : 'Removed from Liked Songs', on ? 'heartFill' : 'heart');
+    },
+    /** Make every heart button on screen match what's liked. */
+    syncHearts: function () {
+      S.$$('[data-like]').forEach(function (b) {
+        const id = b.dataset.like;
+        const liked = !!id && S.pl.isLiked(id);
+        b.classList.toggle('on', liked);
+        b.setAttribute('aria-pressed', liked ? 'true' : 'false');
+        const label = liked ? 'Remove from Liked Songs' : 'Add to Liked Songs';
+        b.setAttribute('aria-label', label); b.title = label;
+        b.innerHTML = S.icon(liked ? 'heartFill' : 'heart', parseInt(b.dataset.size || '18', 10));
+      });
     },
     /** Adds tracks, skipping duplicates. Returns number actually added. */
     addTracks: function (id, ids) {
