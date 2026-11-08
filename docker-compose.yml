@@ -1,0 +1,36 @@
+# Volvix Home next to Lidarr. Both see the same music folder:
+#   Lidarr imports into it, Volvix Home streams from it (read-only).
+#
+#   1. Change the paths under "volumes" to your music and downloads folders.
+#   2. docker compose up -d
+#   3. Open http://<server>:4747 and create the admin account. Add your household under Account → Household.
+#   4. Open Lidarr at http://<server>:8686 and set its root folder to /music.
+services:
+  volvix-home:
+    image: ghcr.io/twoplayz/volvix-home:latest   # or build it yourself: comment this out and keep "build"
+    build: .
+    container_name: volvix-home
+    ports:
+      - "4747:4747"
+    environment:
+      - VH_RESCAN_MINUTES=15        # how often to look for music Lidarr added
+    volumes:
+      - ./config/volvix-home:/data  # accounts, playlists, settings
+      - /path/to/music:/music:ro    # your music library
+    user: "1000:1000"               # match the owner of your music folder
+    restart: unless-stopped
+
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    volumes:
+      - ./config/lidarr:/config
+      - /path/to/music:/music
+      - /path/to/downloads:/downloads
+    ports:
+      - "8686:8686"
+    restart: unless-stopped
