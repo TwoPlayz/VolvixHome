@@ -65,6 +65,18 @@ Both are built by GitHub Actions (`.github/workflows/apps.yml`) — run the **Ap
 
 ## Develop
 
+Quickest way to try changes on your own PC (no Docker, nothing to host):
+
+```powershell
+powershell -File dev.ps1          # server + sample music on http://localhost:4747
+powershell -File dev.ps1 -Mocks   # also a fake Lidarr and MusicBrainz, so Get more music works
+```
+
+The site is served straight from `web/`, so refresh the page after editing JS or CSS. Only Rust changes
+(`server/src`) need Ctrl+C and a re-run. State lives in `.dev/`; delete it to start fresh.
+
+Or run the server by hand:
+
 ```sh
 cd server
 VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run

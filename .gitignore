@@ -7,3 +7,6 @@ config/
 apps/windows/target/
 apps/ios/build/
 apps/ios/VolvixHome.xcodeproj/
+
+# local dev state (sample music, accounts)
+.dev/
