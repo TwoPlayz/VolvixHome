@@ -29,6 +29,22 @@ Spin.views = Spin.views || {};
       '<span class="t-sub">' + S.esc([a.artist, a.year, a.type && a.type !== 'Album' ? a.type : ''].filter(Boolean).join(' · ')) + '</span></div>' +
       stateButton(a, 'album') + '</div>';
   }
+  /** A song: Lidarr fetches releases, not songs, so offer its single (if any) and its album. */
+  function songCard(s) {
+    let action;
+    if (s.onServer) action = '<a class="btn btn-secondary btn-sm" href="#/album/' + s.onServer + '">' + S.icon('check', 14) + 'In your library</a>';
+    else if (s.requested) action = '<span class="gm-state">' + S.icon('download', 14) + 'Requested</span>';
+    else {
+      const btns = [];
+      if (s.singleId) btns.push('<button class="btn btn-primary btn-sm" data-get="album" data-id="' + S.esc(s.singleId) + '" data-label="' + S.esc(s.title) + ' (single)">' + S.icon('download', 14) + 'Get the single</button>');
+      if (s.albumId) btns.push('<button class="btn ' + (s.singleId ? 'btn-secondary' : 'btn-primary') + ' btn-sm" data-get="album" data-id="' + S.esc(s.albumId) + '" data-label="the album with ' + S.esc(s.title) + '">' + S.icon('download', 14) + 'Get the album</button>');
+      action = '<div class="gm-actions">' + btns.join('') + '</div>';
+    }
+    return '<div class="gm-card gm-song">' + art(s.image, false, s.title) +
+      '<div class="gm-text"><span class="t-name">' + S.esc(s.title) + '</span>' +
+      '<span class="t-sub">' + S.esc([s.artist, s.year].filter(Boolean).join(' · ')) + '</span></div>' +
+      action + '</div>';
+  }
   function artistRow(r) {
     return '<div class="gm-card gm-artist">' + art(r.image, true, r.name) +
       '<div class="gm-text"><span class="t-name">' + S.esc(r.name) + '</span>' +
@@ -41,14 +57,17 @@ Spin.views = Spin.views || {};
   function searchInto(host, q) {
     if (!L.canRequest || !host) return;
     const mine = ++seq;
-    host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p>Searching with Lidarr…</p></div></div></section>';
+    host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p>Searching…</p></div></div></section>';
     S.server.json('GET', '/api/lidarr/search?term=' + encodeURIComponent(q)).then(function (r) {
       if (mine !== seq) return; // a newer search took over
-      if (!r.artists.length && !r.albums.length) { host.innerHTML = ''; return; }
+      const songs = r.songs || [];
+      if (!r.artists.length && !r.albums.length && !songs.length) { host.innerHTML = ''; return; }
       host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2>' +
-          '<p>Not in your library yet. Lidarr finds it and adds it here when it\'s done.</p></div></div>' +
+          '<p>Not in your library yet. Lidarr gets it and adds it here when it\'s done.</p></div></div>' +
         (r.artists.length ? '<div class="gm-list">' + r.artists.slice(0, 3).map(artistRow).join('') + '</div>' : '') +
-        (r.albums.length ? '<div class="gm-grid">' + r.albums.map(albumCard).join('') + '</div>' : '') +
+        (songs.length ? '<h3 class="gm-sub">Songs</h3><div class="gm-list">' + songs.map(songCard).join('') + '</div>' : '') +
+        (r.albums.length ? '<h3 class="gm-sub">Albums</h3><div class="gm-grid">' + r.albums.map(albumCard).join('') + '</div>' : '') +
+        '<p class="gm-credit">Results from MusicBrainz.</p>' +
         '</section>';
     }).catch(function (e) {
       if (mine !== seq) return;
@@ -64,9 +83,10 @@ Spin.views = Spin.views || {};
     b.disabled = true;
     b.innerHTML = S.icon('download', 14) + 'Asking Lidarr…';
     S.server.json('POST', '/api/lidarr/request', { kind: b.dataset.get, foreignId: b.dataset.id }).then(function (r) {
-      const what = r.request.kind === 'artist' ? 'Everything by ' + r.request.artist : r.request.title;
-      b.outerHTML = '<span class="gm-state">' + S.icon('download', 14) + 'Requested</span>';
-      S.linkToast(what + ' requested. It shows up in your library when Lidarr is done.', 'Requests', '/requests');
+      const what = b.dataset.label || (r.request.kind === 'artist' ? 'Everything by ' + r.request.artist : r.request.title);
+      const box = b.closest('.gm-actions') || b;
+      box.outerHTML = '<span class="gm-state">' + S.icon('download', 14) + 'Requested</span>';
+      S.linkToast(what.charAt(0).toUpperCase() + what.slice(1) + ' requested. It shows up in your library when Lidarr is done.', 'Requests', '/requests');
     }).catch(function (x) {
       b.disabled = false;
       b.innerHTML = S.icon('download', 14) + 'Try again';

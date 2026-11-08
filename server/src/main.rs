@@ -17,6 +17,7 @@
 mod auth;
 mod library;
 mod lidarr;
+mod musicbrainz;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -71,6 +72,7 @@ struct AppState {
     lidarr: Mutex<lidarr::Settings>,
     requests: Mutex<Vec<lidarr::Request>>,
     http: lidarr::Client,
+    mb: musicbrainz::Client,
 }
 type Shared = Arc<AppState>;
 
@@ -368,6 +370,14 @@ fn on_server(st: &AppState, title: Option<&str>, artist: &str) -> Option<String>
     }
 }
 
+/// Is a song (by title + artist) already in the library? Returns its album id.
+fn track_on_server(st: &AppState, title: &str, artist: &str) -> Option<String> {
+    let lib = st.lib.read().unwrap();
+    let (t, a) = (norm(title), norm(artist));
+    let track = lib.catalog.tracks.iter().find(|x| norm(&x.title) == t && norm(&x.artist) == a)?;
+    Some(track.album_id.clone())
+}
+
 async fn lidarr_status(State(st): State<Shared>, headers: HeaderMap) -> Response {
     let (_, user) = match signed_in(&st, &headers) {
         Ok(u) => u,
@@ -459,36 +469,39 @@ async fn lidarr_search(State(st): State<Shared>, headers: HeaderMap, Query(q): Q
     if term.chars().count() < 2 {
         return Json(json!({ "artists": [], "albums": [] })).into_response();
     }
-    let enc: String = term.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
-    let (artist_path, album_path) = (format!("artist/lookup?term={enc}"), format!("album/lookup?term={enc}"));
-    let (artists, albums) = tokio::join!(st.http.get(&s, &artist_path), st.http.get(&s, &album_path));
-    let (artists, albums) = match (artists, albums) {
-        (Err(e), _) | (_, Err(e)) => return error(StatusCode::BAD_GATEWAY, &e),
-        (Ok(a), Ok(b)) => (a, b),
+    // Searching is MusicBrainz (the database Lidarr uses); requesting hands the ids to Lidarr.
+    let found = match st.mb.search(&term).await {
+        Ok(r) => r,
+        Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
     };
     let requested: Vec<String> = st.requests.lock().unwrap().iter().map(|r| r.foreign_id.clone()).collect();
-    let artists: Vec<Value> = artists.as_array().cloned().unwrap_or_default().iter().take(6).map(|a| {
-        let name = a["artistName"].as_str().unwrap_or("");
-        let id = a["foreignArtistId"].as_str().unwrap_or("");
-        json!({
-            "foreignId": id, "name": name, "type": a["artistType"], "disambiguation": a["disambiguation"],
-            "image": lidarr::image(a, &["poster", "fanart", "banner"]),
-            "inLidarr": lidarr::in_lidarr(a), "monitored": a["monitored"].as_bool().unwrap_or(false) && lidarr::in_lidarr(a),
-            "onServer": on_server(&st, None, name), "requested": requested.iter().any(|r| r == id)
-        })
+    let is_requested = |v: &Value| -> bool {
+        ["foreignId", "albumId", "singleId"].iter().any(|k| v[k].as_str().map(|id| requested.iter().any(|r| r == id)).unwrap_or(false))
+    };
+    let artists: Vec<Value> = found.artists.iter().map(|a| {
+        let name = a["name"].as_str().unwrap_or("").to_string();
+        let mut v = a.clone();
+        v["onServer"] = json!(on_server(&st, None, &name));
+        v["requested"] = json!(is_requested(a));
+        v
     }).collect();
-    let albums: Vec<Value> = albums.as_array().cloned().unwrap_or_default().iter().take(16).map(|a| {
-        let title = a["title"].as_str().unwrap_or("");
-        let artist = a["artist"]["artistName"].as_str().unwrap_or("");
-        let id = a["foreignAlbumId"].as_str().unwrap_or("");
-        json!({
-            "foreignId": id, "title": title, "artist": artist, "year": lidarr::year(a), "type": a["albumType"],
-            "image": lidarr::image(a, &["cover", "disc"]),
-            "inLidarr": lidarr::in_lidarr(a), "monitored": a["monitored"].as_bool().unwrap_or(false) && lidarr::in_lidarr(a),
-            "onServer": on_server(&st, Some(title), artist), "requested": requested.iter().any(|r| r == id)
-        })
+    let albums: Vec<Value> = found.albums.iter().map(|a| {
+        let title = a["title"].as_str().map(String::from);
+        let artist = a["artist"].as_str().unwrap_or("").to_string();
+        let mut v = a.clone();
+        v["onServer"] = json!(on_server(&st, title.as_deref(), &artist));
+        v["requested"] = json!(is_requested(a));
+        v
     }).collect();
-    Json(json!({ "artists": artists, "albums": albums })).into_response()
+    let songs: Vec<Value> = found.songs.iter().map(|sg| {
+        let title = sg["title"].as_str().unwrap_or("").to_string();
+        let artist = sg["artist"].as_str().unwrap_or("").to_string();
+        let mut v = sg.clone();
+        v["onServer"] = json!(track_on_server(&st, &title, &artist));
+        v["requested"] = json!(is_requested(sg));
+        v
+    }).collect();
+    Json(json!({ "songs": songs, "artists": artists, "albums": albums })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -679,6 +692,7 @@ async fn main() {
         lidarr: Mutex::new(lidarr::Settings::load(&cfg.data_dir)),
         requests: Mutex::new(lidarr::load_requests(&cfg.data_dir)),
         http: lidarr::Client::new(),
+        mb: musicbrainz::Client::new(),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });

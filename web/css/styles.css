@@ -2475,3 +2475,9 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .set-form select.input { appearance: auto; }
 @media (max-width: 760px) { .gm-grid { grid-template-columns: minmax(0, 1fr); } }
 .search-none { margin: 20px 0 4px; color: var(--text-2); }
+
+.gm-sub { margin: 16px 0 8px; font-size: 14px; color: var(--text-2); }
+.gm-credit { margin: 14px 0 0; font-size: 12px; color: var(--text-3); }
+.gm-actions { display: flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.gm-song .gm-art { border-radius: 6px; }
+@media (max-width: 600px) { .gm-actions { width: 100%; justify-content: flex-start; } }

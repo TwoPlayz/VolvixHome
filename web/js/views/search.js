@@ -88,7 +88,7 @@ Spin.views = Spin.views || {};
       function lookFurther() {
         clearTimeout(lidarrTimer);
         const host = S.$('[data-get-music]', root);
-        if (!S.lidarr || !S.lidarr.canRequest || ui.q.trim().length < 2 || (ui.type !== 'all' && ui.type !== 'albums' && ui.type !== 'artists')) { if (host) host.innerHTML = ''; return; }
+        if (!S.lidarr || !S.lidarr.canRequest || ui.q.trim().length < 2 || (ui.type !== 'all' && ui.type !== 'albums' && ui.type !== 'artists' && ui.type !== 'songs')) { if (host) host.innerHTML = ''; return; }
         lidarrTimer = setTimeout(function () { S.getMusic.searchInto(host, ui.q.trim()); }, 600);
       }
       function update() {

@@ -12,10 +12,11 @@ and on phones.
 - **Household accounts:** the first person to open a new server becomes the admin, and the admin
   adds everyone else. Music is shared; playlists, history and settings are personal and follow you
   to every device.
-- **Get more music with Lidarr:** search shows albums and artists you don't have yet, with a
-  **Get** button. Lidarr finds and downloads them with the sources you've set up there. The
-  Requests page shows progress and who asked, and new albums appear as soon as Lidarr imports them
-  (webhook). An admin can limit requests to admins.
+- **Get more music with Lidarr:** search (powered by MusicBrainz) shows songs, albums and artists
+  you don't have yet. A song offers **Get the single** and **Get the album**; albums and artists have
+  **Get**. Lidarr fetches the release with the sources you've set up there. The Requests page shows
+  progress and who asked, and new music appears as soon as Lidarr imports it (webhook). An admin can
+  limit requests to admins.
 - **Original quality:** files are streamed untouched (FLAC, ALAC, WAV, MP3, AAC, OGG/Opus). The app
   shows the real format, bit depth and sample rate.
 
@@ -40,6 +41,7 @@ arm64, so it runs on most NAS boxes and on a Raspberry Pi.
 | `VH_RESCAN_MINUTES` | `15` | how often to look for new music, `0` = only on start or on demand |
 | `VH_LIDARR_URL` | | e.g. `http://lidarr:8686` (or set it in Settings → Lidarr) |
 | `VH_LIDARR_API_KEY` | | Lidarr → Settings → General → API Key |
+| `VH_MUSICBRAINZ_URL` | musicbrainz.org | set only to use a MusicBrainz mirror |
 
 To reach it from outside your home, put it behind a reverse proxy with HTTPS (Caddy, Nginx Proxy
 Manager, Tailscale…). Sessions use an HttpOnly cookie.
@@ -70,7 +72,7 @@ VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run
 | `GET /api/stream/{trackId}` | audio, with HTTP Range for seeking |
 | `GET /api/cover/{albumId}` | album art |
 | `GET/PUT /api/lidarr` | Lidarr status; connect and choose folder/profiles (admin) |
-| `GET /api/lidarr/search?term=` | artists and albums Lidarr can get, marked if already in the library |
+| `GET /api/lidarr/search?term=` | songs, albums, artists from MusicBrainz, marked if already in the library |
 | `POST /api/lidarr/request` | `{kind: album or artist, foreignId}`: ask Lidarr to get it |
 | `GET /api/lidarr/queue`, `GET /api/lidarr/requests` | downloads in progress; who requested what |
 | `POST /api/hooks/lidarr?token=` | Lidarr's webhook: rescan after an import |
@@ -79,5 +81,4 @@ VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run
 
 1. ~~Core: library, streaming, accounts, Docker~~
 2. ~~**Lidarr:** search, request, progress, appears automatically~~
-3. **SoundCloud streaming** in the same player.
-4. **Apps:** the Windows and iPhone shells from Volvix, pointed at your server.
+3. **Apps:** the Windows and iPhone shells from Volvix, pointed at your server.
