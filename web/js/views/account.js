@@ -241,6 +241,23 @@ Spin.views = Spin.views || {};
     show('');
   }
 
+  /* ---------- the Windows app's own settings (only inside that app) ---------- */
+  function nativeSend(msg) { try { window.ipc.postMessage(JSON.stringify(msg)); } catch (e) { /* not in the app */ } }
+  function nativeGroup() {
+    const n = window.VOLVIX_NATIVE;
+    if (!n || n.app !== 'windows') return '';
+    const s = n.settings || {}, u = n.update || null;
+    const nt = function (key, on) { return '<span class="switch"><input type="checkbox" data-native="' + key + '"' + (on ? ' checked' : '') + '><span class="switch-ui"></span></span>'; };
+    const upd = !u ? 'Version ' + S.esc(n.version) : u.state === 'checking' ? 'Checking…' : u.state === 'downloading' ? 'Downloading ' + S.esc(u.version) + '…'
+      : u.state === 'ready' ? 'Version ' + S.esc(u.version) + ' is installed. Restart to use it.' : u.state === 'failed' ? S.esc(u.message) : 'You have the latest version (' + S.esc(n.version) + ').';
+    return group('Windows app',
+      row('Start with Windows', 'Open Volvix Home in the background when you sign in to Windows.', nt('startWithWindows', s.startWithWindows !== false), { icon: 'monitor' }) +
+      row('Close to the system tray', 'The close button hides the window and the music keeps playing. Use Quit in the tray icon to exit.', nt('closeToTray', s.closeToTray !== false), { icon: 'monitor' }) +
+      row('Update automatically', upd, nt('autoUpdate', s.autoUpdate !== false), { icon: 'download' }) +
+      row('Check for updates', '', u && u.state === 'ready' ? '<button class="btn btn-primary btn-sm" data-act="native-restart">Restart now</button>' : '<button class="btn btn-secondary btn-sm" data-act="native-check">Check now</button>', { icon: 'download' }),
+      { id: 'native' });
+  }
+
   /* ---------- Settings ---------- */
   let sleepChoice = '0';
   function sleepValue() { return S.player.sleepInfo() ? sleepChoice : '0'; }
@@ -266,6 +283,7 @@ Spin.views = Spin.views || {};
         row('Sleep timer', sleepText(), seg('sleep', sleepValue(), [['0', 'Off'], ['15', '15 min'], ['30', '30 min'], ['60', '1 hour'], ['song', 'End of song']]), { icon: 'moon' }) +
         row('Resume where I left off', 'Reopening Volvix shows the last song and spot, paused.', toggle('resumeLast', st.settings.resumeLast !== false), { icon: 'history' }),
         { id: 'playback' }) +
+      nativeGroup() +
       group('Downloads',
         row('Only play downloads', 'Use only the songs saved on this device. Everything else is greyed out and skipped. This also happens by itself when you lose your connection.',
           toggle('offlineOnly', !!st.settings.offlineOnly), { icon: 'wifiOff' }) +
@@ -302,8 +320,14 @@ Spin.views = Spin.views || {};
           '<div class="acct-body">' + (tab[0] === 'members' ? householdTab() : tab[0] === 'settings' ? settingsTab() : profileTab()) + '</div>' +
         '</div>';
 
+      if (!window.__vhNativeHook) { window.__vhNativeHook = true; window.addEventListener('vh-native-update', function () { if (/\/account\/settings/.test(location.hash)) S.app.refresh(); }); }
       root.onchange = function (e) {
         if (e.target.matches && e.target.matches('[data-pfp-file]')) { if (e.target.files && e.target.files[0]) uploadPicture(e.target.files[0]); return; }
+        if (e.target.dataset && e.target.dataset.native) {
+          const k = e.target.dataset.native; window.VOLVIX_NATIVE.settings[k] = e.target.checked;
+          nativeSend({ type: 'setting', key: k, value: e.target.checked });
+          S.toast(e.target.checked ? 'Turned on' : 'Turned off', 'check'); return;
+        }
         const key = e.target.dataset && e.target.dataset.setting;
         if (!key) return;
         S.store.update(function (s) { s.settings[key] = e.target.checked; });
@@ -330,6 +354,8 @@ Spin.views = Spin.views || {};
         if (act) {
           if (act.dataset.act === 'logout') S.server.logout();
           else if (act.dataset.act === 'pfp-pick') { const fi = root.querySelector('[data-pfp-file]'); if (fi) fi.click(); }
+          else if (act.dataset.act === 'native-check') { nativeSend({ type: 'checkUpdate' }); S.toast('Checking for updates…', 'download'); }
+          else if (act.dataset.act === 'native-restart') nativeSend({ type: 'restart' });
           else if (act.dataset.act === 'dl-clear') { S.dl.removeAll().then(function () { S.toast('Downloads removed', 'check'); }); }
           else if (act.dataset.act === 'pfp-remove') {
             fetch('/api/me/avatar', { method: 'DELETE', credentials: 'same-origin' }).then(function () { S.toast('Picture removed', 'check'); setTimeout(function () { location.reload(); }, 600); });

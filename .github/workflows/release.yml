@@ -1,0 +1,36 @@
+﻿# Publishes the Windows app so installed copies can update themselves.
+# To release: push a tag, e.g.  git tag v0.2.0 && git push origin v0.2.0
+# The app compares its own version with the newest release and downloads volvix-home.exe, checking it against
+# volvix-home.exe.sha256 before installing.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version from the tag
+        shell: pwsh
+        run: |
+          $v = '${{ github.ref_name }}'.TrimStart('v')
+          (Get-Content apps/windows/Cargo.toml -Raw) -replace '(?m)^version = ".*"', "version = `"$v`"" | Set-Content apps/windows/Cargo.toml
+      - name: Build
+        run: cargo build --release --manifest-path apps/windows/Cargo.toml
+      - name: Checksum
+        shell: pwsh
+        run: |
+          Copy-Item apps/windows/target/release/volvix-home.exe volvix-home.exe
+          (Get-FileHash volvix-home.exe -Algorithm SHA256).Hash.ToLower() | Set-Content -NoNewline volvix-home.exe.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            volvix-home.exe
+            volvix-home.exe.sha256
+          generate_release_notes: true
