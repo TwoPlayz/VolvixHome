@@ -113,7 +113,20 @@ window.Spin = window.Spin || {};
   /* ---------- talking to the server ---------- */
   S.server = {
     url: function (path) { return path; },
-    streamUrl: function (trackId) { return '/api/stream/' + encodeURIComponent(trackId); },
+    /** Streaming quality for this device: 'original' or 'high' / 'normal' / 'low' (smaller, for a phone). Needs ffmpeg on the server. */
+    streamQuality: function () {
+      if (!(window.VH && window.VH.transcoding)) return 'original';
+      let q = 'original', saver = false;
+      try { q = localStorage.getItem('vh_streamq') || 'original'; saver = localStorage.getItem('vh_datasaver') === '1'; } catch (e) { /* private mode */ }
+      // the data saver: lower quality while the browser says it's on mobile data (Android Chrome) or the person asked it to save data
+      const c = navigator.connection;
+      if (saver && c && (c.type === 'cellular' || c.saveData)) return 'low';
+      return q;
+    },
+    streamUrl: function (trackId) {
+      const q = S.server.streamQuality();
+      return '/api/stream/' + encodeURIComponent(trackId) + (q !== 'original' ? '?q=' + q : '');
+    },
     coverUrl: function (albumId) { return '/api/cover/' + encodeURIComponent(albumId); },
     json: function (method, path, body) {
       return fetch(path, {

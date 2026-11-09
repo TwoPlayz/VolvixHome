@@ -84,7 +84,7 @@
         soft(get('/api/people'), { people: [] }), soft(get('/api/shared'), { playlists: [], invites: [] }),
         soft(get('/api/household'), { members: [] }), soft(get('/api/notifications'), { items: [], unread: 0 })
       ]).then(function (r) {
-        window.VH = { user: me.user, lidarr: me.lidarr || {}, catalog: r[0], userdata: r[1],
+        window.VH = { user: me.user, lidarr: me.lidarr || {}, transcoding: !!me.transcoding, catalog: r[0], userdata: r[1],
           people: r[2].people, shared: r[3], household: r[4], notifications: r[5] };
         app.innerHTML = '';
         loadScripts(SCRIPTS, function () { /* app.js starts itself */ });

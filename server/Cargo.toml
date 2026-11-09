@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "time", "signal", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "time", "signal", "sync", "process"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
 tower = { version = "0.5", features = ["util"] }

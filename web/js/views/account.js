@@ -355,6 +355,11 @@ Spin.views = Spin.views || {};
         row('Crossfade', 'The end of one song fades into the start of the next. Not used in listening parties, and the last song just ends.',
           seg('crossfade', String(st.settings.crossfade || 0), [['0', 'Off'], ['2', '2 s'], ['4', '4 s'], ['6', '6 s'], ['8', '8 s'], ['12', '12 s']]), { icon: 'shuffle' }) +
         row('Crossfade songs on the same album', 'Off keeps albums flowing the way they were recorded (live albums, mixes), and only crossfades between different albums.', toggle('crossfadeAlbums', !!st.settings.crossfadeAlbums), { icon: 'disc' }) +
+        (window.VH && window.VH.transcoding
+          ? row('Streaming quality (this device)', 'Smaller files use less data. Original sends the file as it is. Converted songs are made once on the server and kept. Downloads use this too.',
+              seg('streamq', (function () { try { return localStorage.getItem('vh_streamq') || 'original'; } catch (e) { return 'original'; } })(), [['original', 'Original'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Data saver']]), { icon: 'wifi' }) +
+            row('Use less data on mobile data', 'Switches to Data saver whenever your browser says you\'re on a mobile connection (Android Chrome).', '<span class="switch"><input type="checkbox" data-local="vh_datasaver"' + ((function () { try { return localStorage.getItem('vh_datasaver') === '1'; } catch (e) { return false; } })() ? ' checked' : '') + '><span class="switch-ui"></span></span>', { icon: 'phone' })
+          : row('Streaming quality', 'Smaller files for a phone need ffmpeg on the server (the Docker image includes it). Right now songs stream in original quality.', '', { icon: 'wifi' })) +
         row('Volume leveling', 'Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren\'t changed.',
           seg('leveling', st.settings.leveling || 'off', [['off', 'Off'], ['track', 'Song'], ['album', 'Album']]), { icon: 'volume' }) +
         row('Sleep timer', sleepText(), seg('sleep', sleepValue(), [['0', 'Off'], ['15', '15 min'], ['30', '30 min'], ['60', '1 hour'], ['song', 'End of song']]), { icon: 'moon' }) +
@@ -413,6 +418,10 @@ Spin.views = Spin.views || {};
         }
       };
       root.onchange = function (e) {
+        if (e.target.dataset && e.target.dataset.local) {
+          try { localStorage.setItem(e.target.dataset.local, e.target.checked ? '1' : '0'); } catch (x) { /* ignore */ }
+          S.toast(e.target.checked ? 'Data saver on' : 'Data saver off', 'check'); return;
+        }
         if (e.target.dataset && (e.target.dataset.eqBand !== undefined || e.target.hasAttribute('data-eq-pre'))) { eqSet({}, true); return; }
         if (e.target.hasAttribute && e.target.hasAttribute('data-eq-preset')) {
           const k = e.target.value, P = S.fx.PRESETS[k];
@@ -442,6 +451,10 @@ Spin.views = Spin.views || {};
       root.onclick = function (e) {
         const segBtn = e.target.closest('[data-seg]');
         if (segBtn && segBtn.dataset.seg === 'theme') { S.setTheme(segBtn.dataset.value); S.app.refresh(); return; }
+        if (segBtn && segBtn.dataset.seg === 'streamq') {
+          try { localStorage.setItem('vh_streamq', segBtn.dataset.value); } catch (x) { /* ignore */ }
+          S.toast(segBtn.dataset.value === 'original' ? 'Streaming in original quality' : 'Streaming smaller files from the next song', 'wifi'); S.app.refresh(); return;
+        }
         if (segBtn && (segBtn.dataset.seg === 'crossfade' || segBtn.dataset.seg === 'leveling')) {
           const k = segBtn.dataset.seg, v = k === 'crossfade' ? Number(segBtn.dataset.value) : segBtn.dataset.value;
           S.store.update(function (s) { s.settings[k] = v; });

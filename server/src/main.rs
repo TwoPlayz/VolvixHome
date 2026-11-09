@@ -24,6 +24,7 @@ mod maintenance;
 mod musicbrainz;
 mod party;
 mod social;
+mod transcode;
 mod watch;
 mod vault;
 
@@ -89,6 +90,7 @@ struct AppState {
     parties: party::Parties,
     devices: devices::Devices,
     cast_key: String,
+    transcoder: transcode::Transcoder,
     watch: watch::Watch,
     /// a change was noticed while a scan was already running: scan again when it ends
     rescan_pending: std::sync::atomic::AtomicBool,
@@ -153,7 +155,7 @@ async fn status(State(st): State<Shared>) -> Response {
     let setup = st.accounts.lock().unwrap().needs_setup();
     Json(json!({
         "name": "Volvix Home", "version": VERSION, "setupNeeded": setup,
-        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len(), "watching": st.watch.live(),
+        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len(), "watching": st.watch.live(), "transcoding": st.transcoder.available(),
         "rescanMinutes": st.cfg.rescan_minutes
     }))
     .into_response()
@@ -289,7 +291,7 @@ async fn me(State(st): State<Shared>, headers: HeaderMap) -> Response {
     match signed_in(&st, &headers) {
         Ok((_, user)) => {
             let l = st.lidarr.lock().unwrap();
-            Json(json!({ "user": PublicUser::from(&user), "lidarr": { "configured": l.configured(), "canRequest": l.configured() && can_request(&user, &l) } })).into_response()
+            Json(json!({ "user": PublicUser::from(&user), "lidarr": { "configured": l.configured(), "canRequest": l.configured() && can_request(&user, &l) }, "transcoding": st.transcoder.available() })).into_response()
         }
         Err(r) => r,
     }
@@ -602,9 +604,18 @@ async fn stream(State(st): State<Shared>, Path(id): Path<String>, req: Request) 
             return r;
         }
     }
-    let path = match st.lib.read().unwrap().track_path(&id).cloned() {
-        Some(p) => p,
-        None => return error(StatusCode::NOT_FOUND, "No such track."),
+    let (path, lossless, kbps) = {
+        let lib = st.lib.read().unwrap();
+        let Some(p) = lib.track_path(&id).cloned() else { return error(StatusCode::NOT_FOUND, "No such track.") };
+        let q = lib.catalog.tracks.iter().find(|t| t.id == id).and_then(|t| lib.catalog.albums.iter().find(|a| a.id == t.album_id)).map(|a| (a.quality.lossless, a.quality.kbps));
+        (p, q.map(|x| x.0).unwrap_or(true), q.and_then(|x| x.1))
+    };
+    // ?q=high|normal|low: a smaller copy for a phone (made once with ffmpeg, then kept)
+    let path = match req.uri().query().and_then(|q| q.split('&').find_map(|p| p.strip_prefix("q="))).and_then(|q| transcode::kbps_of(q).map(|k| (q.to_string(), k))) {
+        Some((q, target)) if st.transcoder.available() && !transcode::already_small(lossless, kbps, target) => {
+            match st.transcoder.ensure(&path, &id, &q).await { Ok(p) => p, Err(_) => path } // if converting fails, send the original
+        }
+        _ => path,
     };
     match ServeFile::new(path).oneshot(req).await {
         Ok(res) => { let r = res.map(Body::new).into_response(); if by_cast { with_cors(r) } else { r } }
@@ -1518,6 +1529,7 @@ async fn main() {
         parties: party::Parties::new(),
         devices: devices::Devices::new(),
         cast_key: load_cast_key(&cfg.data_dir),
+        transcoder: transcode::Transcoder::new(&cfg.data_dir),
         watch: watch_tx.0,
         rescan_pending: std::sync::atomic::AtomicBool::new(false),
         lib: RwLock::new(Library::default()),
@@ -1561,6 +1573,9 @@ async fn main() {
                         Err(e) => eprintln!("backup failed: {e}"),
                     }
                 }
+                let mb = std::env::var("VH_TRANSCODE_CACHE_MB").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(5000);
+                let tc = transcode::clean(s.transcoder.dir(), mb * 1_048_576, 30);
+                if tc > 0 { println!("transcodes: removed {tc} old converted files"); }
                 let n = maintenance::clean_cache(&s.cfg.data_dir, 120);
                 if n > 0 { println!("cache: removed {n} old look-ups"); }
                 tokio::time::sleep(Duration::from_secs(86400)).await;

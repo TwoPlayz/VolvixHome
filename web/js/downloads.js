@@ -1,4 +1,4 @@
-﻿/* Volvix Home — downloads: keep songs on this device so they play with no connection.
+/* Volvix Home — downloads: keep songs on this device so they play with no connection.
    Songs go in the browser's own storage (Cache Storage) on THIS device only. Offline, only downloaded songs play:
    the rest are greyed out and skipped. Settings > Downloads has the "only play downloads" switch and a clean-up. */
 window.Spin = window.Spin || {};
@@ -10,7 +10,8 @@ window.Spin = window.Spin || {};
   let manifest = {};   // trackId -> bytes
   try { manifest = JSON.parse(localStorage.getItem(key()) || '{}') || {}; } catch (e) { manifest = {}; }
   const saveManifest = function () { try { localStorage.setItem(key(), JSON.stringify(manifest)); } catch (e) { /* full / private */ } };
-  const urlFor = function (id) { return S.server.streamUrl(id); };
+  // downloads are stored under one address per song, whatever quality they were fetched at
+  const urlFor = function (id) { return '/api/stream/' + encodeURIComponent(id); };
   const supported = typeof caches !== 'undefined';
   let busy = 0, blobUrl = null;
   const progress = { done: 0, total: 0 };
@@ -49,7 +50,7 @@ window.Spin = window.Spin || {};
         let failed = 0;
         return todo.reduce(function (p, id) {
           return p.then(function () {
-            return fetch(urlFor(id), { credentials: 'same-origin' }).then(function (r) {
+            return fetch(S.server.streamUrl(id), { credentials: 'same-origin' }).then(function (r) {
               if (!r.ok) throw new Error('bad');
               const len = Number(r.headers.get('content-length')) || 0;
               return c.put(urlFor(id), r).then(function () { manifest[id] = len || 1; saveManifest(); });
