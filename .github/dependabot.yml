@@ -1,14 +1,32 @@
-﻿version: 2
+# One quiet monthly batch per area instead of a pull request for every package.
+# Big version jumps in the Rust libraries (those change how they're used) are skipped; patch and minor updates still arrive.
+version: 2
 updates:
   - package-ecosystem: cargo
     directory: /server
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      server-crates: { patterns: ["*"] }
   - package-ecosystem: cargo
     directory: /apps/windows
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      windows-crates: { patterns: ["*"] }
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
+    groups:
+      actions: { patterns: ["*"] }
   - package-ecosystem: docker
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
