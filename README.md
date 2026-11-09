@@ -84,6 +84,17 @@ server.
   with LiveContainer, SideStore/AltStore or Sideloadly. First launch asks for the address. Audio keeps
   playing in the background.
 
+**Updates:** push a version tag (`git tag v0.30.0 && git push origin v0.30.0`) and the *Release* workflow builds both apps,
+attaches them to a GitHub Release, and lists the new iPhone version in an update feed. Windows copies update themselves.
+For iPhone, open **SideStore** or **AltStore** → Sources → **+** and add this address once:
+
+```text
+https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/source.json
+```
+
+The app then shows *Update* whenever a new version is released and installs it over the old one with your data intact.
+(The app only displays your server, so almost every change reaches the iPhone without an app update: a new IPA is only
+needed when the native shell itself changes.)
 Both are built by GitHub Actions (`.github/workflows/apps.yml`) — run the **Apps** workflow and download
 `Volvix-Home-Windows` and `Volvix-Home-iOS`. To build the Windows app yourself:
 `cargo build --release --manifest-path apps/windows/Cargo.toml`.
