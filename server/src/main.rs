@@ -304,6 +304,22 @@ async fn me(State(st): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 #[derive(Deserialize)]
+struct ProfileEdit {
+    name: String,
+}
+
+/// Change your own display name.
+async fn update_profile(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<ProfileEdit>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let mut accounts = st.accounts.lock().unwrap();
+    if let Err(e) = accounts.rename(&user.id, &b.name) {
+        return error(StatusCode::BAD_REQUEST, &e);
+    }
+    let fresh = accounts.by_id(&user.id).map(PublicUser::from);
+    Json(json!({ "user": fresh })).into_response()
+}
+
+#[derive(Deserialize)]
 struct PasswordChange {
     current: String,
     new: String,
@@ -1907,6 +1923,7 @@ async fn main() {
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
         .route("/api/me/password", post(change_password))
+        .route("/api/me/profile", axum::routing::put(update_profile))
         .route("/api/me/data", get(get_data).put(put_data))
         .route("/api/users", get(list_users).post(add_user))
         .route("/api/users/{id}", delete(remove_user).put(edit_user))

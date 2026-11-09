@@ -4,12 +4,21 @@ window.Spin.views = window.Spin.views || {};
 (function (S) {
   'use strict';
 
-  const NAV = [
-    { route: '/home', label: 'Home', icon: 'home' },
-    { route: '/search', label: 'Search', icon: 'search' },
-    { route: '/library', label: 'Your Library', short: 'Library', icon: 'library' },
-    { route: '/household', label: 'Household', icon: 'family' }
-  ].concat(window.VH && window.VH.lidarr && window.VH.lidarr.configured ? [{ route: '/requests', label: 'Requests', icon: 'download' }] : []);
+  // the main places (Requests joins once Lidarr is connected, even if that happens while the app is open)
+  function buildNav() {
+    return [
+      { route: '/home', label: 'Home', icon: 'home' },
+      { route: '/search', label: 'Search', icon: 'search' },
+      { route: '/library', label: 'Your Library', short: 'Library', icon: 'library' },
+      { route: '/household', label: 'Household', icon: 'family' }
+    ].concat(window.VH && window.VH.lidarr && window.VH.lidarr.configured ? [{ route: '/requests', label: 'Requests', icon: 'download' }] : []);
+  }
+  const sideNavHtml = function () { return buildNav().map(function (n) { return '<a class="nav-item" href="#' + n.route + '" data-route="' + n.route + '">' + S.icon(n.icon, 22) + '<span>' + n.label + '</span></a>'; }).join(''); };
+  const tabNavHtml = function () { return buildNav().map(function (n) { return '<a class="tab" href="#' + n.route + '" data-route="' + n.route + '">' + S.icon(n.icon, 22) + '<span>' + (n.short || n.label) + '</span></a>'; }).join(''); };
+  const userChipHtml = function () {
+    const me = S.data.me;
+    return S.avatar(me, 32) + '<span class="user-chip-text"><span class="user-chip-name">' + S.esc(me.name) + '</span><span class="user-chip-plan">' + (me.admin ? 'Admin' : 'Member') + '</span></span>' + S.icon('more', 18);
+  };
 
   let shellMounted = false;
   const appEl = document.getElementById('app');
@@ -24,18 +33,14 @@ window.Spin.views = window.Spin.views || {};
       '<div class="app">' +
         '<aside class="sidebar">' +
           '<div class="sidebar-head"><a href="#/home" aria-label="Volvix Home">' + S.brand(28) + '</a></div>' +
-          '<nav class="nav" aria-label="Main">' + NAV.map(function (n) {
-            return '<a class="nav-item" href="#' + n.route + '" data-route="' + n.route + '">' + S.icon(n.icon, 22) + '<span>' + n.label + '</span></a>';
-          }).join('') + '</nav>' +
+          '<nav class="nav" aria-label="Main">' + sideNavHtml() + '</nav>' +
           '<div class="sidebar-section">' +
             '<div class="section-head"><span>Playlists</span>' +
               '<button class="icon-btn" data-action="new-playlist" aria-label="Create playlist" title="Create playlist">' + S.icon('plus', 18) + '</button></div>' +
             '<div class="playlist-list" data-playlists></div>' +
           '</div>' +
           '<div class="sidebar-foot">' +
-            '<button class="user-chip" data-action="account-menu" aria-label="Account menu" aria-haspopup="menu">' + S.avatar(me, 32) +
-              '<span class="user-chip-text"><span class="user-chip-name">' + S.esc(me.name) + '</span>' +
-              '<span class="user-chip-plan">' + (me.admin ? 'Admin' : 'Member') + '</span></span>' + S.icon('more', 18) + '</button>' +
+            '<button class="user-chip" data-action="account-menu" aria-label="Account menu" aria-haspopup="menu">' + userChipHtml() + '</button>' +
           '</div>' +
         '</aside>' +
 
@@ -56,9 +61,7 @@ window.Spin.views = window.Spin.views || {};
 
         playerBar() +
 
-        '<nav class="tabbar" aria-label="Main">' + NAV.map(function (n) {
-          return '<a class="tab" href="#' + n.route + '" data-route="' + n.route + '">' + S.icon(n.icon, 22) + '<span>' + (n.short || n.label) + '</span></a>';
-        }).join('') + '</nav>' +
+        '<nav class="tabbar" aria-label="Main">' + tabNavHtml() + '</nav>' +
       '</div>';
 
     renderSidebarPlaylists();
@@ -218,6 +221,15 @@ window.Spin.views = window.Spin.views || {};
       main.scrollTop = top;
     },
     refreshSidebar: renderSidebarPlaylists,
+    /** After your picture or name changed (or Lidarr got connected): update the sidebar, top bar and menu in place. Nothing reloads. */
+    refreshChrome: function () {
+      if (!shellMounted) return;
+      const chip = S.$('.user-chip'); if (chip) chip.innerHTML = userChipHtml();
+      const btn = S.$('.avatar-btn'); if (btn) btn.innerHTML = S.avatar(S.data.me, 32);
+      const nav = S.$('.sidebar .nav'); if (nav) nav.innerHTML = sideNavHtml();
+      const tabs = S.$('.tabbar'); if (tabs) tabs.innerHTML = tabNavHtml();
+      setActive(S.router.current());
+    },
     remount: function () {
       if (!shellMounted) return;
       shellMounted = false;

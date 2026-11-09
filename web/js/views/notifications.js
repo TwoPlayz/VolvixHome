@@ -74,7 +74,7 @@ Spin.views = Spin.views || {};
         const join = t.closest('[data-note-join]');
         if (join) { const n = S.notify.items().find(function (x) { return x.id === join.dataset.noteJoin; }); if (n && S.party) S.party.joinFromNote(n); return; }
         const rel = t.closest('[data-note-reload]');
-        if (rel) { location.hash = rel.dataset.noteReload.replace(/^#/, ''); location.reload(); }
+        if (rel) { S.data.sync().then(function () { location.hash = rel.dataset.noteReload.replace(/^#/, ''); S.app.refresh(); }); }
       };
     }
   };

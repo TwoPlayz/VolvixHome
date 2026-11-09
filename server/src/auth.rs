@@ -210,6 +210,25 @@ impl Accounts {
         if self.sessions.len() != before { self.save(); }
     }
 
+    /// Change someone's display name (they sign in with it). Names stay unique, ignoring case.
+    pub fn rename(&mut self, user_id: &str, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.chars().count() < 2 {
+            return Err("Please enter a name (2 or more letters).".into());
+        }
+        if name.chars().count() > 60 {
+            return Err("That name is too long (60 letters at most).".into());
+        }
+        if let Some(other) = self.find(name) {
+            if other.id != user_id {
+                return Err("Someone in your household already has that name.".into());
+            }
+        }
+        self.users.iter_mut().find(|u| u.id == user_id).ok_or("No such user")?.name = name.to_string();
+        self.save();
+        Ok(())
+    }
+
     pub fn set_hide_explicit(&mut self, user_id: &str, on: bool) -> Result<(), String> {
         self.users.iter_mut().find(|u| u.id == user_id).ok_or("No such user")?.hide_explicit = on;
         self.save();
@@ -273,6 +292,22 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renaming_keeps_names_unique() {
+        let dir = std::env::temp_dir().join(format!("vh-ren-{}", random_hex(4)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut a = Accounts::load(&dir);
+        let sam = a.create("", "Sam", "password1", true).unwrap();
+        let kim = a.create("", "Kim", "password1", false).unwrap();
+        assert!(a.rename(&kim.id, "Kimberly").is_ok());
+        assert_eq!(a.find("kimberly").unwrap().id, kim.id);
+        assert!(a.find("kim-2").is_none() || a.find("kim").map(|u| u.id == kim.id).unwrap_or(true));
+        assert!(a.rename(&kim.id, "SAM").is_err(), "taken, ignoring case");
+        assert!(a.rename(&sam.id, "sam").is_ok(), "your own name in another case is fine");
+        assert!(a.rename(&kim.id, "K").is_err() && a.rename(&kim.id, &"x".repeat(61)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn permissions_default_grow_and_keep_an_admin() {

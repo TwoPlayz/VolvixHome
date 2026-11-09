@@ -39,6 +39,9 @@ Spin.views = Spin.views || {};
   function profileTab() {
     const me = S.data.me;
     return group('You',
+      '<form class="set-form name-form" data-form="profile-name" novalidate><label class="field"><span class="label">Your name</span>' +
+        '<input class="input" name="name" value="' + S.esc(me.name) + '" maxlength="60" autocomplete="name" autocapitalize="words" spellcheck="false"><span class="hint">This is also what you sign in with, on every device.</span></label>' +
+        '<p class="auth-error" hidden></p><button class="btn btn-primary" type="submit">Save name</button></form>' +
       row(S.avatar(me, 56) + '<span class="set-who"><span>' + S.esc(me.name) + '</span><em>' + (me.admin ? 'Admin' : 'Member') + '</em></span>', '',
         '<input type="file" accept="image/*" data-pfp-file hidden>' +
         '<button class="btn btn-secondary btn-sm" data-act="pfp-pick">' + S.icon('user', 14) + 'Change picture</button>' +
@@ -99,27 +102,87 @@ Spin.views = Spin.views || {};
         '</form>');
   }
 
-  /** Profile picture: crop to a centered square, shrink to 256px, send as a JPEG. */
-  function uploadPicture(file) {
+  /** Your picture or name changed: update every place it's shown, without reloading anything. */
+  function meChanged() { S.app.refreshChrome(); S.app.refresh(); }
+
+  /**
+   * Profile picture: pick a photo, then move it (drag) and zoom it (slider, mouse wheel, pinch or + / -) until the circle
+   * shows what you want. The round preview is exactly what's saved (a 256 px square, shown round everywhere).
+   */
+  function pictureDialog(file) {
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = function () {
-      const side = Math.min(img.width, img.height), size = 256;
-      const c = document.createElement('canvas');
-      c.width = c.height = size;
-      c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
-      URL.revokeObjectURL(url);
-      c.toBlob(function (blob) {
-        fetch('/api/me/avatar', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
-          .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.error || 'Couldn\'t save the picture.'); }); })
-          .then(function () { S.toast('Picture updated', 'check'); setTimeout(function () { location.reload(); }, 600); })
-          .catch(function (x) { S.toast(x.message, 'x'); });
-      }, 'image/jpeg', 0.88);
-    };
     img.onerror = function () { URL.revokeObjectURL(url); S.toast('Couldn\'t read that picture.', 'x'); };
+    img.onload = function () {
+      const SIZE = 300, OUT = 256;
+      const min = SIZE / Math.min(img.width, img.height); // smallest zoom: the photo still fills the square
+      let scale = min, ox = (SIZE - img.width * min) / 2, oy = (SIZE - img.height * min) / 2;
+      const m = S.modal({
+        title: 'Adjust your picture',
+        body: '<div class="crop"><canvas class="crop-canvas" width="' + SIZE + '" height="' + SIZE + '" tabindex="0" role="img" aria-label="Your picture. Drag to move it, use plus and minus to zoom."></canvas>' +
+          '<label class="crop-zoom"><span>' + S.icon('minus', 14) + '</span><input type="range" min="1" max="4" step="0.01" value="1" aria-label="Zoom" data-crop-zoom><span>' + S.icon('plus', 14) + '</span></label>' +
+          '<p class="set-hint">Drag to move. Scroll, pinch or use the slider to zoom.</p></div>',
+        actions: [{ label: 'Cancel', onClick: function (close) { URL.revokeObjectURL(url); close(); } },
+          { label: 'Save picture', kind: 'primary', onClick: function (close) { save(close); } }]
+      });
+      const cv = m.el.querySelector('canvas'), ctx = cv.getContext('2d'), zoom = m.el.querySelector('[data-crop-zoom]');
+      const clamp = function () { ox = Math.min(0, Math.max(SIZE - img.width * scale, ox)); oy = Math.min(0, Math.max(SIZE - img.height * scale, oy)); };
+      function draw() {
+        clamp();
+        ctx.clearRect(0, 0, SIZE, SIZE);
+        ctx.drawImage(img, ox, oy, img.width * scale, img.height * scale);
+        // dim everything outside the circle that will be shown
+        ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.58)'; ctx.beginPath(); ctx.rect(0, 0, SIZE, SIZE); ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 3, 0, Math.PI * 2, true); ctx.fill('evenodd'); ctx.restore();
+        ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 3, 0, Math.PI * 2); ctx.stroke();
+      }
+      /** Zoom, keeping the point (px, py) under the pointer where it is. */
+      function zoomTo(s, px, py) {
+        s = Math.min(min * 4, Math.max(min, s));
+        const k = s / scale;
+        ox = px - (px - ox) * k; oy = py - (py - oy) * k; scale = s;
+        zoom.value = String(scale / min);
+        draw();
+      }
+      zoom.addEventListener('input', function () { zoomTo(min * Number(zoom.value), SIZE / 2, SIZE / 2); });
+      cv.addEventListener('wheel', function (e) { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomTo(scale * (e.deltaY < 0 ? 1.08 : 1 / 1.08), (e.clientX - r.left) * SIZE / r.width, (e.clientY - r.top) * SIZE / r.height); }, { passive: false });
+      cv.addEventListener('keydown', function (e) {
+        const step = 12;
+        if (e.key === 'ArrowLeft') ox += step; else if (e.key === 'ArrowRight') ox -= step; else if (e.key === 'ArrowUp') oy += step; else if (e.key === 'ArrowDown') oy -= step;
+        else if (e.key === '+' || e.key === '=') zoomTo(scale * 1.1, SIZE / 2, SIZE / 2); else if (e.key === '-') zoomTo(scale / 1.1, SIZE / 2, SIZE / 2);
+        else return;
+        e.preventDefault(); draw();
+      });
+      // one finger / mouse moves the photo; two fingers pinch to zoom
+      const pts = new Map(); let last = null;
+      const local = function (e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * SIZE / r.width, (e.clientY - r.top) * SIZE / r.height]; };
+      cv.addEventListener('pointerdown', function (e) { try { cv.setPointerCapture(e.pointerId); } catch (x) { /* synthetic pointer */ } pts.set(e.pointerId, local(e)); last = null; cv.classList.add('grabbing'); });
+      cv.addEventListener('pointermove', function (e) {
+        if (!pts.has(e.pointerId)) return;
+        const p = local(e), old = pts.get(e.pointerId);
+        if (pts.size === 1) { ox += p[0] - old[0]; oy += p[1] - old[1]; pts.set(e.pointerId, p); draw(); return; }
+        const other = Array.from(pts.entries()).find(function (en) { return en[0] !== e.pointerId; })[1];
+        const d0 = Math.hypot(old[0] - other[0], old[1] - other[1]), d1 = Math.hypot(p[0] - other[0], p[1] - other[1]);
+        pts.set(e.pointerId, p);
+        if (d0 > 8) zoomTo(scale * d1 / d0, (p[0] + other[0]) / 2, (p[1] + other[1]) / 2);
+      });
+      const up = function (e) { pts.delete(e.pointerId); if (!pts.size) cv.classList.remove('grabbing'); };
+      cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+      draw();
+
+      function save(close) {
+        const out = document.createElement('canvas'); out.width = out.height = OUT;
+        const sw = SIZE / scale; // how much of the photo the square covers, in the photo's own pixels
+        out.getContext('2d').drawImage(img, -ox / scale, -oy / scale, sw, sw, 0, 0, OUT, OUT);
+        out.toBlob(function (blob) {
+          fetch('/api/me/avatar', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
+            .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.error || 'Couldn\'t save the picture.'); }); })
+            .then(function (r) { URL.revokeObjectURL(url); S.data.me.avatar = r.avatar; close(); S.toast('Picture updated', 'check'); meChanged(); })
+            .catch(function (x) { S.toast(x.message, 'x'); });
+        }, 'image/jpeg', 0.9);
+      }
+    };
     img.src = url;
   }
-
   /** An admin's controls for one person: explicit songs, admin, a new password, remove. */
   function manageDialog(id) {
     const u = (users || []).find(function (x) { return x.id === id; });
@@ -541,7 +604,7 @@ Spin.views = Spin.views || {};
           S.store.update(function (s) { s.settings.eq = Object.assign({ preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, s.settings.eq, { on: e.target.checked }); });
           S.fx.wake(); S.fx.sync(); S.toast(e.target.checked ? 'Equalizer on' : 'Equalizer off', 'check'); S.app.refresh(); return;
         }
-        if (e.target.matches && e.target.matches('[data-pfp-file]')) { if (e.target.files && e.target.files[0]) uploadPicture(e.target.files[0]); return; }
+        if (e.target.matches && e.target.matches('[data-pfp-file]')) { if (e.target.files && e.target.files[0]) { pictureDialog(e.target.files[0]); e.target.value = ''; } return; }
         if (e.target.dataset && e.target.dataset.native) {
           const k = e.target.dataset.native; window.VOLVIX_NATIVE.settings[k] = e.target.checked;
           nativeSend({ type: 'setting', key: k, value: e.target.checked });
@@ -586,7 +649,7 @@ Spin.views = Spin.views || {};
           else if (act.dataset.act === 'native-restart') nativeSend({ type: 'restart' });
           else if (act.dataset.act === 'dl-clear') { S.dl.removeAll().then(function () { S.toast('Downloads removed', 'check'); }); }
           else if (act.dataset.act === 'pfp-remove') {
-            fetch('/api/me/avatar', { method: 'DELETE', credentials: 'same-origin' }).then(function () { S.toast('Picture removed', 'check'); setTimeout(function () { location.reload(); }, 600); });
+            fetch('/api/me/avatar', { method: 'DELETE', credentials: 'same-origin' }).then(function () { S.data.me.avatar = 0; S.toast('Picture removed', 'check'); meChanged(); });
           }
           else if (act.dataset.act === 'pick-folder') pickFolder();
           else if (act.dataset.act === 'switch-server') {
@@ -632,7 +695,11 @@ Spin.views = Spin.views || {};
         err.hidden = true; btn.disabled = true;
         const done = function () { btn.disabled = false; };
         const fail = function (x) { err.textContent = x.message; err.hidden = false; done(); };
-        if (form.dataset.form === 'password') {
+        if (form.dataset.form === 'profile-name') {
+          S.server.json('PUT', '/api/me/profile', { name: f.get('name') }).then(function (r) {
+            S.data.me.name = r.user.name; done(); S.toast('Name saved', 'check'); meChanged();
+          }).catch(fail);
+        } else if (form.dataset.form === 'password') {
           S.server.json('POST', '/api/me/password', { current: f.get('current'), new: f.get('new') })
             .then(function () { form.reset(); done(); S.toast('Password changed', 'check'); }).catch(fail);
         } else if (form.dataset.form === 'lidarr') {
@@ -644,7 +711,9 @@ Spin.views = Spin.views || {};
             lidarr = r; done();
             S.toast(first ? 'Lidarr connected' : 'Saved', 'check');
             // the Requests tab and Get buttons appear after a reload
-            if (first) setTimeout(function () { location.reload(); }, 900); else S.app.refresh();
+            // Requests joins the menu right now: no reload
+            if (first && window.VH && window.VH.lidarr) { window.VH.lidarr.configured = true; window.VH.lidarr.canRequest = true; if (S.getMusic && S.getMusic.helpers) S.getMusic.helpers.setCan(true, true); S.app.refreshChrome(); }
+            S.app.refresh();
           }).catch(fail);
         } else if (form.dataset.form === 'add-user') {
           S.server.json('POST', '/api/users', { name: f.get('name'), password: f.get('password') })

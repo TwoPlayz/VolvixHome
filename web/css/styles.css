@@ -2859,3 +2859,11 @@ a.gm-link:hover .t-name { text-decoration: underline; }
   .eq i:nth-child(3) { animation-delay: -1s !important; }
   .eq.paused i, .track.paused .eq i { animation-play-state: paused !important; }
 }
+
+/* picture cropper */
+.crop { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.crop-canvas { width: min(300px, 100%); height: auto; aspect-ratio: 1; border-radius: 12px; background: #111; cursor: grab; touch-action: none; }
+.crop-canvas.grabbing { cursor: grabbing; }
+.crop-zoom { display: flex; align-items: center; gap: 10px; width: min(300px, 100%); color: var(--text-2); }
+.crop-zoom input { flex: 1; accent-color: var(--accent); }
+.name-form { padding: 12px 16px 4px; }
