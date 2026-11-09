@@ -52,7 +52,7 @@ window.Spin = window.Spin || {};
       '</div>' +
       '<div class="np-art">' + S.cover(album) + '</div>' +
       '<div class="np-meta">' +
-        '<div class="np-text"><div class="np-title">' + S.albumLink(album, t.title) + '</div>' +
+        '<div class="np-text"><div class="np-title">' + S.albumLink(album, t.title) + (t.explicit ? ' ' + S.explicitBadge() : '') + '</div>' +
           '<div class="np-artist">' + S.artistLink(t.artist) + '</div></div>' +
         S.likeButton(t.id, 'np-add np-like', 22) +
         '<button class="add-pl np-add' + (inPl ? ' on' : '') + '" data-add-pl="' + t.id + '" aria-label="Add to playlist" title="Add to playlist">' + S.icon(inPl ? 'check' : 'plus', 22) + '</button>' +
@@ -71,6 +71,7 @@ window.Spin = window.Spin || {};
       '</div>' +
       '<div class="np-tools">' +
         '<button class="ctrl q-btn" data-player="quality" data-np-quality></button>' +
+        ctrl('devices', 'Output device', 'output') +
         ctrl('party', 'Listening party', 'party') +
         ctrl('queue', 'Queue', 'queue', st.queueOpen ? ' on' : '') +
       '</div>';

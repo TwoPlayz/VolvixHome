@@ -105,6 +105,7 @@ window.Spin = window.Spin || {};
       return;
     }
     if (!st.playing) return;
+    if (st.sleepAt && Date.now() >= st.sleepAt) { st.sleepAt = 0; S.toast('Sleep timer: paused', 'moon'); toggle(); return; }
     st.pos = audio.currentTime || st.pos;
     renderProgress();
     saveResume(false);
@@ -114,6 +115,7 @@ window.Spin = window.Spin || {};
   // the song ended / the OS or headphones paused or played it
   audio.addEventListener('ended', function () {
     if (remote) { if (interceptor && interceptor.ended) interceptor.ended(st.index); return; } // the party moves on
+    if (st.sleepSong) { st.sleepSong = false; st.playing = false; stopTimer(); S.toast('Sleep timer: paused after this song', 'moon'); render(); return; }
     if (st.repeat === 'one') { setPos(0); startAudio(); return; }
     next(true);
   });
@@ -153,6 +155,7 @@ window.Spin = window.Spin || {};
   function restoreResume() {
     const r = S.store.aux.get('resume');
     if (!r || !Array.isArray(r.queue) || !r.queue.length) return;
+    if ((S.store.state.settings || {}).resumeLast === false) return; // they chose to start fresh
     const queue = r.queue.filter(function (id) { return !!S.data.track(id); });
     const id = r.queue[r.index];
     const index = queue.indexOf(id);
@@ -209,6 +212,22 @@ window.Spin = window.Spin || {};
     S.store.update(function (s) {
       s.recent = [id].concat((s.recent || []).filter(function (x) { return x !== id; })).slice(0, 12);
     });
+  }
+
+  /* ---------- playback settings: speed, sleep timer ---------- */
+  function applySettings() {
+    const s = S.store.state.settings || {};
+    const rate = remote ? 1 : (Number(s.playbackRate) || 1); // a party plays at normal speed so everyone stays together
+    if (audio.playbackRate !== rate) audio.playbackRate = rate;
+    audio.defaultPlaybackRate = rate; // new songs keep it
+    audio.preservesPitch = true;
+  }
+  audio.addEventListener('loadstart', applySettings);
+  /** v: 0 = off, minutes, or 'song' (stop when this song ends). */
+  function sleep(v) {
+    st.sleepAt = 0; st.sleepSong = false;
+    if (v === 'song') st.sleepSong = true;
+    else if (Number(v) > 0) st.sleepAt = Date.now() + Number(v) * 60000;
   }
 
   /* ---------- public API ---------- */
@@ -270,6 +289,14 @@ window.Spin = window.Spin || {};
     render();
   }
 
+  /** The queue played out: forget it, so there's no stale song and the mini player hides. */
+  function clearPlayer() {
+    st.playing = false; stopTimer(); audio.pause();
+    audio.removeAttribute('src'); audio.load(); loadedId = null;
+    st.queue = []; st.index = -1; st.original = null; st.pos = 0; st.context = null; st.queueOpen = false;
+    render();
+  }
+
   function next(auto) {
     if (!current()) return;
     if (!auto && intercept('next', [])) return;
@@ -277,8 +304,9 @@ window.Spin = window.Spin || {};
     skippedToast(r.skipped);
     if (r.index < 0) {
       // end of queue
+      if (auto) { clearPlayer(); return; } // nothing left: the player goes away
       st.playing = false; stopTimer(); audio.pause(); setPos(0);
-      if (!auto) S.toast('End of queue');
+      S.toast('End of queue');
       render();
       return;
     }
@@ -398,7 +426,7 @@ window.Spin = window.Spin || {};
 
     art.innerHTML = album ? S.cover(album) : S.icon('disc', 22);
     S.$('[data-p="title"]').innerHTML = t
-      ? '<a href="#/album/' + album.id + '">' + S.esc(t.title) + '</a>'
+      ? '<a href="#/album/' + album.id + '">' + S.esc(t.title) + '</a>' + (t.explicit ? ' ' + S.explicitBadge() : '')
       : 'Not playing';
     S.$('[data-p="sub"]').innerHTML = t ? S.artistLink(t.artist) : 'Pick something from your library';
     const like = S.$('[data-p="like"]');
@@ -427,6 +455,7 @@ window.Spin = window.Spin || {};
 
     audio.volume = st.volume;
     audio.muted = st.muted;
+    applySettings();
     mediaSession(t, album);
     const vol = S.$('[data-p="volume-fill"]');
     if (vol) vol.style.width = (st.muted ? 0 : st.volume * 100) + '%';
@@ -471,7 +500,7 @@ window.Spin = window.Spin || {};
       return '<button class="q-row' + (ok ? '' : ' locked') + (i === st.index ? ' now' : '') + (upcoming ? ' movable' : '') + '" data-queue-index="' + i + '">' +
         (upcoming ? '<span class="drag-sign q-sign" aria-hidden="true" title="Drag to reorder: grab the row anywhere">' + S.icon('grip', 16) + '</span>' : '') +
         '<span class="q-cover">' + S.cover(al) + '</span>' +
-        '<span class="q-text"><span class="q-name">' + S.esc(tr.title) + '</span>' +
+        '<span class="q-text"><span class="q-name">' + S.esc(tr.title) + (tr.explicit ? ' ' + S.explicitBadge() : '') + '</span>' +
         '<span class="q-sub">' + (ok ? '' : S.icon('lock', 11) + (S.lib.isBlocked(id) ? 'Explicit · skipped · ' : 'Will be skipped · ')) + S.artistLink(tr.artist, { inert: true }) + '</span></span>' +
         '<span class="q-dur">' + S.fmtTime(tr.duration) + '</span>' +
         (upcoming ? '<span class="q-remove" role="button" tabindex="0" data-q-remove="' + i + '" aria-label="Remove from queue" title="Remove from queue">' + S.icon('x', 15) + '</span>' : '') +
@@ -625,6 +654,9 @@ window.Spin = window.Spin || {};
     toggleShuffle: function () { setShuffle(!st.shuffle); },
     audio: audio,
     seekTo: userSeek,
+    applySettings: applySettings,
+    sleep: sleep,
+    sleepInfo: function () { return st.sleepSong ? 'song' : (st.sleepAt && st.sleepAt > Date.now() ? Math.ceil((st.sleepAt - Date.now()) / 60000) : 0); },
     /* ----- listening party (see party.js) ----- */
     setInterceptor: function (i) { interceptor = i; },
     isRemote: function () { return !!remote; },

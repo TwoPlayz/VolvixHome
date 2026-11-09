@@ -6,7 +6,7 @@
   // the app, in load order (boot.js appends these once the library is loaded)
   const SCRIPTS = [
     'js/ui.js', 'js/data.js', 'js/store.js', 'js/router.js', 'js/components.js', 'js/player.js', 'js/household.js',
-    'js/playlists.js', 'js/nowplaying.js', 'js/lyrics.js', 'js/notifications.js', 'js/party.js', 'js/views/home.js', 'js/views/search.js',
+    'js/playlists.js', 'js/nowplaying.js', 'js/lyrics.js', 'js/notifications.js', 'js/party.js', 'js/output.js', 'js/views/home.js', 'js/views/search.js',
     'js/views/library.js', 'js/views/album.js', 'js/views/artist.js', 'js/views/credit.js','js/views/playlist.js', 'js/views/household.js',
     'js/views/notifications.js', 'js/views/account.js', 'js/views/requests.js', 'js/app.js'
   ];

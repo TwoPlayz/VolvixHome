@@ -20,6 +20,8 @@ and on phones.
 - **Credits:** ⋯ → Credits on any song shows what's tagged in the file plus producers, engineers, mixers,
   composers and writers from MusicBrainz; albums have Credits & info.
 - **Lyrics:** ⋯ → Lyrics beside the player. Timed lyrics follow the song (tap a line to jump there); plain lyrics just scroll. They're found in a .lrc file next to the song (same name), then the file's own tags, then [LRCLIB](https://lrclib.net), a free lyrics database (cached on the server). Set VH_LYRICS_ONLINE=0 to never ask LRCLIB.
+- **Playback settings:** Settings → Playback has speed, a sleep timer and resume-where-you-left-off. When the queue finishes the player clears and hides.
+- **Output device:** the speaker button in the player and Now Playing picks where sound comes out (Chrome / Edge / Android; iPhone uses its own AirPlay menu). In a party, guests swap between the host's speaker and their own device.
 - **Shuffle** is a switch for the whole player (it never starts or interrupts playback); you can **follow**
   artists, and drag playlist or queue rows from anywhere to reorder them.
 - **Listening parties:** press the party button in the player to start one and invite people from your

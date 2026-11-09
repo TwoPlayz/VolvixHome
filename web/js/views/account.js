@@ -242,6 +242,12 @@ Spin.views = Spin.views || {};
   }
 
   /* ---------- Settings ---------- */
+  let sleepChoice = '0';
+  function sleepValue() { return S.player.sleepInfo() ? sleepChoice : '0'; }
+  function sleepText() {
+    const s = S.player.sleepInfo();
+    return s === 'song' ? 'Pauses when this song ends.' : s ? 'Pauses in about ' + s + ' minute' + (s === 1 ? '' : 's') + '.' : 'Pause the music after a while, so you can fall asleep to it.';
+  }
   let status = null;
   function settingsTab() {
     const st = S.store.state;
@@ -254,6 +260,12 @@ Spin.views = Spin.views || {};
         row('Share what I\'m listening to', 'Others in your household see your current song on the Household page.', toggle('shareActivity', st.settings.shareActivity !== false), { icon: 'users' }) +
         row('Private session', 'Stops sharing, and keeps what you play out of Recently played, until you turn it off.', toggle('privateSession', !!st.settings.privateSession), { icon: 'eyeOff' }),
         { id: 'privacy' }) +
+      group('Playback',
+        row('Speed', 'Songs play faster or slower, at the same pitch. Listening parties always play at normal speed.',
+          seg('playbackRate', String(st.settings.playbackRate || 1), [['0.75', '0.75×'], ['1', '1×'], ['1.25', '1.25×'], ['1.5', '1.5×'], ['2', '2×']]), { icon: 'play' }) +
+        row('Sleep timer', sleepText(), seg('sleep', sleepValue(), [['0', 'Off'], ['15', '15 min'], ['30', '30 min'], ['60', '1 hour'], ['song', 'End of song']]), { icon: 'moon' }) +
+        row('Resume where I left off', 'Reopening Volvix shows the last song and spot, paused.', toggle('resumeLast', st.settings.resumeLast !== false), { icon: 'history' }),
+        { id: 'playback' }) +
       group('Library',
         (S.data.me.admin ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
           '<button class="btn btn-secondary btn-sm" data-act="pick-folder">Change</button>', { icon: 'library' }) : '') +
@@ -290,12 +302,23 @@ Spin.views = Spin.views || {};
         if (!key) return;
         S.store.update(function (s) { s.settings[key] = e.target.checked; });
         if (S.household) S.household.syncPresence();
+        if (key === 'resumeLast') { S.toast(e.target.checked ? 'Will resume where you left off' : 'Will start fresh each time'); return; }
         S.toast(key === 'privateSession' ? (e.target.checked ? 'Private session on' : 'Private session off') : (e.target.checked ? 'Sharing what you play' : 'Not sharing what you play'));
       };
 
       root.onclick = function (e) {
         const segBtn = e.target.closest('[data-seg]');
         if (segBtn && segBtn.dataset.seg === 'theme') { S.setTheme(segBtn.dataset.value); S.app.refresh(); return; }
+        if (segBtn && segBtn.dataset.seg === 'playbackRate') {
+          S.store.update(function (s) { s.settings.playbackRate = Number(segBtn.dataset.value); });
+          S.player.applySettings(); S.toast('Speed ' + segBtn.dataset.value + '×', 'play'); S.app.refresh(); return;
+        }
+        if (segBtn && segBtn.dataset.seg === 'sleep') {
+          const v = segBtn.dataset.value;
+          if (v !== '0' && !S.player.current()) { S.toast('Start a song first', 'moon'); return; }
+          sleepChoice = v; S.player.sleep(v === 'song' ? 'song' : Number(v));
+          S.toast(v === '0' ? 'Sleep timer off' : 'Sleep timer set', 'moon'); S.app.refresh(); return;
+        }
         const act = e.target.closest('[data-act]');
         if (act) {
           if (act.dataset.act === 'logout') S.server.logout();

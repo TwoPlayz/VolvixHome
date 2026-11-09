@@ -217,6 +217,16 @@ window.Spin = window.Spin || {};
       .catch(function (e) { S.toast(e.message, 'x'); });
   }
 
+  // for the output-device menu (output.js)
+  P.isHost = isHost;
+  P.hostName = function () { return P.state ? first(P.state.host) : ''; };
+  P.setOutput = function (to) {
+    return post('/' + P.id + '/output', { output: to }).then(function (r) {
+      apply(r.party);
+      S.toast(to === 'host' ? 'This device is silent: music comes from ' + first(P.state.host) + '\'s speaker' : 'Playing on this device', 'volume');
+    }).catch(function (e) { S.toast(e.message, 'x'); });
+  };
+
   function menu(anchor) {
     if (!P.active) {
       S.popover(anchor, { items: [{ label: 'Start a listening party', icon: 'party', onClick: startDialog }] });

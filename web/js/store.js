@@ -20,6 +20,8 @@ window.Spin = window.Spin || {};
         gapless: true,
         normalize: false,
         privateSession: false,
+        playbackRate: 1,                 // Settings > Playback
+        resumeLast: true,                // reopen where you left off
         shareActivity: true,             // let the household see what you're listening to
         allowExplicit: true
       }
