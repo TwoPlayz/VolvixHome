@@ -24,6 +24,7 @@ mod maintenance;
 mod musicbrainz;
 mod party;
 mod social;
+mod watch;
 mod vault;
 
 use std::collections::HashMap;
@@ -88,6 +89,9 @@ struct AppState {
     parties: party::Parties,
     devices: devices::Devices,
     cast_key: String,
+    watch: watch::Watch,
+    /// a change was noticed while a scan was already running: scan again when it ends
+    rescan_pending: std::sync::atomic::AtomicBool,
 }
 type Shared = Arc<AppState>;
 
@@ -149,7 +153,7 @@ async fn status(State(st): State<Shared>) -> Response {
     let setup = st.accounts.lock().unwrap().needs_setup();
     Json(json!({
         "name": "Volvix Home", "version": VERSION, "setupNeeded": setup,
-        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len(),
+        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len(), "watching": st.watch.live(),
         "rescanMinutes": st.cfg.rescan_minutes
     }))
     .into_response()
@@ -1425,6 +1429,7 @@ async fn set_library_folder(State(st): State<Shared>, headers: HeaderMap, Json(b
         return error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't save the setting.");
     }
     *st.music_dir.write().unwrap() = path.clone();
+    st.watch.watch(&path); // follow the new folder
     start_scan(st.clone());
     Json(json!({ "path": path.display().to_string(), "isDefault": path == st.cfg.music_dir, "scanning": true })).into_response()
 }
@@ -1463,6 +1468,7 @@ fn start_scan(st: Shared) {
     {
         let mut lib = st.lib.write().unwrap();
         if lib.scanning {
+            st.rescan_pending.store(true, std::sync::atomic::Ordering::Relaxed); // look again when this one ends
             return;
         }
         lib.scanning = true;
@@ -1474,6 +1480,7 @@ fn start_scan(st: Shared) {
         *st.lib.write().unwrap() = fresh;
         println!("library: {a} albums, {t} tracks in {}", dir.display());
         notify_ready(&st);
+        if st.rescan_pending.swap(false, std::sync::atomic::Ordering::Relaxed) { start_scan(st.clone()); }
     });
 }
 
@@ -1496,6 +1503,8 @@ async fn main() {
     if !music_dir.exists() {
         eprintln!("warning: music folder {} doesn't exist yet (choose one in Settings, or set VH_MUSIC_DIR)", music_dir.display());
     }
+    let watch_tx = watch::Watch::new();
+    let mut watch_rx = watch_tx.1;
     let st: Shared = Arc::new(AppState {
         music_dir: RwLock::new(music_dir.clone()),
         accounts: Mutex::new(Accounts::load(&cfg.data_dir)),
@@ -1509,10 +1518,34 @@ async fn main() {
         parties: party::Parties::new(),
         devices: devices::Devices::new(),
         cast_key: load_cast_key(&cfg.data_dir),
+        watch: watch_tx.0,
+        rescan_pending: std::sync::atomic::AtomicBool::new(false),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });
     start_scan(st.clone());
+    // watch the music folder: changes show up in seconds (the timed scan below is the safety net)
+    {
+        let dir = st.music_dir.read().unwrap().clone();
+        if st.watch.watch(&dir) { println!("watching {} for changes", dir.display()); } else { println!("can't watch {} for changes: relying on the timed scan", dir.display()); }
+        let s = st.clone();
+        tokio::spawn(async move {
+            while watch_rx.recv().await.is_some() {
+                // let a burst of changes (a whole album being copied in) settle before looking
+                let began = std::time::Instant::now();
+                loop {
+                    match tokio::time::timeout(Duration::from_secs(3), watch_rx.recv()).await {
+                        Ok(Some(_)) if began.elapsed() < Duration::from_secs(60) => continue,
+                        _ => break,
+                    }
+                }
+                start_scan(s.clone());
+                // files still being written when we looked get one more look a little later
+                tokio::time::sleep(Duration::from_secs(20)).await;
+                start_scan(s.clone());
+            }
+        });
+    }
     if vault::enabled() { println!("data at rest: encrypted (VH_DATA_KEY is set)"); }
     // nightly housekeeping (see maintenance.rs): expired sign-ins, a dated backup, old cache
     {

@@ -48,15 +48,21 @@ Spin.views = Spin.views || {};
       albums.forEach(function (a) { artists[a.artist] = (artists[a.artist] || 0) + 1; });
       const topArtists = Object.keys(artists).sort(function (a, b) { return artists[b] - artists[a] || a.localeCompare(b); }).slice(0, 12);
 
+      const madeForYou = S.mixes.all();
+      const mostPlayed = S.mixes.topAlbums(10);
+      const picks = S.mixes.randomAlbums(10);
       root.innerHTML =
         '<header class="page-head"><h1 class="page-title">' + greeting() + '</h1></header>' +
         S.rewindBanner() +
         '<div class="quick-grid">' + quick.join('') + '</div>' +
+        (madeForYou.length ? S.shelf('Made for you', madeForYou.map(S.mixCard).join('')) : '') +
         (recent.length ? S.shelf('Recently played', recent.slice(0, 12).map(function (a) { return S.albumCard(a); }).join(''), { href: '#/library' }) : '') +
+        (mostPlayed.length >= 2 ? S.shelf('Your most played', mostPlayed.map(function (a) { return S.albumCard(a); }).join('')) : '') +
         S.shelf('Recently added', added.slice(0, 12).map(function (a) {
           return S.albumCard(a, { meta: '<span>' + S.artistLink(a.artist, { inert: true }) + '</span>' });
         }).join(''), { href: '#/library' }) +
         (S.pl.all().length ? S.shelf('Your playlists', S.pl.all().map(S.playlistCard).join(''), { href: '#/library/playlists' }) : '') +
+        (picks.length >= 3 ? S.shelf('Picked for today', picks.map(function (a) { return S.albumCard(a); }).join('')) : '') +
         S.shelf('Artists', topArtists.map(artistCard).join(''), { href: '#/library/artists' });
     }
   };

@@ -235,9 +235,7 @@ Spin.views = Spin.views || {};
         '<div class="set-actions"><button class="btn btn-primary" type="submit">' + (lidarr.configured ? 'Save' : 'Connect') + '</button>' +
           (lidarr.configured ? '<button class="btn btn-ghost" type="button" data-act="lidarr-off">Disconnect</button>' : '') + '</div>' +
       '</form>' +
-      (lidarr.configured ? row('New music right away', 'In Lidarr → Settings → Connect, add a <strong>Webhook</strong> with this URL and turn on <em>On Release Import</em>. Otherwise new albums appear at the next automatic check.',
-        '<button class="btn btn-secondary btn-sm" data-copy="' + S.esc(hook) + '">' + S.icon('copy', 14) + 'Copy URL</button>', { icon: 'download' }) +
-        '<p class="hook-url"><code>' + S.esc(hook) + '</code></p>' : ''),
+      (lidarr.configured ? '<p class="set-hint" style="padding:12px 16px 0">New downloads appear on their own: Volvix Home watches the music folder, so nothing needs to be set up in Lidarr.</p>' : ''),
       { id: 'lidarr', sub: 'Get music you don\'t have yet.' });
   }
 
@@ -374,8 +372,8 @@ Spin.views = Spin.views || {};
         (S.data.can('settings') ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
           '<button class="btn btn-secondary btn-sm" data-act="pick-folder">Change</button>', { icon: 'library' }) : '') +
         row('Music on this server', (status ? status.albums + ' albums · ' + status.tracks + ' songs' + (status.scanning ? ' · checking the folder…' : '') + '<br>' : '…') +
-          (status && status.rescanMinutes ? 'The server checks the folder by itself every ' + status.rescanMinutes + ' minutes' : 'Automatic checks are off') +
-          (lidarr && lidarr.configured ? ' and right after Lidarr imports something' : '') + '. New and removed files are both picked up, and you\'re told when to reload.',
+          (status && status.watching ? 'Watching the music folder: songs added or removed (by Lidarr or by you) show up within seconds' + (status.rescanMinutes ? ', with a full check every ' + status.rescanMinutes + ' minutes as a safety net' : '') : (status && status.rescanMinutes ? 'The server checks the folder by itself every ' + status.rescanMinutes + ' minutes (this folder can\'t report changes live)' : 'Automatic checks are off')) +
+          '. You\'re told when to reload.',
           S.data.can('rescan') ? '<button class="btn btn-secondary btn-sm" data-act="rescan"' + (status && status.scanning ? ' disabled' : '') + '>Check now</button>' : '', { icon: 'library' }),
         { id: 'library' }) +
       lidarrGroup() +

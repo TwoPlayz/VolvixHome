@@ -67,7 +67,7 @@ window.Spin = window.Spin || {};
       const pl = {
         id: newId(), name: data.name || 'New Playlist', description: data.description || '', public: !!data.public,
         owner: 'u_me', collaborative: false, collaborators: [],
-        tracks: (trackIds || []).map(function (id) { return { id: id, addedBy: 'u_me' }; })
+        tracks: (trackIds || []).map(function (id) { return { id: id, addedBy: 'u_me', at: Math.floor(Date.now() / 1000) }; })
       };
       // new playlists go under Liked Songs, which stays first
       commit(function (s) { s.playlists.splice(s.playlists.some(function (p) { return p.liked; }) ? 1 : 0, 0, pl); });

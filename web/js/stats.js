@@ -1,4 +1,4 @@
-﻿/* Volvix Home — your listening numbers: when you first played a song, how many times, and (for the yearly
+/* Volvix Home — your listening numbers: when you first played a song, how many times, and (for the yearly
    Rewind) what you played each year. A play counts after 30 seconds, or half the song if it's shorter.
    Private sessions record nothing. Kept in your own app data, so it follows you to every device. */
 window.Spin = window.Spin || {};
@@ -22,6 +22,10 @@ window.Spin = window.Spin || {};
     S.store.update(function (s) {
       const r = root(s), t = r.tracks[id] || (r.tracks[id] = { first: now(), n: 0 });
       t.n++; t.last = now();
+      // a short play history, so recent listening can count more than old listening (mixes use this)
+      const log = r.log || (r.log = []);
+      log.push([id, now()]);
+      if (log.length > 3000) log.splice(0, log.length - 3000);
       const y = yearOf(s, new Date().getFullYear());
       y.plays[id] = (y.plays[id] || 0) + 1;
     });
@@ -42,6 +46,8 @@ window.Spin = window.Spin || {};
     /** { first, last, n } in seconds, or null if you've never played it. */
     get: function (id) { const r = S.store.state.stats; return (r && r.tracks[id]) || null; },
     year: function (y) { const r = S.store.state.stats; return (r && r.years[y]) || null; },
+    /** [[trackId, seconds], …] oldest first. */
+    log: function () { const r = S.store.state.stats; return (r && r.log) || []; },
     years: function () { const r = S.store.state.stats; return r ? Object.keys(r.years).map(Number).sort() : []; }
   };
   window.addEventListener('pagehide', flush);

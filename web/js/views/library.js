@@ -5,7 +5,7 @@ Spin.views = Spin.views || {};
   'use strict';
 
   const ui = { tab: 'albums', sort: 'added', artists: 'following' };
-  const TABS = [['albums', 'Albums'], ['artists', 'Artists'], ['songs', 'Songs'], ['playlists', 'Playlists']];
+  const TABS = [['albums', 'Albums'], ['artists', 'Artists'], ['songs', 'Songs'], ['playlists', 'Playlists'], ['browse', 'Browse']];
   const SORTS = [['added', 'Recently added'], ['title', 'Title'], ['artist', 'Artist'], ['year', 'Release year']];
 
   function sorted() {
@@ -32,6 +32,7 @@ Spin.views = Spin.views || {};
           '<button class="btn btn-primary" data-new-pl>' + S.icon('plus', 16) + 'New playlist</button>');
     }
     if (!S.data.albums.length) return S.emptyState('music', 'No music yet', 'Music added to the server shows up here on its own.');
+    if (ui.tab === 'browse') return S.browseSections();
     if (ui.tab === 'albums') return '<div class="grid">' + sorted().map(function (a) {
       return S.albumCard(a, { meta: '<span>' + S.artistLink(a.artist, { inert: true }) + (a.year ? ' · ' + a.year : '') + '</span>' });
     }).join('') + '</div>';
