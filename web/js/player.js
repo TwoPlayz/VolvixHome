@@ -656,6 +656,32 @@ window.Spin = window.Spin || {};
     audio: audio,
     seekTo: userSeek,
     applySettings: applySettings,
+    /* ----- moving playback between your devices (see devices.js) ----- */
+    snapshot: function () {
+      const n = st.queue.length > 500;
+      return { queue: n ? st.queue.slice(Math.max(0, st.index - 50), st.index + 450) : st.queue, index: n ? Math.min(50, st.index) : st.index,
+        pos: st.pos, playing: st.playing, context: st.context, shuffle: st.shuffle, repeat: st.repeat };
+    },
+    /** Take over from another device: same queue, song and spot. */
+    adopt: function (s) {
+      if (remote || !s || !Array.isArray(s.queue) || !s.queue.length) return;
+      const queue = s.queue.filter(function (id) { return !!S.data.track(id); });
+      const id = s.queue[s.index];
+      const index = queue.indexOf(id);
+      if (index < 0) return;
+      st.queue = queue; st.index = index; st.context = s.context || null; st.original = null;
+      st.shuffle = !!s.shuffle; st.repeat = s.repeat || 'off';
+      st.playing = !!s.playing;
+      load(current(), Math.max(0, Number(s.pos) || 0));
+      if (st.playing) { startAudio(); startTimer(); } else stopTimer();
+      render();
+    },
+    /** Another of your devices took over: stop here (the queue stays, in case you come back). */
+    pauseLocal: function () {
+      if (remote || !st.playing) return false;
+      st.playing = false; audio.pause(); stopTimer(); render();
+      return true;
+    },
     sleep: sleep,
     sleepInfo: function () { return st.sleepSong ? 'song' : (st.sleepAt && st.sleepAt > Date.now() ? Math.ceil((st.sleepAt - Date.now()) / 60000) : 0); },
     /* ----- listening party (see party.js) ----- */

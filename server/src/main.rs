@@ -15,6 +15,7 @@
 //!   VH_LIDARR_API_KEY   Lidarr API key
 
 mod auth;
+mod devices;
 mod library;
 mod lidarr;
 mod lyrics;
@@ -84,6 +85,7 @@ struct AppState {
     fails: Mutex<HashMap<String, (u32, u64)>>,
     social: social::Social,
     parties: party::Parties,
+    devices: devices::Devices,
 }
 type Shared = Arc<AppState>;
 
@@ -1171,6 +1173,72 @@ async fn party_events(State(st): State<Shared>, headers: HeaderMap, Path(id): Pa
     res
 }
 
+/* ---------------- your devices ---------------- */
+
+#[derive(Deserialize)]
+struct DeviceQuery {
+    device: String,
+    #[serde(default)]
+    name: String,
+}
+
+/// Dropped when the connection closes, which is how a device goes offline.
+struct DeviceGuard {
+    st: Shared,
+    uid: String,
+    dev: String,
+}
+impl Drop for DeviceGuard {
+    fn drop(&mut self) {
+        self.st.devices.disconnect(&self.uid, &self.dev);
+    }
+}
+
+fn valid_device(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+async fn device_events(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<DeviceQuery>) -> Response {
+    use futures_util::StreamExt;
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    if !valid_device(&q.device) {
+        return error(StatusCode::BAD_REQUEST, "Bad device id.");
+    }
+    let (rx, first) = st.devices.connect(&user.id, &q.device, &q.name);
+    let guard = DeviceGuard { st: st.clone(), uid: user.id.clone(), dev: q.device.clone() };
+    let live = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|m| async move { m.ok() });
+    let stream = futures_util::stream::once(async move { first }).chain(live)
+        .map(move |data| { let _keep = &guard; Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default().data(data)) });
+    let mut res = axum::response::Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
+        .into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    res.headers_mut().insert("X-Accel-Buffering", HeaderValue::from_static("no"));
+    res
+}
+
+#[derive(Deserialize)]
+struct DeviceBody {
+    device: String,
+    #[serde(default)]
+    to: String,
+    #[serde(default)]
+    state: Value,
+}
+
+async fn device_active(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<DeviceBody>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    if st.devices.set_active(&user.id, &b.device) { StatusCode::NO_CONTENT.into_response() } else { error(StatusCode::NOT_FOUND, "This device isn't connected.") }
+}
+
+async fn device_transfer(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<DeviceBody>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    match st.devices.transfer(&user.id, &b.device, &b.to, b.state) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => error(StatusCode::NOT_FOUND, &e),
+    }
+}
+
 /* ---------------- music folder ---------------- */
 
 fn music_dir_file(cfg: &Config) -> PathBuf {
@@ -1312,6 +1380,7 @@ async fn main() {
         fails: Mutex::new(HashMap::new()),
         social: social::Social::load(&cfg.data_dir),
         parties: party::Parties::new(),
+        devices: devices::Devices::new(),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });
@@ -1397,6 +1466,9 @@ async fn main() {
         .route("/api/party/{id}/invite", post(party_invite))
         .route("/api/party/{id}/output", post(party_output))
         .route("/api/party/{id}/action", post(party_action))
+        .route("/api/devices/events", get(device_events))
+        .route("/api/devices/active", post(device_active))
+        .route("/api/devices/transfer", post(device_transfer))
         .route("/api/people", get(people))
         .route("/api/me/now", axum::routing::put(put_now))
         .route("/api/household", get(household))
