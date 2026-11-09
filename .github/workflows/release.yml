@@ -30,7 +30,7 @@ jobs:
         run: |
           Copy-Item apps/windows/target/release/volvix-home.exe volvix-home.exe
           (Get-FileHash volvix-home.exe -Algorithm SHA256).Hash.ToLower() | Set-Content -NoNewline volvix-home.exe.sha256
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             volvix-home.exe
@@ -68,7 +68,7 @@ jobs:
           mkdir Payload && cp -R VolvixHome.app Payload/
           zip -qry "$GITHUB_WORKSPACE/VolvixHome.ipa" Payload
           echo "size=$(stat -f%z "$GITHUB_WORKSPACE/VolvixHome.ipa")" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: VolvixHome.ipa
 
