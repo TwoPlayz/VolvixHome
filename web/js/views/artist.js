@@ -37,6 +37,7 @@ Spin.views = Spin.views || {};
             '</div>' +
           '</div>' +
         '</header>' +
+        '<div class="artist-bio" data-bio hidden></div>' +
         '<section class="section"><div class="section-title"><div><h2>Songs</h2></div></div>' +
           S.trackList(songs.slice(0, 10), { showCover: true, showAlbum: true, context: ctx }) + '</section>' +
         (albums.length ? S.shelf('Albums', albums.map(function (a) {
@@ -45,7 +46,23 @@ Spin.views = Spin.views || {};
         (appears.length ? S.shelf('Appears on', appears.map(function (a) { return S.albumCard(a); }).join('')) : '');
 
       if (S.markPlaying) S.markPlaying();
+      // a photo and a short bio (kept on the server; asked for once a month)
+      if (window.VH && window.VH.artistInfo) {
+        S.server.json('GET', '/api/artist/info?name=' + encodeURIComponent(name)).then(function (r) {
+          if (!r || !r.bio || !document.body.contains(root)) return;
+          const box = S.$('[data-bio]', root); if (!box) return;
+          box.hidden = false;
+          box.innerHTML = '<p class="bio-text">' + S.esc(r.bio) + '</p>' + (r.bio.length > 260 ? '<button class="bio-more" data-bio-more>Read more</button>' : '') +
+            '<span class="bio-source">From ' + S.esc(r.source || 'Wikipedia') + '</span>';
+          if (r.bio.length > 260) box.classList.add('clamped');
+          if (r.image) {
+            const hero = S.$('.artist-hero', root);
+            if (hero) { hero.className = 'artist-hero artist-hero-img'; hero.removeAttribute('style'); hero.innerHTML = '<img src="' + S.esc(r.image) + '" alt="">'; }
+          }
+        }).catch(function () { /* no bio: the page is fine without it */ });
+      }
       root.onclick = function (e) {
+        if (e.target.closest('[data-bio-more]')) { const b = S.$('[data-bio]', root); const open = b.classList.toggle('clamped'); e.target.closest('[data-bio-more]').textContent = open ? 'Read more' : 'Show less'; return; }
         if (e.target.closest('[data-artist-play]')) {
           const c = S.player.state.context;
           if (S.player.current() && c && c.type === 'artist' && c.name === name) S.player.toggle();

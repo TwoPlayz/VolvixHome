@@ -14,6 +14,7 @@
 //!   VH_LIDARR_URL       Lidarr address, e.g. http://lidarr:8686 (or set it in the app: Settings → Lidarr)
 //!   VH_LIDARR_API_KEY   Lidarr API key
 
+mod artistinfo;
 mod auth;
 mod cast;
 mod devices;
@@ -91,6 +92,7 @@ struct AppState {
     devices: devices::Devices,
     cast_key: String,
     transcoder: transcode::Transcoder,
+    artists: artistinfo::Client,
     watch: watch::Watch,
     /// a change was noticed while a scan was already running: scan again when it ends
     rescan_pending: std::sync::atomic::AtomicBool,
@@ -291,7 +293,7 @@ async fn me(State(st): State<Shared>, headers: HeaderMap) -> Response {
     match signed_in(&st, &headers) {
         Ok((_, user)) => {
             let l = st.lidarr.lock().unwrap();
-            Json(json!({ "user": PublicUser::from(&user), "lidarr": { "configured": l.configured(), "canRequest": l.configured() && can_request(&user, &l) }, "transcoding": st.transcoder.available() })).into_response()
+            Json(json!({ "user": PublicUser::from(&user), "lidarr": { "configured": l.configured(), "canRequest": l.configured() && can_request(&user, &l) }, "transcoding": st.transcoder.available(), "artistInfo": st.artists.enabled })).into_response()
         }
         Err(r) => r,
     }
@@ -588,6 +590,55 @@ async fn cast_preflight() -> Response {
     res.headers_mut().insert("access-control-allow-headers", HeaderValue::from_static("range, content-type"));
     res.headers_mut().insert("access-control-allow-methods", HeaderValue::from_static("GET, HEAD, OPTIONS"));
     with_cors(res)
+}
+
+/// An artist's bio and photo (from Wikipedia, via MusicBrainz), kept on the server for a month.
+async fn artist_info(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    let name = q.get("name").map(|n| n.trim().to_string()).unwrap_or_default();
+    if name.is_empty() || name.chars().count() > 120 {
+        return error(StatusCode::BAD_REQUEST, "Which artist?");
+    }
+    let slug: String = name.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+    let slug = format!("{}-{}", slug.chars().take(40).collect::<String>(), &vault::sha256_hex(&name)[..8]);
+    let dir = st.cfg.data_dir.join("cache").join("artists");
+    let file = dir.join(format!("{slug}.json"));
+    let answer = |v: &Value| Json(json!({ "bio": v["bio"], "image": if v["hasImage"].as_bool() == Some(true) { json!(format!("/api/artist/image/{slug}")) } else { Value::Null }, "source": "Wikipedia" })).into_response();
+    if let Some(v) = vault::read(&file).and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        let age = if v["bio"].is_null() { 3 * 86400 } else { 30 * 86400 };
+        if v["at"].as_u64().map(|at| at + age > auth::now()).unwrap_or(false) { return answer(&v); }
+    }
+    match st.artists.find(&st.mb, &name).await {
+        Ok(found) => {
+            let _ = std::fs::create_dir_all(&dir);
+            let mut v = json!({ "at": auth::now(), "bio": Value::Null, "hasImage": false });
+            if let Some(info) = found {
+                v["bio"] = json!(info.bio);
+                if let Some(img) = info.image { if std::fs::write(dir.join(format!("{slug}.img")), img).is_ok() { v["hasImage"] = json!(true); } }
+            }
+            if st.artists.enabled { vault::write(&file, &v.to_string()); }
+            answer(&v)
+        }
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e),
+    }
+}
+
+async fn artist_image(State(st): State<Shared>, headers: HeaderMap, Path(slug): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    if !slug.chars().all(|c| c.is_alphanumeric() || c == '-') {
+        return error(StatusCode::BAD_REQUEST, "Bad name.");
+    }
+    match std::fs::read(st.cfg.data_dir.join("cache").join("artists").join(format!("{slug}.img"))) {
+        Ok(b) => {
+            let kind = if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
+            ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=2592000")], b).into_response()
+        }
+        Err(_) => error(StatusCode::NOT_FOUND, "No picture."),
+    }
 }
 
 /// A short-lived link token so a cast device can fetch songs (see cast.rs).
@@ -1530,6 +1581,7 @@ async fn main() {
         devices: devices::Devices::new(),
         cast_key: load_cast_key(&cfg.data_dir),
         transcoder: transcode::Transcoder::new(&cfg.data_dir),
+        artists: artistinfo::Client::new(),
         watch: watch_tx.0,
         rescan_pending: std::sync::atomic::AtomicBool::new(false),
         lib: RwLock::new(Library::default()),
@@ -1628,6 +1680,8 @@ async fn main() {
         .route("/api/stream/{id}", get(stream).options(cast_preflight))
         .route("/api/cover/{id}", get(cover).options(cast_preflight))
         .route("/api/cast/token", post(cast_token))
+        .route("/api/artist/info", get(artist_info))
+        .route("/api/artist/image/{slug}", get(artist_image))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))
         .route("/api/lidarr/search", get(lidarr_search))
         .route("/api/lidarr/request", post(lidarr_request))

@@ -110,6 +110,43 @@ impl Client {
     }
 }
 
+/// Where MusicBrainz says an artist has a Wikipedia page / Wikidata item.
+#[derive(Debug, Default, PartialEq)]
+pub struct ArtistLinks {
+    pub wikipedia: Option<String>, // English article title, e.g. "Harbor_Lights_(band)"
+    pub wikidata: Option<String>,  // e.g. "Q123"
+}
+
+pub fn parse_artist_links(v: &Value) -> ArtistLinks {
+    let mut out = ArtistLinks::default();
+    for r in v["relations"].as_array().cloned().unwrap_or_default() {
+        let url = r["url"]["resource"].as_str().unwrap_or("");
+        match r["type"].as_str() {
+            Some("wikipedia") => {
+                let (host, rest) = url.split_once("://").and_then(|(_, r)| r.split_once('/')).unwrap_or(("", ""));
+                if host.starts_with("en.") { if let Some(t) = rest.strip_prefix("wiki/") { out.wikipedia = Some(t.split('#').next().unwrap_or(t).to_string()); } }
+            }
+            Some("wikidata") => { out.wikidata = url.rsplit('/').next().filter(|q| q.starts_with('Q')).map(String::from); }
+            _ => {}
+        }
+    }
+    out
+}
+
+impl Client {
+    /// The Wikipedia / Wikidata pages MusicBrainz lists for an artist (matched by exact name).
+    pub async fn artist_links(&self, name: &str) -> Result<Option<ArtistLinks>, String> {
+        let found = self.get(&format!("artist?query=artist:%22{}%22&fmt=json&limit=5", encode(name))).await?;
+        let want = norm(name);
+        let id = found["artists"].as_array().cloned().unwrap_or_default().into_iter()
+            .find(|a| norm(a["name"].as_str().unwrap_or("")) == want)
+            .and_then(|a| a["id"].as_str().map(String::from));
+        let Some(id) = id else { return Ok(None) };
+        let rec = self.get(&format!("artist/{id}?inc=url-rels&fmt=json")).await?;
+        Ok(Some(parse_artist_links(&rec)))
+    }
+}
+
 fn norm(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
 }
@@ -318,6 +355,19 @@ mod tests {
         assert_eq!(c[4].1, "Kit Moss", "same person in another case isn't repeated");
         assert_eq!(c[6].1, "Jane Doe, Odessa Rowe");
         assert!(parse_credits(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn artist_links_are_read_from_relations() {
+        let v = json!({ "relations": [
+            { "type": "official homepage", "url": { "resource": "https://example.com" } },
+            { "type": "wikipedia", "url": { "resource": "https://en.wikipedia.org/wiki/Harbor_Lights_(band)#History" } },
+            { "type": "wikidata", "url": { "resource": "https://www.wikidata.org/wiki/Q4242" } }
+        ] });
+        let l = parse_artist_links(&v);
+        assert_eq!(l.wikipedia.as_deref(), Some("Harbor_Lights_(band)"));
+        assert_eq!(l.wikidata.as_deref(), Some("Q4242"));
+        assert_eq!(parse_artist_links(&json!({ "relations": [{ "type": "wikipedia", "url": { "resource": "https://de.wikipedia.org/wiki/X" } }] })), ArtistLinks::default());
     }
 
     #[test]
