@@ -1,4 +1,4 @@
-﻿# Scheduled security checks (the "cron jobs" that run on GitHub; the server's own nightly jobs are in maintenance.rs).
+# Scheduled security checks (the "cron jobs" that run on GitHub; the server's own nightly jobs are in maintenance.rs).
 #  - weekly: audit the Rust dependencies of the server and the Windows app for known vulnerabilities
 #  - weekly: rebuild and publish the Docker image, so security fixes in the base system reach your server
 #    (pull the new image on your NAS, or let Watchtower do it)
@@ -41,7 +41,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           pull: true          # fetch fresh base images
           no-cache: true

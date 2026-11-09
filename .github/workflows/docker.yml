@@ -34,7 +34,9 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # amd64 only: arm64 is built by emulation here and takes 10x longer. For a Raspberry Pi / ARM NAS, change this to
+          # linux/amd64,linux/arm64 (and expect a long first build).
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
