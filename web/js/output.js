@@ -1,4 +1,4 @@
-﻿/* Volvix Home — the Output menu: where the music plays.
+/* Volvix Home — the Output menu: where the music plays.
  *  - On its own: this device, or any other device where you have Volvix Home open (phone, PC…). Only one plays
  *    at a time; picking another moves the song, queue and spot there.
  *  - In a party: a guest swaps between the host's speaker and their own device. */
@@ -45,7 +45,14 @@ window.Spin = window.Spin || {};
         D.transferTo(d.id);
       } });
     });
-    if (items.length === 1) items.push({ label: 'Open Volvix Home on another device and it shows up here', icon: 'info', onClick: function () {} });
+    if (items.length === 1 && !S.cast.supported() && !S.cast.airplay()) items.push({ label: 'Open Volvix Home on another device and it shows up here', icon: 'info', onClick: function () {} });
+    // TVs and speakers
+    if (S.cast.active) {
+      items.push({ sep: true }, { label: 'Casting to ' + S.cast.name, icon: 'check', onClick: function () {} }, { label: 'Stop casting', icon: 'x', onClick: S.cast.stop });
+    } else {
+      if (S.cast.supported() || !S.cast.airplay()) { items.push({ sep: true }); items.push({ label: 'Cast to a TV or speaker…', icon: 'devices', onClick: S.cast.request }); }
+      if (S.cast.airplay()) items.push({ label: 'AirPlay…', icon: 'volume', onClick: S.cast.airplayPicker });
+    }
     S.popover(anchor, { header: '<div class="q-pop"><div class="menu-name">Play on</div><div class="menu-sub">One device plays at a time</div></div>', items: items });
   }
 

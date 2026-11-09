@@ -15,6 +15,7 @@
 //!   VH_LIDARR_API_KEY   Lidarr API key
 
 mod auth;
+mod cast;
 mod devices;
 mod library;
 mod lidarr;
@@ -86,6 +87,7 @@ struct AppState {
     social: social::Social,
     parties: party::Parties,
     devices: devices::Devices,
+    cast_key: String,
 }
 type Shared = Arc<AppState>;
 
@@ -471,29 +473,74 @@ async fn rescan(State(st): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 /// Audio file with Range support, so the player can seek and browsers can buffer.
+/// The ?cast= token on a request, if it's valid: the person it was issued to.
+fn cast_user(st: &AppState, uri: &axum::http::Uri) -> Option<String> {
+    let q = uri.query()?;
+    let token = q.split('&').find_map(|p| p.strip_prefix("cast="))?;
+    let uid = cast::verify(&st.cast_key, token, auth::now())?;
+    st.accounts.lock().unwrap().by_id(&uid).map(|u| u.id.clone())
+}
+
+fn load_cast_key(dir: &std::path::Path) -> String {
+    let path = dir.join("cast.key");
+    if let Some(k) = vault::read(&path).map(|k| k.trim().to_string()).filter(|k| k.len() >= 32) { return k; }
+    let k = auth::random_hex(32);
+    vault::write(&path, &k);
+    k
+}
+
+/// Players on a TV fetch songs from another origin, so answer their CORS questions.
+fn with_cors(mut res: Response) -> Response {
+    let h = res.headers_mut();
+    h.insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    h.insert("access-control-expose-headers", HeaderValue::from_static("content-length, content-range, accept-ranges"));
+    res
+}
+
+async fn cast_preflight() -> Response {
+    let mut res = StatusCode::NO_CONTENT.into_response();
+    res.headers_mut().insert("access-control-allow-headers", HeaderValue::from_static("range, content-type"));
+    res.headers_mut().insert("access-control-allow-methods", HeaderValue::from_static("GET, HEAD, OPTIONS"));
+    with_cors(res)
+}
+
+/// A short-lived link token so a cast device can fetch songs (see cast.rs).
+async fn cast_token(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let exp = auth::now() + cast::LIFETIME;
+    Json(json!({ "token": cast::sign(&st.cast_key, &user.id, exp), "expires": exp })).into_response()
+}
+
 async fn stream(State(st): State<Shared>, Path(id): Path<String>, req: Request) -> Response {
-    if let Err(r) = signed_in(&st, req.headers()) {
-        return r;
+    let by_cast = cast_user(&st, req.uri()).is_some();
+    if !by_cast {
+        if let Err(r) = signed_in(&st, req.headers()) {
+            return r;
+        }
     }
     let path = match st.lib.read().unwrap().track_path(&id).cloned() {
         Some(p) => p,
         None => return error(StatusCode::NOT_FOUND, "No such track."),
     };
     match ServeFile::new(path).oneshot(req).await {
-        Ok(res) => res.map(Body::new).into_response(),
+        Ok(res) => { let r = res.map(Body::new).into_response(); if by_cast { with_cors(r) } else { r } }
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't read the file."),
     }
 }
 
-async fn cover(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
-    if let Err(r) = signed_in(&st, &headers) {
-        return r;
+async fn cover(State(st): State<Shared>, headers: HeaderMap, uri: axum::http::Uri, Path(id): Path<String>) -> Response {
+    let by_cast = cast_user(&st, &uri).is_some();
+    if !by_cast {
+        if let Err(r) = signed_in(&st, &headers) {
+            return r;
+        }
     }
     let bytes = st.lib.read().unwrap().cover(&id);
     match bytes {
         Some(b) => {
             let kind = if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
-            ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=86400")], b).into_response()
+            let r = ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=86400")], b).into_response();
+            if by_cast { with_cors(r) } else { r }
         }
         None => error(StatusCode::NOT_FOUND, "No cover."),
     }
@@ -1381,6 +1428,7 @@ async fn main() {
         social: social::Social::load(&cfg.data_dir),
         parties: party::Parties::new(),
         devices: devices::Devices::new(),
+        cast_key: load_cast_key(&cfg.data_dir),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });
@@ -1449,8 +1497,9 @@ async fn main() {
         .route("/api/library/rescan", post(rescan))
         .route("/api/library/folder", get(library_folder).put(set_library_folder))
         .route("/api/library/browse", get(browse_folders))
-        .route("/api/stream/{id}", get(stream))
-        .route("/api/cover/{id}", get(cover))
+        .route("/api/stream/{id}", get(stream).options(cast_preflight))
+        .route("/api/cover/{id}", get(cover).options(cast_preflight))
+        .route("/api/cast/token", post(cast_token))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))
         .route("/api/lidarr/search", get(lidarr_search))
         .route("/api/lidarr/request", post(lidarr_request))

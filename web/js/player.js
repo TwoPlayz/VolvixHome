@@ -254,6 +254,7 @@ window.Spin = window.Spin || {};
   function userSeek(sec) {
     if (intercept('seek', [sec])) return;
     setPos(sec); renderProgress();
+    S.player.seekHooks.forEach(function (fn) { fn(sec); });
   }
 
   function play(ids, startIndex, context) {
@@ -473,7 +474,7 @@ window.Spin = window.Spin || {};
     if (q && album) qualityButton(q, S.lib.streamQuality ? S.lib.streamQuality(album, t.id) : S.lib.quality(album));
 
     audio.volume = st.volume;
-    audio.muted = st.muted;
+    audio.muted = st.muted || !!S.player.silent; // silent: a cast device is making the sound
     applySettings();
     mediaSession(t, album);
     const vol = S.$('[data-p="volume-fill"]');
@@ -717,6 +718,8 @@ window.Spin = window.Spin || {};
     removeFromQueue: removeAt,
     reshuffle: reshuffle,
     qualityButton: qualityButton,
+    silent: false,      // the sound comes from a cast device: this one keeps time but stays quiet
+    seekHooks: [],      // called with the new position when the person seeks
     hooks: [],          // called after every full render (used by v7 extras)
     progressHooks: []   // called on every progress tick
   };
