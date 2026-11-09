@@ -1569,7 +1569,7 @@ async fn set_library_folder(State(st): State<Shared>, headers: HeaderMap, Json(b
         return error(StatusCode::BAD_REQUEST, "That folder doesn't exist on the server.");
     }
     if std::fs::read_dir(&path).is_err() {
-        return error(StatusCode::BAD_REQUEST, "The server isn't allowed to read that folder.");
+        return error(StatusCode::BAD_REQUEST, "The server isn't allowed to read that folder. Give the user in your stack's `user:` line read access to it (on TrueNAS: chown -R 1000:1000 on the folder, or edit the dataset permissions).");
     }
     let saved = if chosen.is_empty() { json!({}) } else { json!({ "musicDir": path.display().to_string() }) };
     let file = music_dir_file(&st.cfg);
@@ -1598,6 +1598,8 @@ async fn browse_folders(State(st): State<Shared>, headers: HeaderMap, Query(q): 
             _ => { dir = PathBuf::from("/"); break; }
         }
     }
+    // can this server read the folder at all? (the container's user may not be allowed to)
+    let denied = matches!(std::fs::read_dir(&dir), Err(ref e) if e.kind() == std::io::ErrorKind::PermissionDenied);
     let mut dirs: Vec<(String, String)> = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|e| e.ok()).filter_map(|e| {
         let name = e.file_name().to_string_lossy().to_string();
         (e.path().is_dir() && !name.starts_with('.')).then(|| (name, e.path().display().to_string()))
@@ -1610,6 +1612,7 @@ async fn browse_folders(State(st): State<Shared>, headers: HeaderMap, Query(q): 
         "dirs": dirs.iter().map(|(n, p)| json!({ "name": n, "path": p })).collect::<Vec<_>>(),
         "songsHere": count_audio_here(&dir),
         "missing": missing,
+        "denied": denied,
         // in Docker only the folders you mounted into the container exist
         "docker": std::path::Path::new("/.dockerenv").exists()
     })).into_response()

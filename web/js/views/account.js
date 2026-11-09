@@ -280,6 +280,7 @@ Spin.views = Spin.views || {};
         current = r.path;
         const inp = m.el.querySelector('[data-fb-type] input'); if (inp) inp.value = r.path;
         host().innerHTML =
+          (r.denied ? '<p class="auth-error">Volvix isn\'t allowed to read this folder. It runs as the user in your stack\'s <code>user:</code> line, and that user needs read access (and write access to its own data folder). On TrueNAS: <code>chown -R 1000:1000 &lt;folder&gt;</code> or add that user to the dataset\'s permissions (Datasets → Permissions), then try again.</p>' : '') +
           (r.missing ? '<p class="auth-error">That folder doesn\'t exist on the server, so this is the closest one that does.</p>' : '') +
           (r.docker ? '<p class="set-hint">Volvix is running in Docker, so it only sees folders you mounted into the container. To see more, add a volume in your stack (for example <code>/mnt/pool/data/media:/media:ro</code>) and pick it here (<code>/media</code>).</p>' : '') +
           '<div class="fb-path">' + S.icon('library', 15) + '<span>' + S.esc(r.path) + '</span></div>' +
