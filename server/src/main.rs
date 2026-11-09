@@ -1291,6 +1291,12 @@ async fn main() {
             std::process::exit(1);
         }
     }
+    for f in ["users.json", "sessions.json", "lidarr.json"] {
+        if let Err(e) = vault::check(&cfg.data_dir.join(f)) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    }
     let music_dir = load_music_dir(&cfg);
     if !music_dir.exists() {
         eprintln!("warning: music folder {} doesn't exist yet (choose one in Settings, or set VH_MUSIC_DIR)", music_dir.display());

@@ -1,4 +1,4 @@
-﻿//! Private data at rest.
+//! Private data at rest.
 //!  - Passwords are never stored: only Argon2 hashes (see auth.rs).
 //!  - Sign-in tokens are stored as SHA-256 hashes, so a copy of sessions.json can't be used to sign in.
 //!  - Everything else the server keeps about people (accounts, playlists, history, Lidarr key, requests) can be
@@ -63,6 +63,16 @@ pub fn decrypt(text: &str) -> Option<String> {
     let cipher = Aes256Gcm::new_from_slice(k).ok()?;
     let pt = cipher.decrypt(Nonce::from_slice(&blob[..12]), &blob[12..]).ok()?;
     String::from_utf8(pt).ok()
+}
+
+/// Refuse to carry on when a file is encrypted and the key is missing or wrong. Otherwise the server would think
+/// it's a fresh install (letting the next visitor become admin) and overwrite the data on its next save.
+pub fn check(path: &Path) -> Result<(), String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) if t.starts_with(PREFIX) && decrypt(&t).is_none() => Err(format!(
+            "{} is encrypted, but VH_DATA_KEY is missing or isn't the key it was written with. Set the same VH_DATA_KEY as before.", path.display())),
+        _ => Ok(()),
+    }
 }
 
 /// Read a data file (decrypting it when needed).
