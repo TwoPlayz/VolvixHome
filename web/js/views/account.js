@@ -59,7 +59,8 @@ Spin.views = Spin.views || {};
     ['rescan', 'Check for new music', 'Look in the music folder for added or removed songs right now.'],
     ['parties', 'Start listening parties', 'Host a party and invite the household.'],
     ['members', 'Manage members', 'Add people, change what they may do, set passwords and remove them.'],
-    ['settings', 'Server settings', 'Change the music folder and the Lidarr connection.']
+    ['settings', 'Server settings', 'Change the music folder and the Lidarr connection.'],
+    ['share', 'Create share links', 'Make a link to an album or playlist that anyone with the link can play for a few days.']
   ];
   function roleOf(u) {
     const p = u.perms || [];
@@ -301,6 +302,15 @@ Spin.views = Spin.views || {};
       { id: 'native' });
   }
 
+  /* ---------- share links ---------- */
+  let myShares = null;
+  function shareGroup() {
+    if (!S.data.can('share') && !S.data.can('members')) return '';
+    if (!myShares) { S.shares.load().then(function (l) { myShares = l; S.app.refresh(); }).catch(function () { myShares = []; }); return group('Share links', '<p class="set-hint">Loading…</p>', { id: 'shares' }); }
+    return group('Share links', myShares.length ? myShares.map(S.shares.row).join('') : '<p class="set-hint" style="padding:12px 16px">No links are open. Share an album or playlist from its ⋯ menu.</p>',
+      { id: 'shares', sub: 'Open links, newest first. Cancelling one stops it working straight away.' });
+  }
+
   /* ---------- equalizer ---------- */
   function eqGroup(st) {
     const eq = st.settings.eq || { on: false, preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
@@ -366,6 +376,7 @@ Spin.views = Spin.views || {};
         row('Resume where I left off', 'Reopening Volvix shows the last song and spot, paused.', toggle('resumeLast', st.settings.resumeLast !== false), { icon: 'history' }),
         { id: 'playback' }) +
       nativeGroup() +
+      shareGroup() +
       eqGroup(st) +
       group('Downloads',
         row('Only play downloads', 'Use only the songs saved on this device. Everything else is greyed out and skipped. This also happens by itself when you lose your connection.',
@@ -505,6 +516,10 @@ Spin.views = Spin.views || {};
           }
           return;
         }
+        const sc = e.target.closest('[data-share-copy]');
+        if (sc) { (navigator.clipboard ? navigator.clipboard.writeText(sc.dataset.shareCopy) : Promise.reject()).then(function () { S.toast('Link copied', 'check'); }).catch(function () { S.toast(sc.dataset.shareCopy, 'copy'); }); return; }
+        const sx = e.target.closest('[data-share-cancel]');
+        if (sx) { S.server.json('DELETE', '/api/shares/' + sx.dataset.shareCancel).then(function () { myShares = null; S.toast('Link cancelled', 'check'); S.app.refresh(); }).catch(function (x) { S.toast(x.message, 'x'); }); return; }
         const copy = e.target.closest('[data-copy]');
         if (copy) {
           (navigator.clipboard ? navigator.clipboard.writeText(copy.dataset.copy) : Promise.reject()).then(function () { S.toast('Copied', 'check'); })

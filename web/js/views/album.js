@@ -69,6 +69,7 @@ Spin.views = Spin.views || {};
             { label: 'Add to queue', icon: 'queue', onClick: function () { S.player.addToQueue(album.trackIds); } },
             { label: 'Play next', icon: 'next', onClick: function () { S.player.addNext(album.trackIds); } },
             { label: 'Credits & info', icon: 'book', onClick: function () { S.albumInfoDialog(album.id); } },
+            S.data.can('share') ? { label: 'Share link…', icon: 'send', onClick: function () { S.shareDialog('album', album.title, album.trackIds); } } : null,
             { label: 'Go to artist', icon: 'user', onClick: function () { location.hash = S.artistUrl(album.artist); } }
           ] });
         }

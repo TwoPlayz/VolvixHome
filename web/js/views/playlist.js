@@ -155,6 +155,7 @@ Spin.views = Spin.views || {};
             items.push({ label: owner.name.split(' ')[0] + '\'s page', icon: 'user', onClick: function () { S.router.go('/household'); } });
           }
           if (ids.length) items.push({ label: 'Add to queue', icon: 'queue', onClick: function () { S.player.addToQueue(ids); } });
+          if (ids.length && S.data.can('share')) items.push({ label: 'Share link…', icon: 'send', onClick: function () { S.shareDialog('playlist', pl.name, ids); } });
           if (isOwner && !pl.liked) {
             items.push({ sep: true });
             items.push({ label: 'Delete playlist', icon: 'x', danger: true, onClick: function () { S.pl.deleteDialog(pl.id); } });

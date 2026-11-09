@@ -24,6 +24,7 @@ mod lyrics;
 mod maintenance;
 mod musicbrainz;
 mod party;
+mod shares;
 mod social;
 mod transcode;
 mod watch;
@@ -93,6 +94,7 @@ struct AppState {
     cast_key: String,
     transcoder: transcode::Transcoder,
     artists: artistinfo::Client,
+    shares: shares::Shares,
     watch: watch::Watch,
     /// a change was noticed while a scan was already running: scan again when it ends
     rescan_pending: std::sync::atomic::AtomicBool,
@@ -590,6 +592,91 @@ async fn cast_preflight() -> Response {
     res.headers_mut().insert("access-control-allow-headers", HeaderValue::from_static("range, content-type"));
     res.headers_mut().insert("access-control-allow-methods", HeaderValue::from_static("GET, HEAD, OPTIONS"));
     with_cors(res)
+}
+
+/* ---------------- share links ---------------- */
+
+#[derive(Deserialize)]
+struct NewShare {
+    kind: String,
+    #[serde(default)]
+    name: String,
+    tracks: Vec<String>,
+    #[serde(default)]
+    days: u64,
+}
+
+fn share_json(s: &shares::Share) -> Value {
+    json!({ "token": s.token, "kind": s.kind, "name": s.name, "by": s.by_name, "count": s.tracks.len(), "created": s.created, "expires": s.expires, "path": format!("/s/{}", s.token) })
+}
+
+async fn share_create(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<NewShare>) -> Response {
+    let user = match require(&st, &headers, "share") { Ok(u) => u, Err(r) => return r };
+    // only songs that really are on the server
+    let known: Vec<String> = {
+        let lib = st.lib.read().unwrap();
+        b.tracks.into_iter().filter(|id| lib.track_path(id).is_some()).collect()
+    };
+    match st.shares.create(&b.kind, b.name.trim(), &user.id, &user.name, known, if b.days == 0 { 7 } else { b.days }, auth::now()) {
+        Ok(s) => Json(json!({ "share": share_json(&s) })).into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+async fn share_list(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let all = user.has("members");
+    let list: Vec<Value> = st.shares.mine(&user.id, all, auth::now()).iter().map(share_json).collect();
+    Json(json!({ "shares": list })).into_response()
+}
+
+async fn share_cancel(State(st): State<Shared>, headers: HeaderMap, Path(token): Path<String>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    if st.shares.revoke(&token, &user.id, user.has("members")) { StatusCode::NO_CONTENT.into_response() } else { error(StatusCode::NOT_FOUND, "No such link.") }
+}
+
+/// The page a share link opens (no sign-in).
+async fn share_page(State(st): State<Shared>) -> Response {
+    match std::fs::read_to_string(st.cfg.web_dir.join("share.html")) {
+        Ok(h) => ([(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-cache"), (header::HeaderName::from_static("x-robots-tag"), "noindex, nofollow")], h).into_response(),
+        Err(_) => error(StatusCode::NOT_FOUND, "No page."),
+    }
+}
+
+/// What a share link holds: its name and songs.
+async fn share_info(State(st): State<Shared>, Path(token): Path<String>) -> Response {
+    let Some(s) = st.shares.get(&token, auth::now()) else { return error(StatusCode::NOT_FOUND, "This link has expired or was cancelled.") };
+    let lib = st.lib.read().unwrap();
+    let tracks: Vec<Value> = s.tracks.iter().filter_map(|id| {
+        let t = lib.catalog.tracks.iter().find(|t| &t.id == id)?;
+        let al = lib.catalog.albums.iter().find(|a| a.id == t.album_id);
+        Some(json!({ "id": t.id, "title": t.title, "artist": t.artist, "album": al.map(|a| a.title.clone()), "albumId": t.album_id, "duration": t.duration, "cover": al.map(|a| a.cover).unwrap_or(false) }))
+    }).collect();
+    Json(json!({ "name": s.name, "kind": s.kind, "by": s.by_name, "expires": s.expires, "serverNow": auth::now(), "tracks": tracks })).into_response()
+}
+
+async fn share_stream(State(st): State<Shared>, Path((token, id)): Path<(String, String)>, req: Request) -> Response {
+    let Some(s) = st.shares.get(&token, auth::now()) else { return error(StatusCode::NOT_FOUND, "This link has expired or was cancelled.") };
+    if !s.tracks.iter().any(|t| *t == id) { return error(StatusCode::NOT_FOUND, "Not in this link."); }
+    let Some(path) = st.lib.read().unwrap().track_path(&id).cloned() else { return error(StatusCode::NOT_FOUND, "No such track.") };
+    match ServeFile::new(path).oneshot(req).await {
+        Ok(res) => res.map(Body::new).into_response(),
+        Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't read the file."),
+    }
+}
+
+async fn share_cover(State(st): State<Shared>, Path((token, album)): Path<(String, String)>) -> Response {
+    let Some(s) = st.shares.get(&token, auth::now()) else { return error(StatusCode::NOT_FOUND, "Expired.") };
+    // only albums that one of its songs is on
+    let ok = { let lib = st.lib.read().unwrap(); s.tracks.iter().any(|id| lib.catalog.tracks.iter().any(|t| &t.id == id && t.album_id == album)) };
+    if !ok { return error(StatusCode::NOT_FOUND, "Not in this link."); }
+    match st.lib.read().unwrap().cover(&album) {
+        Some(b) => {
+            let kind = if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
+            ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=3600")], b).into_response()
+        }
+        None => error(StatusCode::NOT_FOUND, "No cover."),
+    }
 }
 
 /// An artist's bio and photo (from Wikipedia, via MusicBrainz), kept on the server for a month.
@@ -1582,6 +1669,7 @@ async fn main() {
         cast_key: load_cast_key(&cfg.data_dir),
         transcoder: transcode::Transcoder::new(&cfg.data_dir),
         artists: artistinfo::Client::new(),
+        shares: shares::Shares::load(&cfg.data_dir),
         watch: watch_tx.0,
         rescan_pending: std::sync::atomic::AtomicBool::new(false),
         lib: RwLock::new(Library::default()),
@@ -1619,6 +1707,7 @@ async fn main() {
             loop {
                 let keep = std::env::var("VH_BACKUP_KEEP").ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(7);
                 s.accounts.lock().unwrap().purge_expired();
+                s.shares.purge(auth::now());
                 if keep > 0 {
                     match maintenance::backup(&s.cfg.data_dir, auth::now(), keep) {
                         Ok(p) => println!("backup: {}", p.display()),
@@ -1680,6 +1769,12 @@ async fn main() {
         .route("/api/stream/{id}", get(stream).options(cast_preflight))
         .route("/api/cover/{id}", get(cover).options(cast_preflight))
         .route("/api/cast/token", post(cast_token))
+        .route("/api/shares", get(share_list).post(share_create))
+        .route("/api/shares/{token}", delete(share_cancel))
+        .route("/s/{token}", get(share_page))
+        .route("/api/share/{token}", get(share_info))
+        .route("/api/share/{token}/stream/{id}", get(share_stream))
+        .route("/api/share/{token}/cover/{album}", get(share_cover))
         .route("/api/artist/info", get(artist_info))
         .route("/api/artist/image/{slug}", get(artist_image))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))

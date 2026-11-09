@@ -12,7 +12,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 /// What a person can be allowed to do. An admin can do all of it.
-pub const PERMS: [&str; 5] = ["request", "rescan", "parties", "members", "settings"];
+pub const PERMS: [&str; 6] = ["request", "rescan", "parties", "members", "settings", "share"];
 /// What a new member gets until an admin changes it.
 pub const DEFAULT_PERMS: [&str; 2] = ["request", "parties"];
 

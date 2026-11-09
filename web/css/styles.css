@@ -2764,3 +2764,8 @@ body.reordering { cursor: grabbing; user-select: none; }
 .bio-more { margin-top: 6px; color: var(--text); font-weight: 600; font-size: 13px; }
 .bio-source { display: block; margin-top: 6px; font-size: 11px; color: var(--text-3); }
 .artist-hero-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.share-link { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.share-link .input { flex: 1; min-width: 200px; }
+.share-link .set-hint { flex-basis: 100%; margin: 0; }
+.share-dlg .seg-ctl { margin-top: 12px; }
