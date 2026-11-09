@@ -2605,3 +2605,19 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .ly-note p { margin: 0; line-height: 1.5; font-size: 14px; }
 .ly-credit { padding: 8px 20px 12px; font-size: 11px; color: var(--text-3); text-align: center; }
 @media (max-width: 760px) { .ly-line { font-size: 24px; } }
+
+/* phone Now Playing fits the screen: the cover takes whatever room is left, so nothing scrolls */
+.np { overflow: hidden; height: 100dvh; max-height: 100dvh; }
+.np > * { flex: none; }
+.np .np-art { flex: 1 1 0; min-height: 0; max-width: none; margin: 12px 0; container-type: size; display: grid; place-items: center; }
+.np .np-art .cover { width: min(100cqw, 100cqh, 420px); }
+.np-progress { margin-top: 10px; }
+.np-controls { margin: 8px 0 4px; }
+.np-tools { padding-top: 8px; margin-top: 0; }
+@media (max-height: 700px) {
+  .np { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .np-title { font-size: 20px; }
+  .np-artist { font-size: 14px; }
+  .np-controls .ctrl, .np-tools .ctrl { width: 42px; height: 42px; }
+  .np-play { width: 58px !important; height: 58px !important; }
+}
