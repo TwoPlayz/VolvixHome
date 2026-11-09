@@ -132,7 +132,7 @@ window.Spin.views = window.Spin.views || {};
       header: '<div class="menu-user">' + S.avatar(me, 40) + '<div><div class="menu-name">' + S.esc(me.name) + '</div><div class="menu-sub">' + (me.admin ? 'Admin' : 'Member') + '</div></div></div>',
       items: [
         { label: 'Account', icon: 'user', onClick: function () { S.router.go('/account/profile'); } },
-        me.admin ? { label: 'Members', icon: 'family', onClick: function () { S.router.go('/account/members'); } } : null,
+        S.data.can('members') ? { label: 'Members', icon: 'family', onClick: function () { S.router.go('/account/members'); } } : null,
         { label: 'Settings', icon: 'settings', onClick: function () { S.router.go('/account/settings'); } },
         { label: 'Rewind', icon: 'history', onClick: function () { S.router.go('/rewind'); } },
         { sep: true },

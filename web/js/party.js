@@ -142,6 +142,7 @@ window.Spin = window.Spin || {};
   const chosen = function (el) { return S.$$('input[type=checkbox]:checked:not(:disabled)', el).map(function (c) { return c.value; }); };
 
   function startDialog() {
+    if (!S.data.can('parties')) { S.toast('You don\'t have permission to start parties. Ask an admin.', 'lock'); return; }
     const st = S.player.state;
     const has = !!S.player.current();
     const m = S.modal({

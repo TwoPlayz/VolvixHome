@@ -119,10 +119,11 @@ fn signed_in(st: &AppState, headers: &HeaderMap) -> Result<(String, User), Respo
     Ok((token, user))
 }
 
-fn admin(st: &AppState, headers: &HeaderMap) -> Result<User, Response> {
+/// The signed-in user, if they're allowed to do perm (admins are allowed everything).
+fn require(st: &AppState, headers: &HeaderMap, perm: &str) -> Result<User, Response> {
     let (_, user) = signed_in(st, headers)?;
-    if !user.admin {
-        return Err(error(StatusCode::FORBIDDEN, "Only an admin can do that."));
+    if !user.has(perm) {
+        return Err(error(StatusCode::FORBIDDEN, "You don't have permission to do that. Ask an admin."));
     }
     Ok(user)
 }
@@ -164,6 +165,8 @@ struct NewAccount {
     password: String,
     #[serde(default)]
     admin: bool,
+    #[serde(default)]
+    perms: Option<Vec<String>>,
 }
 
 /// First run only: whoever opens a fresh server creates the admin account.
@@ -312,8 +315,22 @@ async fn change_password(State(st): State<Shared>, headers: HeaderMap, Json(body
 
 /* ---------------- household (admin) ---------------- */
 
+/// A person who can manage members still can't touch an admin, or anyone with more permissions than they have.
+fn can_manage(actor: &User, target: &User) -> bool {
+    actor.admin || (actor.has("members") && !target.admin && target.effective().iter().all(|p| actor.has(p)))
+}
+
+/// Keep only real permission names, and (unless admin) only ones the person granting them has.
+fn grantable(actor: &User, wanted: &[String]) -> Result<Vec<String>, String> {
+    let list: Vec<String> = auth::PERMS.iter().filter(|p| wanted.iter().any(|w| w == *p)).map(|p| p.to_string()).collect();
+    if let Some(p) = list.iter().find(|p| !actor.has(p)) {
+        return Err(format!("You can't give someone a permission you don't have ({p})."));
+    }
+    Ok(list)
+}
+
 async fn list_users(State(st): State<Shared>, headers: HeaderMap) -> Response {
-    if let Err(r) = admin(&st, &headers) {
+    if let Err(r) = require(&st, &headers, "members") {
         return r;
     }
     let accounts = st.accounts.lock().unwrap();
@@ -322,22 +339,38 @@ async fn list_users(State(st): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 async fn add_user(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<NewAccount>) -> Response {
-    if let Err(r) = admin(&st, &headers) {
-        return r;
+    let me = match require(&st, &headers, "members") {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    // new members get the basics; permissions can be changed afterwards under Manage
+    let perms = match body.perms.as_ref().map(|p| grantable(&me, p)).transpose() {
+        Ok(p) => p,
+        Err(e) => return error(StatusCode::FORBIDDEN, &e),
+    };
+    if body.admin && !me.admin {
+        return error(StatusCode::FORBIDDEN, "Only an admin can make another admin.");
     }
-    match st.accounts.lock().unwrap().create(&body.username, &body.name, &body.password, body.admin) {
-        Ok(user) => Json(json!({ "user": PublicUser::from(&user) })).into_response(),
+    let mut accounts = st.accounts.lock().unwrap();
+    match accounts.create(&body.username, &body.name, &body.password, body.admin) {
+        Ok(user) => {
+            let user = match perms { Some(p) => { let _ = accounts.set_perms(&user.id, &p); accounts.by_id(&user.id).cloned().unwrap_or(user) } None => user };
+            Json(json!({ "user": PublicUser::from(&user) })).into_response()
+        }
         Err(e) => error(StatusCode::BAD_REQUEST, &e),
     }
 }
 
 async fn remove_user(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
-    let me = match admin(&st, &headers) {
+    let me = match require(&st, &headers, "members") {
         Ok(u) => u,
         Err(r) => return r,
     };
     if me.id == id {
         return error(StatusCode::BAD_REQUEST, "You can't remove yourself.");
+    }
+    if !st.accounts.lock().unwrap().by_id(&id).map(|t| can_manage(&me, t)).unwrap_or(false) {
+        return error(StatusCode::FORBIDDEN, "You can't remove someone with more permissions than you.");
     }
     match st.accounts.lock().unwrap().remove(&id) {
         Ok(()) => {
@@ -355,24 +388,35 @@ struct UserEdit {
     hide_explicit: Option<bool>,
     #[serde(default)]
     admin: Option<bool>,
+    /// the full list of what they may do (replaces the old one)
+    #[serde(default)]
+    perms: Option<Vec<String>>,
 }
 
-/// An admin changes someone's settings: explicit songs on or off, admin or member.
+/// Someone with the Members permission changes a person: explicit songs on or off, and what they may do.
 async fn edit_user(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<UserEdit>) -> Response {
-    if let Err(r) = admin(&st, &headers) {
-        return r;
-    }
+    let me = match require(&st, &headers, "members") {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
     let mut accounts = st.accounts.lock().unwrap();
-    if accounts.by_id(&id).is_none() {
-        return error(StatusCode::NOT_FOUND, "No such person.");
+    let Some(target) = accounts.by_id(&id).cloned() else { return error(StatusCode::NOT_FOUND, "No such person.") };
+    if me.id == id && (body.perms.is_some() || body.admin.is_some()) {
+        return error(StatusCode::BAD_REQUEST, "You can't change your own permissions.");
+    }
+    if !can_manage(&me, &target) {
+        return error(StatusCode::FORBIDDEN, "You can't change someone with more permissions than you.");
+    }
+    // dmin (older) means everything / the basics
+    let wanted: Option<Vec<String>> = body.perms.clone().or_else(|| body.admin.map(|a| if a { auth::PERMS.iter().map(|p| p.to_string()).collect() } else { auth::DEFAULT_PERMS.iter().map(|p| p.to_string()).collect() }));
+    if let Some(w) = wanted {
+        match grantable(&me, &w) {
+            Ok(list) => { if let Err(e) = accounts.set_perms(&id, &list) { return error(StatusCode::BAD_REQUEST, &e); } }
+            Err(e) => return error(StatusCode::FORBIDDEN, &e),
+        }
     }
     if let Some(on) = body.hide_explicit {
         if let Err(e) = accounts.set_hide_explicit(&id, on) {
-            return error(StatusCode::BAD_REQUEST, &e);
-        }
-    }
-    if let Some(a) = body.admin {
-        if let Err(e) = accounts.set_admin(&id, a) {
             return error(StatusCode::BAD_REQUEST, &e);
         }
     }
@@ -387,12 +431,15 @@ struct NewPassword {
 
 /// An admin sets a new password for someone else. They're signed out everywhere and use the new one.
 async fn reset_password(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<NewPassword>) -> Response {
-    let me = match admin(&st, &headers) {
+    let me = match require(&st, &headers, "members") {
         Ok(u) => u,
         Err(r) => return r,
     };
     if me.id == id {
         return error(StatusCode::BAD_REQUEST, "Change your own password under Profile.");
+    }
+    if !st.accounts.lock().unwrap().by_id(&id).map(|t| can_manage(&me, t)).unwrap_or(false) {
+        return error(StatusCode::FORBIDDEN, "You can't change the password of someone with more permissions than you.");
     }
     match st.accounts.lock().unwrap().set_password(&id, &body.password) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -498,7 +545,7 @@ async fn get_library(State(st): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 async fn rescan(State(st): State<Shared>, headers: HeaderMap) -> Response {
-    if let Err(r) = admin(&st, &headers) {
+    if let Err(r) = require(&st, &headers, "rescan") {
         return r;
     }
     start_scan(st.clone());
@@ -582,7 +629,8 @@ async fn cover(State(st): State<Shared>, headers: HeaderMap, uri: axum::http::Ur
 /* ---------------- Lidarr ---------------- */
 
 fn can_request(user: &User, l: &lidarr::Settings) -> bool {
-    user.admin || l.everyone_can_request
+    let _ = l; // (the old household-wide switch is gone: it's the Request permission now)
+    user.has("request")
 }
 
 /// letters and digits only, lowercase: "The Velvet Room (Deluxe)" ~ "thevelvetroomdeluxe"
@@ -618,7 +666,7 @@ async fn lidarr_status(State(st): State<Shared>, headers: HeaderMap) -> Response
     };
     let s = st.lidarr.lock().unwrap().clone();
     let mut out = json!({ "configured": s.configured(), "canRequest": s.configured() && can_request(&user, &s) });
-    if user.admin {
+    if user.has("settings") {
         out["settings"] = json!({
             "url": s.url, "apiKeySet": !s.api_key.is_empty(), "rootFolder": s.root_folder,
             "qualityProfileId": s.quality_profile_id, "metadataProfileId": s.metadata_profile_id,
@@ -656,7 +704,7 @@ fn default_true() -> bool {
 
 /// Save Lidarr's address and key, but only after Lidarr answers with them.
 async fn lidarr_config(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<LidarrConfig>) -> Response {
-    if let Err(r) = admin(&st, &headers) {
+    if let Err(r) = require(&st, &headers, "settings") {
         return r;
     }
     let mut s = st.lidarr.lock().unwrap().clone();
@@ -1159,7 +1207,7 @@ struct PartyNew {
 }
 
 async fn party_create(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<PartyNew>) -> Response {
-    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let user = match require(&st, &headers, "parties") { Ok(u) => u, Err(r) => return r };
     let names = names_map(&st);
     let invite: Vec<String> = b.invite.into_iter().filter(|u| names.contains_key(u)).collect();
     let known = track_known(&st);
@@ -1340,7 +1388,7 @@ fn count_audio_here(dir: &std::path::Path) -> usize {
 }
 
 async fn library_folder(State(st): State<Shared>, headers: HeaderMap) -> Response {
-    if let Err(r) = admin(&st, &headers) {
+    if let Err(r) = require(&st, &headers, "settings") {
         return r;
     }
     let path = st.music_dir.read().unwrap().clone();
@@ -1359,7 +1407,7 @@ struct FolderBody {
 
 /// Choose the music folder (empty = back to the default), then look for music in it.
 async fn set_library_folder(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<FolderBody>) -> Response {
-    if let Err(r) = admin(&st, &headers) {
+    if let Err(r) = require(&st, &headers, "settings") {
         return r;
     }
     let chosen = body.path.trim();
@@ -1383,7 +1431,7 @@ async fn set_library_folder(State(st): State<Shared>, headers: HeaderMap, Json(b
 
 /// List the folders on the server so an admin can pick the music folder without typing a path.
 async fn browse_folders(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    if let Err(r) = admin(&st, &headers) {
+    if let Err(r) = require(&st, &headers, "settings") {
         return r;
     }
     let mut dir = q.get("path").map(|p| PathBuf::from(p.trim())).filter(|p| !p.as_os_str().is_empty())

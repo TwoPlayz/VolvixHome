@@ -32,7 +32,7 @@ Spin.views = Spin.views || {};
   }
 
   const TABS = function () {
-    return [['profile', 'Profile', 'user']].concat(S.data.me.admin ? [['members', 'Members', 'family']] : []).concat([['settings', 'Settings', 'settings']]);
+    return [['profile', 'Profile', 'user']].concat(S.data.can('members') ? [['members', 'Members', 'family']] : []).concat([['settings', 'Settings', 'settings']]);
   };
 
   /* ---------- Profile ---------- */
@@ -53,6 +53,26 @@ Spin.views = Spin.views || {};
       group('Sign out', row('Sign out on this device', 'Your playlists and settings stay on the server.', '<button class="btn btn-secondary" data-act="logout">Sign out</button>', { icon: 'logout' }));
   }
 
+  /* ---------- permissions ---------- */
+  const PERMS = [
+    ['request', 'Request music', 'Ask Lidarr to download music that isn\'t on the server yet.'],
+    ['rescan', 'Check for new music', 'Look in the music folder for added or removed songs right now.'],
+    ['parties', 'Start listening parties', 'Host a party and invite the household.'],
+    ['members', 'Manage members', 'Add people, change what they may do, set passwords and remove them.'],
+    ['settings', 'Server settings', 'Change the music folder and the Lidarr connection.']
+  ];
+  function roleOf(u) {
+    const p = u.perms || [];
+    if (u.admin || p.length === PERMS.length) return 'Admin';
+    const basic = p.length === 2 && p.indexOf('request') !== -1 && p.indexOf('parties') !== -1;
+    return basic ? 'Member' : 'Member · custom permissions';
+  }
+  /** You can manage someone unless they're an admin or hold more permissions than you (the server checks too). */
+  function canManage(u) {
+    const me = S.data.me;
+    return me.admin || (S.data.can('members') && !u.admin && (u.perms || []).every(function (p) { return S.data.can(p); }));
+  }
+
   /* ---------- Household (admin) ---------- */
   let users = null;
   function householdTab() {
@@ -63,16 +83,16 @@ Spin.views = Spin.views || {};
     return group('Members of this server',
       users.map(function (u) {
         const me = u.id === S.data.me.serverId;
-        const notes = [u.admin ? 'Admin' : 'Member'].concat(u.hideExplicit ? ['Explicit off'] : []).join(' · ');
+        const notes = [roleOf(u)].concat(u.hideExplicit ? ['Explicit off'] : []).join(' · ');
         return row(S.avatar({ id: u.id, name: u.name }, 36) + '<span class="set-who"><span>' + S.esc(u.name) + (me ? ' (you)' : '') + '</span><em>' + notes + '</em></span>', '',
-          me ? '' : '<button class="btn btn-secondary btn-sm" data-manage-user="' + u.id + '">Manage</button>');
+          me || !canManage(u) ? '' : '<button class="btn btn-secondary btn-sm" data-manage-user="' + u.id + '">Manage</button>');
       }).join(''),
       { sub: 'Everyone shares the same music. Playlists, play history and settings are personal.' }) +
       group('Add a member',
         '<form class="set-form" data-form="add-user" novalidate>' +
           field('Name', 'name', 'text', 'They sign in with this name.') +
           field('Password', 'password', 'password', 'At least 8 characters. They can change it under Account.') +
-          '<label class="check"><input type="checkbox" name="admin"> <span>Admin (can add people and rescan the library)</span></label>' +
+          '<p class="set-hint">New members can request music and start parties. Change that any time under Manage.</p>' +
           '<p class="auth-error" hidden></p>' +
           '<button class="btn btn-primary" type="submit">' + S.icon('plus', 16) + 'Add to household</button>' +
         '</form>');
@@ -110,9 +130,15 @@ Spin.views = Spin.views || {};
     const m = S.modal({
       title: 'Manage ' + u.name,
       body: '<div class="mg">' +
-        '<div class="mg-who">' + S.avatar({ id: u.id, name: u.name }, 48) + '<div><strong>' + S.esc(u.name) + '</strong><span>' + (u.admin ? 'Admin' : 'Member') + '</span></div></div>' +
+        '<div class="mg-who">' + S.avatar({ id: u.id, name: u.name }, 48) + '<div><strong>' + S.esc(u.name) + '</strong><span>' + roleOf(u) + '</span></div></div>' +
         sw('hideExplicit', 'Turn off explicit music', 'Songs marked explicit stay listed but are skipped for them.', u.hideExplicit) +
-        sw('admin', 'Admin', 'Can add and manage members and change the library.', u.admin) +
+        '<div class="q-label mg-label">What ' + S.esc(u.name) + ' can do</div>' +
+        PERMS.map(function (p) {
+          const on = (u.perms || []).indexOf(p[0]) !== -1;
+          return '<label class="switch-row' + (S.data.can(p[0]) ? '' : ' disabled') + '"><span class="switch-text"><strong>' + p[1] + '</strong><span>' + p[2] + (S.data.can(p[0]) ? '' : ' (you don\'t have this one, so you can\'t give it)') + '</span></span>' +
+            '<span class="switch"><input type="checkbox" data-perm="' + p[0] + '"' + (on ? ' checked' : '') + (S.data.can(p[0]) ? '' : ' disabled') + '><span class="switch-ui"></span></span></label>';
+        }).join('') +
+        '<div class="mg-presets"><button class="btn btn-ghost btn-sm" data-mg-preset="all"' + (S.data.me.admin ? '' : ' disabled') + '>Everything (admin)</button><button class="btn btn-ghost btn-sm" data-mg-preset="basic">Basics only</button></div>' +
         '<form class="mg-pass" data-mg-pass novalidate><label class="field"><span class="label">New password</span>' +
           '<input class="input" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters"></label>' +
           '<p class="auth-error" hidden></p>' +
@@ -123,17 +149,36 @@ Spin.views = Spin.views || {};
       actions: [{ label: 'Done', kind: 'secondary' }]
     });
     const err = function (x) { S.toast(x.message || 'That didn\'t work', 'x'); };
+    /** Save what they may do, and update the dialog and the list. */
+    function savePerms(list, onFail) {
+      S.server.json('PUT', '/api/users/' + id, { perms: list }).then(function (r) {
+        Object.assign(u, r.user);
+        const who = m.el.querySelector('.mg-who span'); if (who) who.textContent = roleOf(u);
+        m.el.querySelectorAll('[data-perm]').forEach(function (c) { c.checked = (u.perms || []).indexOf(c.dataset.perm) !== -1; });
+        S.toast('Permissions saved', 'check');
+        S.app.refresh();
+      }).catch(function (x) { if (onFail) onFail(); err(x); });
+    }
     m.el.addEventListener('change', function (e) {
+      if (e.target.dataset && e.target.dataset.perm) {
+        const list = Array.from(m.el.querySelectorAll('[data-perm]')).filter(function (c) { return c.checked; }).map(function (c) { return c.dataset.perm; });
+        savePerms(list, function () { e.target.checked = !e.target.checked; });
+        return;
+      }
       const key = e.target.dataset && e.target.dataset.mg;
       if (!key) return;
       const body = {}; body[key] = e.target.checked;
       S.server.json('PUT', '/api/users/' + id, body).then(function (r) {
         Object.assign(u, r.user);
-        S.toast(key === 'hideExplicit' ? (e.target.checked ? 'Explicit music is off for ' + u.name : 'Explicit music is on for ' + u.name) : (e.target.checked ? u.name + ' is now an admin' : u.name + ' is now a member'), 'check');
+        S.toast(e.target.checked ? 'Explicit music is off for ' + u.name : 'Explicit music is on for ' + u.name, 'check');
         S.app.refresh();
       }).catch(function (x) { e.target.checked = !e.target.checked; err(x); });
     });
-    m.el.addEventListener('submit', function (e) {
+    m.el.addEventListener('click', function (e) {
+      const pre = e.target.closest('[data-mg-preset]');
+      if (!pre) return;
+      savePerms(pre.dataset.mgPreset === 'all' ? PERMS.map(function (p) { return p[0]; }) : ['request', 'parties']);
+    });    m.el.addEventListener('submit', function (e) {
       const form = e.target.closest('[data-mg-pass]');
       if (!form) return;
       e.preventDefault();
@@ -165,7 +210,7 @@ Spin.views = Spin.views || {};
     }).join('') + '</select>';
   }
   function lidarrGroup() {
-    if (!S.data.me.admin) return '';
+    if (!S.data.can('settings')) return '';
     if (!lidarr) {
       S.server.json('GET', '/api/lidarr').then(function (r) { lidarr = r; S.app.refresh(); }).catch(function () {});
       return group('Lidarr', '<p class="set-hint">Loading…</p>', { id: 'lidarr' });
@@ -185,7 +230,7 @@ Spin.views = Spin.views || {};
           (folder && s.rootFolder && !samePath(folder.path, s.rootFolder) ? ' <strong>Right now they differ</strong> (Volvix reads ' + S.esc(folder.path) + '). That\'s fine if one is just the other\'s name inside Docker; otherwise change one of them.' : '') + '</span></label>' +
           '<label class="field"><span class="label">Quality profile</span>' + select('qualityProfileId', s.qualityProfileId, L.qualityProfiles.map(function (p) { return [p.id, p.name]; })) + '</label>' +
           '<label class="field"><span class="label">Metadata profile</span>' + select('metadataProfileId', s.metadataProfileId, L.metadataProfiles.map(function (p) { return [p.id, p.name]; })) + '</label>' +
-          '<label class="check"><input type="checkbox" name="everyoneCanRequest"' + (s.everyoneCanRequest !== false ? ' checked' : '') + '> <span>Everyone in the household can request music (otherwise only admins)</span></label>' : '') +
+          '<p class="set-hint">Who may ask for music is set per member (Members → Manage → Request music).</p>' : '') +
         '<p class="auth-error" hidden></p>' +
         '<div class="set-actions"><button class="btn btn-primary" type="submit">' + (lidarr.configured ? 'Save' : 'Connect') + '</button>' +
           (lidarr.configured ? '<button class="btn btn-ghost" type="button" data-act="lidarr-off">Disconnect</button>' : '') + '</div>' +
@@ -269,7 +314,7 @@ Spin.views = Spin.views || {};
   function settingsTab() {
     const st = S.store.state;
     if (!status) S.server.json('GET', '/api/status').then(function (s) { status = s; S.app.refresh(); }).catch(function () {});
-    if (!folder && S.data.me.admin) S.server.json('GET', '/api/library/folder').then(function (f) { folder = f; S.app.refresh(); }).catch(function () {});
+    if (!folder && S.data.can('settings')) S.server.json('GET', '/api/library/folder').then(function (f) { folder = f; S.app.refresh(); }).catch(function () {});
     return group('Appearance',
         row('Theme', st.theme === 'system' ? 'Matches your device\'s light or dark setting.' : 'Always ' + st.theme + '.',
           seg('theme', st.theme, [['system', 'System', 'monitor'], ['dark', 'Dark', 'moon'], ['light', 'Light', 'sun']]), { icon: 'sun' })) +
@@ -291,12 +336,12 @@ Spin.views = Spin.views || {};
           S.dl.count() ? '<button class="btn btn-secondary btn-sm" data-act="dl-clear">Remove all</button>' : '', { icon: 'download' }),
         { id: 'downloads' }) +
       group('Library',
-        (S.data.me.admin ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
+        (S.data.can('settings') ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
           '<button class="btn btn-secondary btn-sm" data-act="pick-folder">Change</button>', { icon: 'library' }) : '') +
         row('Music on this server', (status ? status.albums + ' albums · ' + status.tracks + ' songs' + (status.scanning ? ' · checking the folder…' : '') + '<br>' : '…') +
           (status && status.rescanMinutes ? 'The server checks the folder by itself every ' + status.rescanMinutes + ' minutes' : 'Automatic checks are off') +
           (lidarr && lidarr.configured ? ' and right after Lidarr imports something' : '') + '. New and removed files are both picked up, and you\'re told when to reload.',
-          S.data.me.admin ? '<button class="btn btn-secondary btn-sm" data-act="rescan"' + (status && status.scanning ? ' disabled' : '') + '>Check now</button>' : '', { icon: 'library' }),
+          S.data.can('rescan') ? '<button class="btn btn-secondary btn-sm" data-act="rescan"' + (status && status.scanning ? ' disabled' : '') + '>Check now</button>' : '', { icon: 'library' }),
         { id: 'library' }) +
       lidarrGroup() +
       group('About',
@@ -412,8 +457,7 @@ Spin.views = Spin.views || {};
         } else if (form.dataset.form === 'lidarr') {
           S.server.json('PUT', '/api/lidarr', {
             url: f.get('url') || '', apiKey: f.get('apiKey') || '', rootFolder: f.get('rootFolder') || '',
-            qualityProfileId: Number(f.get('qualityProfileId') || 0), metadataProfileId: Number(f.get('metadataProfileId') || 0),
-            everyoneCanRequest: f.has('everyoneCanRequest') ? true : !form.querySelector('[name=everyoneCanRequest]')
+            qualityProfileId: Number(f.get('qualityProfileId') || 0), metadataProfileId: Number(f.get('metadataProfileId') || 0)
           }).then(function (r) {
             const first = !lidarr || !lidarr.configured;
             lidarr = r; done();
@@ -422,7 +466,7 @@ Spin.views = Spin.views || {};
             if (first) setTimeout(function () { location.reload(); }, 900); else S.app.refresh();
           }).catch(fail);
         } else if (form.dataset.form === 'add-user') {
-          S.server.json('POST', '/api/users', { name: f.get('name'), password: f.get('password'), admin: !!f.get('admin') })
+          S.server.json('POST', '/api/users', { name: f.get('name'), password: f.get('password') })
             .then(function (r) { users = null; S.toast(r.user.name + ' can now sign in', 'check'); S.app.refresh(); }).catch(fail);
         }
       };

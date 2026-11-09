@@ -42,7 +42,7 @@ window.Spin = window.Spin || {};
   const byId = {};
   ALBUMS.forEach(function (a) { byId[a.id] = a; });
 
-  const ME = { id: 'u_me', serverId: VH.user.id, name: VH.user.name, username: VH.user.username, admin: !!VH.user.admin, pfp: null, avatar: VH.user.avatar || 0, hideExplicit: !!VH.user.hideExplicit };
+  const ME = { id: 'u_me', serverId: VH.user.id, name: VH.user.name, username: VH.user.username, admin: !!VH.user.admin, perms: VH.user.perms || [], pfp: null, avatar: VH.user.avatar || 0, hideExplicit: !!VH.user.hideExplicit };
   // everyone in the household (server ids); you are also 'u_me' inside playlists and the UI
   const PEOPLE = {};
   (VH.people || []).forEach(function (p) { PEOPLE[p.id] = { id: p.id, name: p.name, admin: !!p.admin, avatar: p.avatar || 0 }; });
@@ -54,6 +54,8 @@ window.Spin = window.Spin || {};
     me: ME,
     people: PEOPLE,
     /** Everyone except you. */
+    /** Is this person allowed to do perm (request, rescan, parties, members, settings)? */
+    can: function (perm) { return ME.perms.indexOf(perm) !== -1; },
     others: function () { return Object.keys(PEOPLE).filter(function (id) { return id !== ME.serverId; }).map(function (id) { return PEOPLE[id]; }); },
     album: function (id) { return byId[id] || null; },
     track: function (id) { return TRACKS[id] || null; },

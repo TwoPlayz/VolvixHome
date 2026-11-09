@@ -18,7 +18,7 @@ Spin.views = Spin.views || {};
   let canGet = L.canRequest, lidarrOn = L.configured; // set from each search: can this person download?
   /** Shown instead of a Get button when downloading isn't set up for them. */
   function noGet() {
-    return S.data.me.admin && !lidarrOn
+    return S.data.can('settings') && !lidarrOn
       ? '<a class="btn btn-secondary btn-sm" href="#/account/settings">Connect Lidarr</a>'
       : '<span class="gm-state">' + (lidarrOn ? 'Admins only' : 'Ask an admin') + '</span>';
   }
@@ -73,7 +73,7 @@ Spin.views = Spin.views || {};
       const songs = r.songs || [];
       if (!r.artists.length && !r.albums.length && !songs.length) { host.innerHTML = ''; return; }
       host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2>' +
-          '<p>' + (canGet ? 'Not in your library yet. Lidarr gets it and adds it here when it\'s done.' : lidarrOn ? 'Not in your library yet. Only admins can ask for new music.' : S.data.me.admin ? 'Not in your library yet. Connect Lidarr in Settings to download it.' : 'Not in your library yet. Ask an admin to connect Lidarr so it can be downloaded.') + '</p></div></div>' +
+          '<p>' + (canGet ? 'Not in your library yet. Lidarr gets it and adds it here when it\'s done.' : lidarrOn ? 'Not in your library yet. Only admins can ask for new music.' : S.data.can('settings') ? 'Not in your library yet. Connect Lidarr in Settings to download it.' : 'Not in your library yet. Ask an admin to connect Lidarr so it can be downloaded.') + '</p></div></div>' +
         (r.artists.length ? '<div class="gm-list">' + r.artists.slice(0, 3).map(artistRow).join('') + '</div>' : '') +
         (songs.length ? '<h3 class="gm-sub">Songs</h3><div class="gm-list">' + songs.map(songCard).join('') + '</div>' : '') +
         (r.albums.length ? '<h3 class="gm-sub">Albums</h3><div class="gm-grid">' + r.albums.map(albumCard).join('') + '</div>' : '') +
@@ -122,8 +122,8 @@ Spin.views = Spin.views || {};
   function render(root) {
     if (!L.configured) {
       root.innerHTML = '<header class="page-head"><h1 class="page-title">Requests</h1></header>' +
-        S.emptyState('download', 'Lidarr isn\'t connected', S.data.me.admin ? 'Connect Lidarr in Settings to search for music you don\'t have and add it automatically.' : 'Ask whoever runs this server to connect Lidarr.',
-          S.data.me.admin ? '<a class="btn btn-primary" href="#/account/settings">Connect Lidarr</a>' : '');
+        S.emptyState('download', 'Lidarr isn\'t connected', S.data.can('settings') ? 'Connect Lidarr in Settings to search for music you don\'t have and add it automatically.' : 'Ask whoever runs this server to connect Lidarr.',
+          S.data.can('settings') ? '<a class="btn btn-primary" href="#/account/settings">Connect Lidarr</a>' : '');
       return;
     }
     root.innerHTML = '<header class="page-head"><h1 class="page-title">Requests</h1>' +

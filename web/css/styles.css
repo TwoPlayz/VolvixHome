@@ -2729,3 +2729,7 @@ body.reordering { cursor: grabbing; user-select: none; }
 .np-add:hover { background: var(--hover); }
 .np-add:focus-visible, .np .icon-btn:focus-visible, .np .ctrl:focus-visible { outline-offset: -2px; }
 .np-add { display: grid; place-items: center; }
+
+.mg-label { padding: 4px 0 0; }
+.mg-presets { display: flex; gap: 8px; }
+.switch-row.disabled { opacity: .5; }

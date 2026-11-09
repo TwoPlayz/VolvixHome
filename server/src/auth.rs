@@ -11,6 +11,11 @@ use argon2::Argon2;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
+/// What a person can be allowed to do. An admin can do all of it.
+pub const PERMS: [&str; 5] = ["request", "rescan", "parties", "members", "settings"];
+/// What a new member gets until an admin changes it.
+pub const DEFAULT_PERMS: [&str; 2] = ["request", "parties"];
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct User {
     pub id: String,
@@ -25,6 +30,23 @@ pub struct User {
     /// profile picture version (seconds); 0 = none
     #[serde(default)]
     pub avatar: u64,
+    /// what they may do (None = the member defaults). Admins can do everything whatever this says.
+    #[serde(default)]
+    pub perms: Option<Vec<String>>,
+}
+
+impl User {
+    /// Everything this person is allowed to do.
+    pub fn effective(&self) -> Vec<String> {
+        if self.admin { return PERMS.iter().map(|p| p.to_string()).collect(); }
+        match &self.perms {
+            Some(l) => PERMS.iter().filter(|p| l.iter().any(|x| x == *p)).map(|p| p.to_string()).collect(),
+            None => DEFAULT_PERMS.iter().map(|p| p.to_string()).collect(),
+        }
+    }
+    pub fn has(&self, perm: &str) -> bool {
+        self.admin || self.effective().iter().any(|p| p == perm)
+    }
 }
 
 /// What the app gets to see about a user (never the hash).
@@ -37,11 +59,12 @@ pub struct PublicUser {
     #[serde(rename = "hideExplicit")]
     pub hide_explicit: bool,
     pub avatar: u64,
+    pub perms: Vec<String>,
 }
 
 impl From<&User> for PublicUser {
     fn from(u: &User) -> Self {
-        PublicUser { id: u.id.clone(), username: u.username.clone(), name: u.name.clone(), admin: u.admin, hide_explicit: u.hide_explicit, avatar: u.avatar }
+        PublicUser { id: u.id.clone(), username: u.username.clone(), name: u.name.clone(), admin: u.admin, hide_explicit: u.hide_explicit, avatar: u.avatar, perms: u.effective() }
     }
 }
 
@@ -159,6 +182,7 @@ impl Accounts {
             created: now(),
             hide_explicit: false,
             avatar: 0,
+            perms: None,
         };
         self.users.push(user.clone());
         self.save();
@@ -192,17 +216,19 @@ impl Accounts {
         Ok(())
     }
 
-    pub fn set_admin(&mut self, user_id: &str, admin: bool) -> Result<(), String> {
+    /// Replace what someone may do. Having every permission makes them an admin. At least one admin must remain.
+    pub fn set_perms(&mut self, user_id: &str, perms: &[String]) -> Result<(), String> {
         let admins = self.users.iter().filter(|u| u.admin).count();
+        let all = PERMS.iter().all(|p| perms.iter().any(|x| x == p));
         let user = self.users.iter_mut().find(|u| u.id == user_id).ok_or("No such user")?;
-        if user.admin && !admin && admins <= 1 {
+        if user.admin && !all && admins <= 1 {
             return Err("Keep at least one admin.".into());
         }
-        user.admin = admin;
+        user.admin = all;
+        user.perms = Some(PERMS.iter().filter(|p| perms.iter().any(|x| x == *p)).map(|p| p.to_string()).collect());
         self.save();
         Ok(())
     }
-
     pub fn set_avatar(&mut self, user_id: &str, version: u64) {
         if let Some(u) = self.users.iter_mut().find(|u| u.id == user_id) {
             u.avatar = version;
@@ -247,6 +273,30 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permissions_default_grow_and_keep_an_admin() {
+        let dir = std::env::temp_dir().join(format!("vh-perm-{}", random_hex(4)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut a = Accounts::load(&dir);
+        let boss = a.create("", "Boss", "password1", true).unwrap();
+        let kid = a.create("", "Kid", "password1", false).unwrap();
+        // a new member has the basics only
+        assert!(kid.has("request") && kid.has("parties") && !kid.has("rescan") && !kid.has("members"));
+        assert!(boss.has("settings") && boss.effective().len() == PERMS.len());
+        // give one extra permission: still not an admin
+        a.set_perms(&kid.id, &["request".into(), "rescan".into()]).unwrap();
+        let kid = a.by_id(&kid.id).unwrap().clone();
+        assert!(kid.has("rescan") && !kid.has("parties") && !kid.admin);
+        // every permission makes an admin; unknown names are dropped
+        a.set_perms(&kid.id, &PERMS.iter().map(|p| p.to_string()).chain(std::iter::once("fly".to_string())).collect::<Vec<_>>()).unwrap();
+        assert!(a.by_id(&kid.id).unwrap().admin);
+        assert!(!a.by_id(&kid.id).unwrap().perms.as_ref().unwrap().contains(&"fly".to_string()));
+        // the last admin can't be demoted
+        a.set_perms(&kid.id, &["request".into()]).unwrap(); // boss is still admin
+        assert!(a.set_perms(&boss.id, &["request".into()]).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn passwords_round_trip() {

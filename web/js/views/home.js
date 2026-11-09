@@ -30,10 +30,10 @@ Spin.views = Spin.views || {};
       const albums = S.data.albums;
       if (!albums.length) {
         root.innerHTML = '<header class="page-head"><h1 class="page-title">' + greeting() + '</h1></header>' +
-          S.emptyState('music', 'No music yet', S.data.me.admin
+          S.emptyState('music', 'No music yet', S.data.can('settings')
             ? 'Point Volvix Home at your music folder (VH_MUSIC_DIR), or let Lidarr fill it. New music shows up here on its own.'
             : 'Your library is empty for now. Music added to the server shows up here on its own.',
-            S.data.me.admin ? '<a class="btn btn-secondary" href="#/account/settings">Library settings</a>' : '');
+            S.data.can('settings') ? '<a class="btn btn-secondary" href="#/account/settings">Library settings</a>' : '');
         return;
       }
       const recent = (state.recent || []).map(S.data.album).filter(Boolean);
