@@ -70,9 +70,11 @@ window.Spin = window.Spin || {};
       '</div>' +
       '<div class="np-tools">' +
         '<button class="ctrl q-btn" data-player="quality" data-np-quality></button>' +
+        ctrl('party', 'Listening party', 'party') +
         ctrl('queue', 'Queue', 'queue', st.queueOpen ? ' on' : '') +
       '</div>';
     S.player.qualityButton(el.querySelector('[data-np-quality]'), q);
+    if (S.party && S.party.paint) S.party.paint(); // show whether you're in a party
     progress();
     if (focusSel) { const again = el.querySelector(focusSel); if (again) again.focus(); }
   }

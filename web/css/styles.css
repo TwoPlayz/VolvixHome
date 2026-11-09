@@ -2557,3 +2557,16 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .credit-row dt { color: var(--text-2); }
 .credit-row dd { margin: 0; overflow-wrap: anywhere; }
 .credits-none { color: var(--text-2); }
+/* listening party */
+.party-btn { position: relative; }
+.party-btn.on { color: var(--accent); }
+.party-count {
+  position: absolute; right: 1px; top: 1px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
+  display: grid; place-items: center; font-size: 9px; font-weight: 700; line-height: 1; background: var(--accent); color: #fff;
+}
+.np .ctrl.party-btn { position: relative; }
+.choice { display: flex; align-items: flex-start; gap: 12px; padding: 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.choice input { margin-top: 3px; accent-color: var(--accent); }
+.choice span { display: flex; flex-direction: column; gap: 2px; }
+.choice em { font-style: normal; font-size: 13px; color: var(--text-2); }

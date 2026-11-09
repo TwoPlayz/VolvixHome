@@ -18,6 +18,7 @@ mod auth;
 mod library;
 mod lidarr;
 mod musicbrainz;
+mod party;
 mod social;
 
 use std::collections::HashMap;
@@ -76,6 +77,7 @@ struct AppState {
     http: lidarr::Client,
     mb: musicbrainz::Client,
     social: social::Social,
+    parties: party::Parties,
 }
 type Shared = Arc<AppState>;
 
@@ -846,6 +848,147 @@ fn notify_ready(st: &AppState) {
     }
 }
 
+/* ---------------- listening parties ---------------- */
+
+fn track_known(st: &AppState) -> impl Fn(&str) -> bool + '_ {
+    move |id: &str| st.lib.read().unwrap().track_path(id).is_some()
+}
+fn track_dur_ms(st: &AppState) -> impl Fn(&str) -> i64 + '_ {
+    move |id: &str| st.lib.read().unwrap().catalog.tracks.iter().find(|t| t.id == id).map(|t| t.duration as i64 * 1000).unwrap_or(0)
+}
+fn party_fail(f: party::Fail) -> Response {
+    error(StatusCode::from_u16(f.0).unwrap_or(StatusCode::BAD_REQUEST), &f.1)
+}
+fn host_name(st: &AppState, uid: &str) -> String {
+    st.accounts.lock().unwrap().by_id(uid).map(|u| u.name.clone()).unwrap_or_else(|| "Someone".into())
+}
+/// Tell people they're invited (a notification with a Join button).
+fn send_party_invites(st: &AppState, party_id: &str, from: &str, to: &[String]) {
+    let name = host_name(st, from);
+    for u in to {
+        st.social.add_note(u, "party_invite", format!("{name} invited you to a listening party"), json!({ "partyId": party_id, "from": name, "fromId": from }));
+    }
+}
+/// A party ended: its pending invites are moot.
+fn close_party_invites(st: &AppState, party_id: &str, invited: &[String]) {
+    for u in invited {
+        st.social.set_done(u, "party_invite", "partyId", party_id, "over");
+    }
+}
+
+async fn party_mine(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    Json(json!({ "party": st.parties.of(&user.id) })).into_response()
+}
+
+#[derive(Deserialize)]
+struct PartyNew {
+    #[serde(default)]
+    invite: Vec<String>,
+    #[serde(default)]
+    queue: Vec<String>,
+    #[serde(default)]
+    index: i64,
+    #[serde(default, rename = "posMs")]
+    pos_ms: i64,
+    #[serde(default)]
+    playing: bool,
+}
+
+async fn party_create(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<PartyNew>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let names = names_map(&st);
+    let invite: Vec<String> = b.invite.into_iter().filter(|u| names.contains_key(u)).collect();
+    let known = track_known(&st);
+    let queue: Vec<String> = b.queue.into_iter().filter(|t| known(t)).collect();
+    match st.parties.create(&user.id, &invite, queue, b.index, b.pos_ms, b.playing) {
+        Ok(state) => {
+            let id = state["id"].as_str().unwrap_or("").to_string();
+            let invited: Vec<String> = state["invited"].as_array().cloned().unwrap_or_default().iter().filter_map(|v| v.as_str().map(String::from)).collect();
+            send_party_invites(&st, &id, &user.id, &invited);
+            Json(json!({ "party": state })).into_response()
+        }
+        Err(f) => party_fail(f),
+    }
+}
+
+#[derive(Deserialize)]
+struct PartyJoin {
+    #[serde(default)]
+    output: String,
+}
+
+async fn party_join(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(b): Json<PartyJoin>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    match st.parties.join(&user.id, &id, &b.output) {
+        Ok(state) => {
+            st.social.set_done(&user.id, "party_invite", "partyId", &id, "joined");
+            Json(json!({ "party": state })).into_response()
+        }
+        Err(f) => party_fail(f),
+    }
+}
+
+async fn party_leave(State(st): State<Shared>, headers: HeaderMap, Path(_id): Path<String>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    if let Some(party::Left::Ended { id, invited }) = st.parties.leave(&user.id) {
+        close_party_invites(&st, &id, &invited);
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Deserialize)]
+struct PartyInvite {
+    #[serde(default, rename = "userIds")]
+    user_ids: Vec<String>,
+}
+
+async fn party_invite(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(b): Json<PartyInvite>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let names = names_map(&st);
+    match st.parties.invite(&user.id, &id, &b.user_ids, &|u| names.contains_key(u)) {
+        Ok((state, fresh)) => {
+            send_party_invites(&st, &id, &user.id, &fresh);
+            Json(json!({ "party": state })).into_response()
+        }
+        Err(f) => party_fail(f),
+    }
+}
+
+async fn party_output(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(b): Json<PartyJoin>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    match st.parties.set_output(&user.id, &id, &b.output) {
+        Ok(state) => Json(json!({ "party": state })).into_response(),
+        Err(f) => party_fail(f),
+    }
+}
+
+async fn party_action(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let (known, dur) = (track_known(&st), track_dur_ms(&st));
+    match st.parties.action(&user.id, &id, &body, &known, &dur) {
+        Ok(state) => Json(json!({ "party": state })).into_response(),
+        Err(f) => party_fail(f),
+    }
+}
+
+/// Live updates for a party (Server-Sent Events): the current state, then every change.
+async fn party_events(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    use futures_util::StreamExt;
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let (rx, first) = match st.parties.subscribe(&user.id, &id) { Ok(x) => x, Err(f) => return party_fail(f) };
+    let first = json!({ "type": "state", "state": first }).to_string();
+    let live = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|m| async move { m.ok() }); // a lagging reader just skips ahead
+    let stream = futures_util::stream::once(async move { first }).chain(live)
+        .map(|data| Ok::<_, std::convert::Infallible>(axum::response::sse::Event::default().data(data)));
+    let mut res = axum::response::Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
+        .into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    res.headers_mut().insert("X-Accel-Buffering", HeaderValue::from_static("no")); // reverse proxies shouldn't hold events back
+    res
+}
+
 /* ---------------- music folder ---------------- */
 
 fn music_dir_file(cfg: &Config) -> PathBuf {
@@ -978,10 +1121,25 @@ async fn main() {
         http: lidarr::Client::new(),
         mb: musicbrainz::Client::new(),
         social: social::Social::load(&cfg.data_dir),
+        parties: party::Parties::new(),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });
     start_scan(st.clone());
+    // parties: move on to the next song when one ends, and resend the state every 5 s so devices stay in step
+    {
+        let s = st.clone();
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_secs(1));
+            let mut n: u64 = 0;
+            loop {
+                every.tick().await;
+                n += 1;
+                let dur = track_dur_ms(&s);
+                s.parties.tick(n % 5 == 0, &dur);
+            }
+        });
+    }
     if cfg.rescan_minutes > 0 {
         let s = st.clone();
         tokio::spawn(async move {
@@ -1017,6 +1175,13 @@ async fn main() {
         .route("/api/lidarr/requests", get(lidarr_requests))
         .route("/api/hooks/lidarr", post(lidarr_hook).put(lidarr_hook))
         .route("/api/credits/{id}", get(track_credits))
+        .route("/api/party", get(party_mine).post(party_create))
+        .route("/api/party/{id}/events", get(party_events))
+        .route("/api/party/{id}/join", post(party_join))
+        .route("/api/party/{id}/leave", post(party_leave))
+        .route("/api/party/{id}/invite", post(party_invite))
+        .route("/api/party/{id}/output", post(party_output))
+        .route("/api/party/{id}/action", post(party_action))
         .route("/api/people", get(people))
         .route("/api/me/now", axum::routing::put(put_now))
         .route("/api/household", get(household))

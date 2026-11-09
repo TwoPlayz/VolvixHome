@@ -21,6 +21,12 @@ and on phones.
   composers and writers from MusicBrainz; albums have Credits & info.
 - **Shuffle** is a switch for the whole player (it never starts or interrupts playback); you can **follow**
   artists, and drag playlist or queue rows from anywhere to reorder them.
+- **Listening parties:** press the party button in the player to start one and invite people from your
+  household. Everyone shares one queue: anyone can add, remove, reorder, skip, pause and seek, and it all
+  stays in sync. The button is filled while you're in a party. When you join you choose where the sound
+  plays: **this device**, or **the host's speaker** (your device shows the same player but stays silent,
+  for the same room or a car ride). The host replaces the queue when they play something; guests add to
+  it. The host leaving ends the party.
 - **Liked Songs:** a heart on the player, Now Playing and every song row adds or removes the song in one
   built-in Liked Songs playlist.
 - **Music folder:** admins pick it under Settings → Library by browsing the server's folders (or set
@@ -117,6 +123,8 @@ VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run
 | ``GET/POST /api/shared``, ``POST /api/shared/{id}/op`` | shared playlists and every change to them (add, remove, move, invite, accept…) |
 | ``GET /api/notifications``, ``POST /api/notifications/read`` | invites, and when a request has arrived |
 | ``GET /api/credits/{trackId}`` | credits for a song from MusicBrainz (cached on disk) |
+| ``GET/POST /api/party``, ``GET /api/party/{id}/events`` | your party; start one; live updates (Server-Sent Events) |
+| ``POST /api/party/{id}/join`` ``/leave`` ``/invite`` ``/output`` ``/action`` | join (output: own or host), leave, invite, switch speaker, and every playback / queue action |
 | `GET /api/stream/{trackId}` | audio, with HTTP Range for seeking |
 | `GET /api/cover/{albumId}` | album art |
 | `GET/PUT /api/lidarr` | Lidarr status; connect and choose folder/profiles (admin) |

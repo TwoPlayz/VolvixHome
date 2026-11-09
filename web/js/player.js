@@ -21,6 +21,11 @@ window.Spin = window.Spin || {};
   };
   let timer = null;
 
+  /* ---------- listening party: while in one, the server decides what plays ---------- */
+  let interceptor = null;   // { handle(name, args) → true when the party took that action, ended(index) }
+  let remote = null;        // { state, offset, output, blocked } while following a party
+  const intercept = function (name, args) { return !!(interceptor && interceptor.handle(name, args)); };
+
   /* ---------- the audio element ---------- */
   const audio = new Audio();
   audio.preload = 'auto';
@@ -43,6 +48,8 @@ window.Spin = window.Spin || {};
     const p = audio.play();
     if (p && p.catch) p.catch(function (err) {
       if (err && err.name === 'AbortError') return; // a newer track took over
+      // in a party the music IS playing for everyone: we just need a tap before this device may make sound
+      if (remote) { remote.blocked = true; S.toast('Tap play to hear the party', 'volume'); render(); return; }
       st.playing = false; stopTimer(); render();
     });
   }
@@ -89,7 +96,15 @@ window.Spin = window.Spin || {};
 
   function tick() {
     const t = current();
-    if (!t || !st.playing) return;
+    if (!t) return;
+    if (remote) {
+      // party: the position comes from the party clock; a device making sound corrects itself if it drifts
+      st.pos = remoteTarget();
+      if (remote.output === 'own' && !audio.paused && Math.abs((audio.currentTime || 0) - st.pos) > 2) setPos(st.pos);
+      renderProgress(); mediaPosition();
+      return;
+    }
+    if (!st.playing) return;
     st.pos = audio.currentTime || st.pos;
     renderProgress();
     saveResume(false);
@@ -98,11 +113,12 @@ window.Spin = window.Spin || {};
 
   // the song ended / the OS or headphones paused or played it
   audio.addEventListener('ended', function () {
+    if (remote) { if (interceptor && interceptor.ended) interceptor.ended(st.index); return; } // the party moves on
     if (st.repeat === 'one') { setPos(0); startAudio(); return; }
     next(true);
   });
-  audio.addEventListener('pause', function () { if (st.playing && !audio.ended) { st.playing = false; stopTimer(); render(); } });
-  audio.addEventListener('play', function () { if (!st.playing) { st.playing = true; startTimer(); render(); } });
+  audio.addEventListener('pause', function () { if (remote) return; if (st.playing && !audio.ended) { st.playing = false; stopTimer(); render(); } });
+  audio.addEventListener('play', function () { if (remote) return; if (!st.playing) { st.playing = true; startTimer(); render(); } });
   audio.addEventListener('loadedmetadata', function () {
     const t = current();
     if (t && !t.duration && isFinite(audio.duration)) { t.duration = Math.round(audio.duration); renderProgress(); }
@@ -112,6 +128,7 @@ window.Spin = window.Spin || {};
     const t = current();
     if (!t || !audio.src) return;
     S.toast('Couldn\'t play ' + t.title, 'x');
+    if (remote) return; // the party decides what's next
     // skip ahead, but don't spin through a whole queue of broken files
     if (++errors < 4 && st.playing) setTimeout(function () { next(true); }, 800);
     else { st.playing = false; stopTimer(); render(); }
@@ -121,6 +138,7 @@ window.Spin = window.Spin || {};
   /* ---------- remember where you left off ---------- */
   let lastSaved = 0;
   function saveResume(force) {
+    if (remote) return; // a party's queue isn't yours to resume
     const now = Date.now();
     if (!force && now - lastSaved < 4000) return;
     lastSaved = now;
@@ -177,9 +195,9 @@ window.Spin = window.Spin || {};
     on('pause', function () { if (st.playing) toggle(); });
     on('nexttrack', function () { next(false); });
     on('previoustrack', function () { prev(); });
-    on('seekto', function (d) { if (d && d.seekTime != null) { setPos(d.seekTime); renderProgress(); } });
-    on('seekbackward', function () { setPos(Math.max(0, st.pos - 10)); renderProgress(); });
-    on('seekforward', function () { setPos(st.pos + 10); renderProgress(); });
+    on('seekto', function (d) { if (d && d.seekTime != null) userSeek(d.seekTime); });
+    on('seekbackward', function () { userSeek(Math.max(0, st.pos - 10)); });
+    on('seekforward', function () { userSeek(st.pos + 10); });
   }
   window.addEventListener('pagehide', function () { saveResume(true); });
   document.addEventListener('visibilitychange', function () { if (document.hidden) saveResume(true); });
@@ -194,8 +212,15 @@ window.Spin = window.Spin || {};
   }
 
   /* ---------- public API ---------- */
+  /** The user moved the seek bar (or a lock-screen scrubber). In a party that's everyone's position. */
+  function userSeek(sec) {
+    if (intercept('seek', [sec])) return;
+    setPos(sec); renderProgress();
+  }
+
   function play(ids, startIndex, context) {
     if (!ids || !ids.length) return;
+    if (intercept('play', [ids, startIndex, context])) return;
     // -1 = "from the top": the first song, or a random one when shuffle is on
     startIndex = startIndex === -1 ? (st.shuffle ? Math.floor(Math.random() * ids.length) : 0) : (startIndex || 0);
     if (!ids.some(owned)) {
@@ -230,6 +255,7 @@ window.Spin = window.Spin || {};
   }
 
   function toggle() {
+    if (intercept('toggle', [])) return;
     if (!current()) {
       // nothing loaded: start the most recent album
       const recent = (S.store.state.recent || [])[0];
@@ -245,6 +271,7 @@ window.Spin = window.Spin || {};
 
   function next(auto) {
     if (!current()) return;
+    if (!auto && intercept('next', [])) return;
     const r = seek(st.index, 1);
     skippedToast(r.skipped);
     if (r.index < 0) {
@@ -262,6 +289,7 @@ window.Spin = window.Spin || {};
 
   function prev() {
     if (!current()) return;
+    if (intercept('prev', [])) return;
     if (st.pos > 3) { setPos(0); renderProgress(); return; }
     const r = seek(st.index, -1);
     skippedToast(r.skipped);
@@ -274,6 +302,8 @@ window.Spin = window.Spin || {};
 
   function setShuffle(on) {
     st.shuffle = on;
+    // in a party the queue is shared, so shuffle only decides how songs you start or add are ordered
+    if (remote) { S.toast(on ? 'Shuffle on' : 'Shuffle off', 'shuffle'); render(); return; }
     if (st.index >= 0) {
       const curId = st.queue[st.index];
       if (on) {
@@ -291,6 +321,7 @@ window.Spin = window.Spin || {};
   }
 
   function cycleRepeat() {
+    if (remote) { S.toast('Repeat isn\'t available in a party'); return; }
     st.repeat = st.repeat === 'off' ? 'all' : st.repeat === 'all' ? 'one' : 'off';
     S.toast(st.repeat === 'off' ? 'Repeat off' : st.repeat === 'all' ? 'Repeat all' : 'Repeat this song', 'repeat');
     render();
@@ -299,6 +330,7 @@ window.Spin = window.Spin || {};
   function insert(ids, atNext) {
     ids = ids.filter(owned);
     if (!ids.length) return;
+    if (intercept(atNext ? 'addNext' : 'addToQueue', [ids])) return;
     if (st.index < 0) { play(ids, 0, null); return; }
     const at = atNext ? st.index + 1 : st.queue.length;
     st.queue.splice.apply(st.queue, [at, 0].concat(ids));
@@ -306,7 +338,48 @@ window.Spin = window.Spin || {};
     renderQueue();
   }
 
+  /** Where the party is right now, in seconds (its clock, not this device's). */
+  function remoteTarget() {
+    if (!remote) return st.pos;
+    const s = remote.state;
+    const elapsed = s.playing ? Date.now() + remote.offset - s.updatedAt : 0;
+    return Math.max(0, (s.posMs + elapsed) / 1000);
+  }
+
+  function applyRemote(s, output, offset) {
+    remote = { state: s, output: output, offset: offset, blocked: remote ? remote.blocked : false };
+    st.queue = s.queue.slice(); st.original = null;
+    st.index = s.index;
+    st.context = { type: 'party', id: s.id, name: 'Party' };
+    st.playing = !!s.playing && s.index >= 0;
+    const t = current();
+    if (!t) { audio.pause(); st.pos = 0; stopTimer(); render(); return; }
+    const target = remoteTarget();
+    st.pos = target;
+    if (output === 'own') {
+      audio.muted = st.muted;
+      if (loadedId !== t.id) { audio.src = S.server.streamUrl(t.id); loadedId = t.id; setPos(target); }
+      else if (Math.abs((audio.currentTime || 0) - target) > 1.5) setPos(target);
+      if (st.playing) { if (audio.paused && !remote.blocked) startAudio(); } else { audio.pause(); remote.blocked = false; }
+    } else {
+      audio.pause(); // the sound comes out of the host's speaker; this device stays silent
+    }
+    startTimer();
+    render();
+  }
+
+  function releaseRemote() {
+    if (!remote) return;
+    const silent = remote.output === 'host';
+    remote = null;
+    st.context = null;
+    if (silent) { st.playing = false; audio.pause(); stopTimer(); }
+    else if (st.playing && audio.paused) startAudio();
+    render();
+  }
+
   function playAt(queueIndex) {
+    if (intercept('playAt', [queueIndex])) return;
     if (!owned(st.queue[queueIndex])) { S.toast('Locked: this song will be skipped', 'lock'); return; }
     st.index = queueIndex; st.playing = true;
     load(current(), 0); startAudio();
@@ -446,17 +519,20 @@ window.Spin = window.Spin || {};
   /* ---------- queue editing ---------- */
   function moveInQueue(from, to) {
     if (from <= st.index || to <= st.index || from === to) return;
+    if (intercept('move', [from, to])) return;
     const id = st.queue.splice(from, 1)[0];
     st.queue.splice(to, 0, id);
     renderQueue(); saveResume(true);
   }
   function removeAt(i) {
     if (i <= st.index) return;
+    if (intercept('remove', [i])) return;
     st.queue.splice(i, 1);
     renderQueue(); saveResume(true);
     const first = S.$('[data-q-remove]'); if (first && document.activeElement === document.body) first.focus();
   }
   function reshuffle() {
+    if (intercept('reshuffle', [])) return;
     const upcoming = st.queue.slice(st.index + 1);
     if (upcoming.length < 2) return;
     st.queue = st.queue.slice(0, st.index + 1).concat(shuffleArray(upcoming));
@@ -513,8 +589,7 @@ window.Spin = window.Spin || {};
       if (isSeek) {
         const t = current();
         if (!t) return;
-        setPos(ratio * durationOf(t));
-        renderProgress();
+        userSeek(ratio * durationOf(t));
       } else {
         st.volume = ratio; st.muted = false;
         render();
@@ -552,7 +627,18 @@ window.Spin = window.Spin || {};
     /** Shuffle on/off for the whole player (it never starts or stops anything by itself). */
     toggleShuffle: function () { setShuffle(!st.shuffle); },
     audio: audio,
-    seekTo: function (sec) { setPos(sec); renderProgress(); },
+    seekTo: userSeek,
+    /* ----- listening party (see party.js) ----- */
+    setInterceptor: function (i) { interceptor = i; },
+    isRemote: function () { return !!remote; },
+    remoteState: function () { return remote && remote.state; },
+    /** The party's sound was blocked until a tap: a tap on play lets this device start it. */
+    resumeLocalAudio: function () { if (remote) { remote.blocked = false; startAudio(); } },
+    audioBlocked: function () { return !!(remote && remote.blocked && audio.paused); },
+    /** Follow a party: its queue, song, position and play / pause become this player's. */
+    applyRemote: applyRemote,
+    /** Stop following. On your own speaker the music carries on; on the host's speaker it stops here. */
+    releaseRemote: releaseRemote,
     moveInQueue: moveInQueue,
     removeFromQueue: removeAt,
     reshuffle: reshuffle,
