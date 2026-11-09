@@ -698,6 +698,38 @@ async fn share_cover(State(st): State<Shared>, Path((token, album)): Path<(Strin
     }
 }
 
+/// An album picture for music that isn't in the library yet. Fetched once from the Cover Art Archive and kept on the server,
+/// so it loads fast and the browser never contacts a third party. Albums with no picture are remembered too.
+async fn discover_image(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    if id.len() > 40 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return error(StatusCode::BAD_REQUEST, "Bad id."); }
+    let dir = st.cfg.data_dir.join("cache").join("mbcovers");
+    let (img, none) = (dir.join(format!("{id}.img")), dir.join(format!("{id}.none")));
+    let kind_of = |b: &[u8]| if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
+    if let Ok(b) = std::fs::read(&img) {
+        return ([(header::CONTENT_TYPE, kind_of(&b)), (header::CACHE_CONTROL, "private, max-age=2592000")], b).into_response();
+    }
+    let fresh_none = std::fs::metadata(&none).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|a| a < Duration::from_secs(7 * 86400)).unwrap_or(false);
+    if fresh_none { return error(StatusCode::NOT_FOUND, "No picture."); }
+    static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let _permit = GATE.get_or_init(|| tokio::sync::Semaphore::new(4)).acquire().await; // a few at a time, not fifty
+    if let Ok(b) = std::fs::read(&img) { // another request fetched it while this one waited
+        return ([(header::CONTENT_TYPE, kind_of(&b)), (header::CACHE_CONTROL, "private, max-age=2592000")], b).into_response();
+    }
+    match st.artists.fetch_cover(&id).await {
+        Some(bytes) => {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(&img, &bytes);
+            ([(header::CONTENT_TYPE, kind_of(&bytes)), (header::CACHE_CONTROL, "private, max-age=2592000")], bytes).into_response()
+        }
+        None => {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(&none, b"");
+            error(StatusCode::NOT_FOUND, "No picture.")
+        }
+    }
+}
+
 /// An artist's bio and photo (from Wikipedia, via MusicBrainz), kept on the server for a month.
 async fn artist_info(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     if let Err(r) = signed_in(&st, &headers) {
@@ -986,22 +1018,32 @@ async fn lidarr_search(State(st): State<Shared>, headers: HeaderMap, Query(q): Q
         return Json(json!({ "artists": [], "albums": [], "songs": [], "canRequest": can, "configured": configured })).into_response();
     }
     // Searching is MusicBrainz (the database Lidarr uses); requesting hands the ids to Lidarr.
-    let found = match st.mb.search(&term).await {
-        Ok(r) => r,
-        Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
-    };
+    // ?kind=songs|albums|artists asks for just that part, so the page can show each as soon as it arrives
+    let kind = q.get("kind").map(|k| k.as_str()).unwrap_or("all");
+    let (mut f_artists, mut f_albums, mut f_songs): (Vec<Value>, Vec<Value>, Vec<Value>) = (vec![], vec![], vec![]);
+    if kind == "all" {
+        match st.mb.search(&term).await {
+            Ok(r) => { f_artists = r.artists; f_albums = r.albums; f_songs = r.songs; }
+            Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
+        }
+    } else {
+        match st.mb.search_part(&term, kind).await {
+            Ok(list) => match kind { "artists" => f_artists = list, "albums" => f_albums = list, _ => f_songs = list },
+            Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
+        }
+    }
     let requested: Vec<String> = st.requests.lock().unwrap().iter().map(|r| r.foreign_id.clone()).collect();
     let is_requested = |v: &Value| -> bool {
         ["foreignId", "albumId", "singleId"].iter().any(|k| v[k].as_str().map(|id| requested.iter().any(|r| r == id)).unwrap_or(false))
     };
-    let artists: Vec<Value> = found.artists.iter().map(|a| {
+    let artists: Vec<Value> = f_artists.iter().map(|a| {
         let name = a["name"].as_str().unwrap_or("").to_string();
         let mut v = a.clone();
         v["onServer"] = json!(on_server(&st, None, &name));
         v["requested"] = json!(is_requested(a));
         v
     }).collect();
-    let albums: Vec<Value> = found.albums.iter().map(|a| {
+    let albums: Vec<Value> = f_albums.iter().map(|a| {
         let title = a["title"].as_str().map(String::from);
         let artist = a["artist"].as_str().unwrap_or("").to_string();
         let mut v = a.clone();
@@ -1009,7 +1051,7 @@ async fn lidarr_search(State(st): State<Shared>, headers: HeaderMap, Query(q): Q
         v["requested"] = json!(is_requested(a));
         v
     }).collect();
-    let songs: Vec<Value> = found.songs.iter().map(|sg| {
+    let songs: Vec<Value> = f_songs.iter().map(|sg| {
         let title = sg["title"].as_str().unwrap_or("").to_string();
         let artist = sg["artist"].as_str().unwrap_or("").to_string();
         let mut v = sg.clone();
@@ -1969,6 +2011,7 @@ async fn main() {
         .route("/api/share/{token}", get(share_info))
         .route("/api/share/{token}/stream/{id}", get(share_stream))
         .route("/api/share/{token}/cover/{album}", get(share_cover))
+        .route("/api/discover/image/{id}", get(discover_image))
         .route("/api/artist/info", get(artist_info))
         .route("/api/artist/image/{slug}", get(artist_image))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))

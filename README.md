@@ -65,6 +65,7 @@ arm64, so it runs on most NAS boxes and on a Raspberry Pi.
 | `VH_LIDARR_URL` | | e.g. `http://lidarr:8686` (or set it in Settings → Lidarr) |
 | `VH_LIDARR_API_KEY` | | Lidarr → Settings → General → API Key |
 | `VH_MUSICBRAINZ_URL` | musicbrainz.org | set only to use a MusicBrainz mirror |
+| `VH_COVERART_URL` | coverartarchive.org | set only to use a Cover Art Archive mirror; album pictures in search are fetched once and kept in `data/cache/mbcovers` |
 | `VH_LYRICS_ONLINE` | on | `0` = never look lyrics up online (files and tags still work) |
 | `VH_LRCLIB_URL` | lrclib.net | a LRCLIB mirror |
 

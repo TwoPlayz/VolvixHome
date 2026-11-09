@@ -2870,3 +2870,13 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 
 .gm-problem { flex-basis: 100%; font-size: 13px; margin-top: 4px; }
 .list-row:has(.gm-problem) { flex-wrap: wrap; }
+
+/* search results placeholders while MusicBrainz answers */
+.gm-skel { pointer-events: none; }
+.gm-skel-art { flex: none; width: 52px; height: 52px; border-radius: 6px; background: var(--surface-3, rgba(128,128,128,.18)); }
+.gm-skel-lines { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.gm-skel-lines i { display: block; height: 10px; border-radius: 5px; background: var(--surface-3, rgba(128,128,128,.18)); }
+.gm-skel-lines i:last-child { width: 55%; }
+.gm-skel-art, .gm-skel-lines i { animation: gm-pulse 1.2s ease-in-out infinite; }
+@keyframes gm-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .gm-skel-art, .gm-skel-lines i { animation: none; } }

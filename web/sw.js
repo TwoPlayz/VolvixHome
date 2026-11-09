@@ -24,7 +24,7 @@ self.addEventListener('fetch', function (e) {
   if (p.indexOf('/api/stream/') === 0 || p.indexOf('/api/devices/') === 0 || p.indexOf('/api/party') === 0) return; // live: never cached
   if (FRESH.indexOf(p) !== -1 || p.indexOf('/api/lyrics/') === 0 || p.indexOf('/api/credits/') === 0) {
     e.respondWith(networkFirst(req, DATA));
-  } else if (p.indexOf('/api/cover/') === 0 || p.indexOf('/api/avatar/') === 0) {
+  } else if (p.indexOf('/api/cover/') === 0 || p.indexOf('/api/discover/image/') === 0 || p.indexOf('/api/avatar/') === 0) {
     e.respondWith(staleWhileRevalidate(req, DATA));
   } else if (p.indexOf('/api/') !== 0) {
     e.respondWith(networkFirst(req, SHELL, req.mode === 'navigate' ? '/' : null));

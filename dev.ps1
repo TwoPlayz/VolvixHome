@@ -33,7 +33,7 @@ try {
     $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-mb.js'), '3100') -PassThru -WindowStyle Hidden
     $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-lrclib.js'), '3101') -PassThru -WindowStyle Hidden
     $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-wiki.js'), '3102') -PassThru -WindowStyle Hidden
-    $env:VH_WIKIPEDIA_URL = 'http://127.0.0.1:3102'; $env:VH_WIKIDATA_URL = 'http://127.0.0.1:3102'
+    $env:VH_WIKIPEDIA_URL = 'http://127.0.0.1:3102'; $env:VH_WIKIDATA_URL = 'http://127.0.0.1:3102'; $env:VH_COVERART_URL = 'http://127.0.0.1:3102'
     $env:VH_MUSICBRAINZ_URL = 'http://127.0.0.1:3100/ws/2'
     $env:VH_LIDARR_URL = 'http://127.0.0.1:8686'   # already connected, so Search -> Get works right away
     $env:VH_LIDARR_API_KEY = 'testkey'

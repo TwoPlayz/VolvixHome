@@ -53,6 +53,14 @@ impl Client {
         r.json().await.ok()
     }
 
+    /// An album picture (about 250 px) from the Cover Art Archive, if it has one.
+    pub async fn fetch_cover(&self, rg_id: &str) -> Option<Vec<u8>> {
+        let base = base("VH_COVERART_URL", crate::musicbrainz::COVER_ART);
+        let r = self.http.get(format!("{base}/release-group/{rg_id}/front-250")).send().await.ok()?;
+        if !r.status().is_success() { return None; }
+        r.bytes().await.ok().filter(|b| b.len() > 100 && b.len() < 2_000_000).map(|b| b.to_vec())
+    }
+
     /// Ok(None) = nothing found. Err = couldn't ask (don't remember that as "none").
     pub async fn find(&self, mb: &Mb, name: &str) -> Result<Option<Info>, String> {
         if !self.enabled { return Ok(None); }

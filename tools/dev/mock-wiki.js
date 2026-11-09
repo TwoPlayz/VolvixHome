@@ -1,4 +1,4 @@
-﻿// A stand-in for Wikipedia + Wikidata, only for trying artist bios offline. Usage: node mock-wiki.js <port>
+// A stand-in for Wikipedia + Wikidata, only for trying artist bios offline. Usage: node mock-wiki.js <port>
 const http = require('http');
 const port = Number(process.argv[2] || 3102);
 // a 2x2 PNG
@@ -14,6 +14,7 @@ http.createServer((req, res) => {
   const send = (v, t = 'application/json') => { res.writeHead(200, { 'content-type': t }); res.end(typeof v === 'string' || Buffer.isBuffer(v) ? v : JSON.stringify(v)); };
   const sum = u.pathname.match(/^\/api\/rest_v1\/page\/summary\/(.+)$/);
   if (sum) { const t = decodeURIComponent(sum[1]); return bios[t] ? send({ type: 'standard', title: t, extract: bios[t], thumbnail: { source: 'http://127.0.0.1:' + port + '/img/' + t + '.png' } }) : (res.writeHead(404), res.end()); }
+  if (/^\/release-group\/[^/]+\/front-250$/.test(u.pathname)) return u.pathname.includes('nocover') ? (res.writeHead(404), res.end()) : send(PAD, 'image/png');
   if (u.pathname.startsWith('/img/')) return send(PAD, 'image/png');
   if (u.pathname === '/wiki/Special:EntityData/Q4242.json') return send({ entities: { Q4242: { sitelinks: { enwiki: { title: 'Mara Quinn' } } } } });
   res.writeHead(404); res.end();

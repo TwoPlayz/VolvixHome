@@ -71,35 +71,50 @@ Spin.views = Spin.views || {};
 
   let seq = 0;
   const SHOW = { artists: 4, songs: 6, albums: 8 };
-  /** Fill `host` with results from MusicBrainz for `q`, only the kinds the filter allows (Search calls this, debounced). */
+  const TITLES = { artists: 'Artists', songs: 'Songs', albums: 'Albums' };
+  /** Fill `host` with results from MusicBrainz for `q`, only the kinds the filter allows (Search calls this, debounced).
+   *  Each kind is asked for separately and shown the moment it arrives, so the first results appear fast. */
   function searchInto(host, q, type) {
     if (!host) return;
     type = type || 'all';
     const mine = ++seq;
-    host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p>Searching…</p></div></div></section>';
-    S.server.json('GET', '/api/lidarr/search?term=' + encodeURIComponent(q)).then(function (r) {
-      if (mine !== seq) return; // a newer search took over
-      canGet = !!r.canRequest; lidarrOn = !!r.configured;
-      const open = {}; // which sections the person has expanded
-      function draw() {
-        const want = function (k) { return type === 'all' || type === k; };
-        const part = function (key, title, list, card, wrap) {
-          if (!want(key) || !list.length) return '';
-          const limit = type === 'all' && !open[key] ? SHOW[key] : list.length;
-          return '<h3 class="gm-sub">' + title + '</h3><div class="' + wrap + '">' + list.slice(0, limit).map(card).join('') + '</div>' +
-            (list.length > limit ? '<button class="btn btn-ghost btn-sm gm-more" data-gm-more="' + key + '">Show ' + (list.length - limit) + ' more</button>' : '');
-        };
-        const html = part('artists', 'Artists', r.artists || [], artistRow, 'gm-list') + part('songs', 'Songs', r.songs || [], songCard, 'gm-list') + part('albums', 'Albums', r.albums || [], albumCard, 'gm-grid');
-        if (!html) { host.innerHTML = ''; return; }
-        host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2>' +
-          '<p>' + (canGet ? 'Not in your library yet? Open an artist or album to see everything, then get it. Lidarr downloads it and adds it here when it\'s done.' : lidarrOn ? 'Only admins can ask for new music.' : S.data.can('settings') ? 'Connect Lidarr in Settings to download these.' : 'Ask an admin to connect Lidarr so these can be downloaded.') + '</p></div></div>' +
-          html + '<p class="gm-credit">Results from MusicBrainz.</p></section>';
-      }
-      draw();
-      host.onclick = function (e) { const b = e.target.closest('[data-gm-more]'); if (b) { open[b.dataset.gmMore] = true; draw(); } };
-    }).catch(function (e) {
-      if (mine !== seq) return;
-      host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p class="gm-error">' + S.esc(e.message) + '</p></div></div></section>';
+    const kinds = ['artists', 'songs', 'albums'].filter(function (k) { return type === 'all' || type === k; });
+    const got = {}, open = {}, failed = {};
+    let head = 'Searching…';
+    function skeleton(k) {
+      const n = k === 'albums' ? 4 : 3;
+      return '<h3 class="gm-sub">' + TITLES[k] + '</h3><div class="' + (k === 'albums' ? 'gm-grid' : 'gm-list') + '">' +
+        new Array(n + 1).join('<div class="gm-card gm-skel"><span class="gm-skel-art"></span><span class="gm-skel-lines"><i></i><i></i></span></div>') + '</div>';
+    }
+    function draw() {
+      const pending = kinds.some(function (k) { return !got[k] && !failed[k]; });
+      const part = function (key, card, wrap) {
+        if (!got[key]) return failed[key] ? '' : skeleton(key);
+        const list = got[key];
+        if (!list.length) return '';
+        const limit = type === 'all' && !open[key] ? SHOW[key] : list.length;
+        return '<h3 class="gm-sub">' + TITLES[key] + '</h3><div class="' + wrap + '">' + list.slice(0, limit).map(card).join('') + '</div>' +
+          (list.length > limit ? '<button class="btn btn-ghost btn-sm gm-more" data-gm-more="' + key + '">Show ' + (list.length - limit) + ' more</button>' : '');
+      };
+      const cards = { artists: artistRow, songs: songCard, albums: albumCard }, wraps = { artists: 'gm-list', songs: 'gm-list', albums: 'gm-grid' };
+      const html = kinds.map(function (k) { return part(k, cards[k], wraps[k]); }).join('');
+      if (!pending && !html) { host.innerHTML = Object.keys(failed).length ? '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p class="gm-error">' + S.esc(head) + '</p></div></div></section>' : ''; return; }
+      const sub = pending && !html.replace(/gm-skel/g, '') ? head : (canGet ? 'Not in your library yet? Open an artist or album to see everything, then get it. Lidarr downloads it and adds it here when it\'s done.' : lidarrOn ? 'Only admins can ask for new music.' : S.data.can('settings') ? 'Connect Lidarr in Settings to download these.' : 'Ask an admin to connect Lidarr so these can be downloaded.');
+      host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p>' + S.esc(pending && Object.keys(got).length === 0 ? 'Searching…' : sub) + '</p></div></div>' +
+        html + (pending ? '' : '<p class="gm-credit">Results from MusicBrainz.</p>') + '</section>';
+    }
+    draw();
+    host.onclick = function (e) { const b = e.target.closest('[data-gm-more]'); if (b) { open[b.dataset.gmMore] = true; draw(); } };
+    kinds.forEach(function (k) {
+      S.server.json('GET', '/api/lidarr/search?kind=' + k + '&term=' + encodeURIComponent(q)).then(function (r) {
+        if (mine !== seq) return; // a newer search took over
+        canGet = !!r.canRequest; lidarrOn = !!r.configured;
+        got[k] = r[k] || [];
+        draw();
+      }).catch(function (e) {
+        if (mine !== seq) return;
+        failed[k] = true; head = e.message; draw();
+      });
     });
   }
 

@@ -14,11 +14,13 @@ use tokio::sync::Mutex as AsyncMutex;
 
 const DEFAULT_BASE: &str = "https://musicbrainz.org/ws/2";
 pub const COVER_ART: &str = "https://coverartarchive.org";
+const BURST: f64 = 3.0; // calls allowed at once
+const PACE: f64 = 1.1;  // seconds per call after that
 
 pub struct Client {
     http: reqwest::Client,
     base: String, // VH_MUSICBRAINZ_URL for a mirror (or tests); default musicbrainz.org
-    gate: AsyncMutex<Instant>, // enforces >= 1s between calls
+    gate: AsyncMutex<(f64, Instant)>, // a small token bucket: a short burst is fine, then about one call a second
     cache: Mutex<HashMap<String, (Instant, Value)>>,
 }
 
@@ -32,7 +34,7 @@ impl Client {
                 .build()
                 .expect("http client"),
             base: std::env::var("VH_MUSICBRAINZ_URL").ok().map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| !u.is_empty()).unwrap_or_else(|| DEFAULT_BASE.to_string()),
-            gate: AsyncMutex::new(Instant::now() - Duration::from_secs(2)),
+            gate: AsyncMutex::new((BURST, Instant::now())),
             cache: Mutex::new(HashMap::new()),
         }
     }
@@ -41,14 +43,18 @@ impl Client {
         if let Some(v) = self.cached(path_and_query) {
             return Ok(v);
         }
-        // one call at a time, at least 1.1s apart (MusicBrainz rate limit)
-        {
-            let mut last = self.gate.lock().await;
-            let wait = Duration::from_millis(1100).checked_sub(last.elapsed());
-            if let Some(w) = wait {
-                tokio::time::sleep(w).await;
-            }
-            *last = Instant::now();
+        // MusicBrainz allows about one call a second on average. A search needs three calls (songs, albums, artists), so
+        // a small burst is allowed and then the pace is held: the first results appear at once instead of after 3 seconds.
+        loop {
+            let wait = {
+                let mut g = self.gate.lock().await;
+                let now = Instant::now();
+                g.0 = (g.0 + now.duration_since(g.1).as_secs_f64() / PACE).min(BURST);
+                g.1 = now;
+                if g.0 >= 1.0 { g.0 -= 1.0; break; }
+                Duration::from_secs_f64((1.0 - g.0) * PACE)
+            };
+            tokio::time::sleep(wait).await;
         }
         let url = format!("{}/{path_and_query}", self.base);
         let res = self.http.get(&url).header("Accept", "application/json").send().await
@@ -74,6 +80,17 @@ impl Client {
             cache.clear();
         }
         cache.insert(key.to_string(), (Instant::now(), v));
+    }
+
+    /// Just one kind of result ("songs", "albums" or "artists"), so the page can show each as soon as it arrives.
+    pub async fn search_part(&self, term: &str, kind: &str) -> Result<Vec<Value>, String> {
+        let q = encode(term);
+        match kind {
+            "songs" => self.get(&format!("recording?query={q}&fmt=json&limit=25")).await.map(|v| parse_songs(&v)),
+            "albums" => self.get(&format!("release-group?query={q}%20AND%20(primarytype:album%20OR%20primarytype:ep)&fmt=json&limit=20")).await.map(|v| parse_albums(&v)),
+            "artists" => self.get(&format!("artist?query={q}&fmt=json&limit=10")).await.map(|v| parse_artists(&v)),
+            _ => Err("Unknown kind.".into()),
+        }
     }
 
     /// Songs, albums and artists for a search term.
@@ -284,8 +301,9 @@ fn year(date: Option<&str>) -> Option<String> {
     date.and_then(|d| d.get(0..4)).filter(|y| y.len() == 4).map(String::from)
 }
 
+/// Where the app asks for an album's picture: our own server, which fetches it once from the Cover Art Archive and keeps it.
 fn cover(rg_id: &str) -> String {
-    format!("{COVER_ART}/release-group/{rg_id}/front-250")
+    format!("/api/discover/image/{rg_id}")
 }
 
 /// Albums (release-groups of type album/ep).
