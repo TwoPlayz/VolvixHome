@@ -28,6 +28,10 @@ for (const [artist, album, year, songs, base] of lib) {
     fs.writeFileSync(file, wav(12 + i * 3, base + i * 40, { INAM: t, IART: artist, IPRD: album, ITRK: i + 1, ICRD: year, IGNR: 'Indie', IMUS: artist + ' & Jane Doe', IPRO: 'Sam Lee', IWRI: 'Jane Doe', ICOP: '(c) ' + year + ' ' + artist }));
   });
 }
+// sample lyrics: a timed .lrc next to one song, plain words in a .txt next to another; the rest can come from LRCLIB
+const h = path.join(root, 'Harbor Lights', 'Tidewater (2025)');
+fs.writeFileSync(path.join(h, '01 - Low Tide.lrc'), '[ti:Low Tide]\n[00:00.50]The water pulls back from the shore\n[00:03.00]Leaving lanterns on the sand\n[00:06.00]We count the hours, one by one\n[00:09.00]Until the tide comes in again\n');
+fs.writeFileSync(path.join(h, '02 - Lantern Hours.txt'), 'Lantern hours, lantern hours\nSlow light on the harbor wall\nNobody here but the two of us\nAnd the long way home\n');
 // an untagged file: names must come from the folders
 const dir = path.join(root, 'Low Orchard', 'Orchard Season');
 fs.mkdirSync(dir, { recursive: true });

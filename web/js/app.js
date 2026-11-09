@@ -53,6 +53,7 @@ window.Spin.views = window.Spin.views || {};
           '<div class="view" id="view" tabindex="-1"></div>' +
         '</main>' +
         '<aside class="queue-panel" data-p="queue-panel" aria-label="Queue" hidden></aside>' +
+        '<aside class="queue-panel lyrics-panel" data-p="lyrics-panel" aria-label="Lyrics" hidden></aside>' +
 
         playerBar() +
 

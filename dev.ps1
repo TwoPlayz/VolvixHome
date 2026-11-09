@@ -1,4 +1,4 @@
-﻿# Run Volvix Home locally for quick changes. No Docker, nothing to host.
+# Run Volvix Home locally for quick changes. No Docker, nothing to host.
 #
 #   powershell -File dev.ps1            # server + sample music
 #   powershell -File dev.ps1 -Mocks     # also fake Lidarr + MusicBrainz, so Search -> "Get more music" works
@@ -31,8 +31,10 @@ try {
   if ($Mocks) {
     $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-lidarr.js'), $music, $data, '8686') -PassThru -WindowStyle Hidden
     $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-mb.js'), '3100') -PassThru -WindowStyle Hidden
+    $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-lrclib.js'), '3101') -PassThru -WindowStyle Hidden
     $env:VH_MUSICBRAINZ_URL = 'http://127.0.0.1:3100/ws/2'
-    Write-Host 'Fake Lidarr (port 8686) and MusicBrainz (port 3100) are running.'
+    $env:VH_LRCLIB_URL = 'http://127.0.0.1:3101'
+    Write-Host 'Fake Lidarr (port 8686), MusicBrainz (3100) and LRCLIB (3101) are running.'
     Write-Host 'In the app: Settings -> Lidarr -> address 127.0.0.1:8686, API key  testkey'
   }
   Write-Host ''

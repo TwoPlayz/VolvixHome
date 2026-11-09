@@ -17,6 +17,7 @@
 mod auth;
 mod library;
 mod lidarr;
+mod lyrics;
 mod musicbrainz;
 mod party;
 mod social;
@@ -76,6 +77,7 @@ struct AppState {
     requests: Mutex<Vec<lidarr::Request>>,
     http: lidarr::Client,
     mb: musicbrainz::Client,
+    lyrics: lyrics::Client,
     social: social::Social,
     parties: party::Parties,
 }
@@ -710,6 +712,49 @@ async fn track_credits(State(st): State<Shared>, headers: HeaderMap, Path(id): P
     }
 }
 
+/// Lyrics for a song: next to the file, inside it, or from LRCLIB. What LRCLIB says is cached on disk
+/// (found for 90 days, "not found" for a day, so a later upload there gets picked up).
+async fn track_lyrics(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return error(StatusCode::BAD_REQUEST, "Bad id.");
+    }
+    let (path, title, artist, album, duration) = {
+        let lib = st.lib.read().unwrap();
+        let Some(t) = lib.catalog.tracks.iter().find(|t| t.id == id) else { return error(StatusCode::NOT_FOUND, "No such track.") };
+        let album = lib.catalog.albums.iter().find(|a| a.id == t.album_id).map(|a| a.title.clone()).unwrap_or_default();
+        (lib.track_path(&id).cloned(), t.title.clone(), t.artist.clone(), album, t.duration)
+    };
+    // 1 + 2: the files themselves (read off the async threads)
+    if let Some(p) = path {
+        if let Ok(Some(l)) = tokio::task::spawn_blocking(move || lyrics::from_files(&p)).await {
+            return Json(json!({ "lyrics": l.to_json(), "online": st.lyrics.online() })).into_response();
+        }
+    }
+    // 3: LRCLIB, through the cache
+    let file = st.cfg.data_dir.join("cache").join("lyrics").join(format!("{id}.json"));
+    if let Some(v) = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        let found = !v["lyrics"].is_null();
+        let age = if found { 90 * 86400 } else { 86400 };
+        if v["at"].as_u64().map(|at| at + age > auth::now()).unwrap_or(false) {
+            return Json(json!({ "lyrics": v["lyrics"], "online": st.lyrics.online() })).into_response();
+        }
+    }
+    match st.lyrics.find(&title, &artist, &album, duration).await {
+        Ok(found) => {
+            let value = found.map(|l| l.to_json()).unwrap_or(Value::Null);
+            if st.lyrics.online() {
+                if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
+                let _ = std::fs::write(&file, json!({ "at": auth::now(), "lyrics": value }).to_string());
+            }
+            Json(json!({ "lyrics": value, "online": st.lyrics.online() })).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e),
+    }
+}
+
 async fn people(State(st): State<Shared>, headers: HeaderMap) -> Response {
     if let Err(r) = signed_in(&st, &headers) {
         return r;
@@ -1120,6 +1165,7 @@ async fn main() {
         requests: Mutex::new(lidarr::load_requests(&cfg.data_dir)),
         http: lidarr::Client::new(),
         mb: musicbrainz::Client::new(),
+        lyrics: lyrics::Client::new(),
         social: social::Social::load(&cfg.data_dir),
         parties: party::Parties::new(),
         lib: RwLock::new(Library::default()),
@@ -1175,6 +1221,7 @@ async fn main() {
         .route("/api/lidarr/requests", get(lidarr_requests))
         .route("/api/hooks/lidarr", post(lidarr_hook).put(lidarr_hook))
         .route("/api/credits/{id}", get(track_credits))
+        .route("/api/lyrics/{id}", get(track_lyrics))
         .route("/api/party", get(party_mine).post(party_create))
         .route("/api/party/{id}/events", get(party_events))
         .route("/api/party/{id}/join", post(party_join))

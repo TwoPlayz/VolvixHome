@@ -19,6 +19,7 @@ and on phones.
 - **Notifications:** the bell shows playlist invites, and tells you when music you requested has arrived.
 - **Credits:** ⋯ → Credits on any song shows what's tagged in the file plus producers, engineers, mixers,
   composers and writers from MusicBrainz; albums have Credits & info.
+- **Lyrics:** ⋯ → Lyrics beside the player. Timed lyrics follow the song (tap a line to jump there); plain lyrics just scroll. They're found in a .lrc file next to the song (same name), then the file's own tags, then [LRCLIB](https://lrclib.net), a free lyrics database (cached on the server). Set VH_LYRICS_ONLINE=0 to never ask LRCLIB.
 - **Shuffle** is a switch for the whole player (it never starts or interrupts playback); you can **follow**
   artists, and drag playlist or queue rows from anywhere to reorder them.
 - **Listening parties:** press the party button in the player to start one and invite people from your
@@ -62,6 +63,8 @@ arm64, so it runs on most NAS boxes and on a Raspberry Pi.
 | `VH_LIDARR_URL` | | e.g. `http://lidarr:8686` (or set it in Settings → Lidarr) |
 | `VH_LIDARR_API_KEY` | | Lidarr → Settings → General → API Key |
 | `VH_MUSICBRAINZ_URL` | musicbrainz.org | set only to use a MusicBrainz mirror |
+| `VH_LYRICS_ONLINE` | on | `0` = never look lyrics up online (files and tags still work) |
+| `VH_LRCLIB_URL` | lrclib.net | a LRCLIB mirror |
 
 To reach it from outside your home, put it behind a reverse proxy with HTTPS (Caddy, Nginx Proxy
 Manager, Tailscale…). Sessions use an HttpOnly cookie.
