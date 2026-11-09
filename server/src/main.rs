@@ -191,6 +191,36 @@ struct Login {
     password: String,
 }
 
+/// The newest change time (seconds) among the app's own files: the version number of what's on disk.
+fn web_build(dir: &std::path::Path) -> u64 {
+    fn walk(d: &std::path::Path, depth: u32, best: &mut u64) {
+        let Ok(rd) = std::fs::read_dir(d) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() { if depth < 4 { walk(&p, depth + 1, best); } }
+            else if let Ok(t) = e.metadata().and_then(|m| m.modified()) {
+                if let Ok(s) = t.duration_since(std::time::UNIX_EPOCH) { *best = (*best).max(s.as_secs()); }
+            }
+        }
+    }
+    let mut best = 0;
+    walk(dir, 0, &mut best);
+    best
+}
+
+/// index.html with the app's version stamped on its files (styles.css?v=…), so a changed file can never be
+/// served from a browser's old copy: the page is re-checked every time and points at fresh addresses.
+async fn index_page(State(st): State<Shared>) -> Response {
+    let Ok(html) = std::fs::read_to_string(st.cfg.web_dir.join("index.html")) else { return error(StatusCode::NOT_FOUND, "No app here.") };
+    let b = web_build(&st.cfg.web_dir).to_string();
+    let html = html
+        .replace("href=\"css/styles.css\"", &format!("href=\"css/styles.css?v={b}\""))
+        .replace("src=\"js/config.js\"", &format!("src=\"js/config.js?v={b}\""))
+        .replace("src=\"js/boot.js\"", &format!("src=\"js/boot.js?v={b}\""))
+        .replace("<head>", &format!("<head><script>window.VH_BUILD=\"{b}\";</script>"));
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], html).into_response()
+}
+
 /// Basic hardening headers on every response.
 async fn security_headers(req: Request, next: axum::middleware::Next) -> Response {
     let is_api = req.uri().path().starts_with("/api/");
@@ -1520,6 +1550,8 @@ async fn main() {
         .route("/api/devices/events", get(device_events))
         .route("/api/devices/active", post(device_active))
         .route("/api/devices/transfer", post(device_transfer))
+        .route("/", get(index_page))
+        .route("/index.html", get(index_page))
         .route("/api/people", get(people))
         .route("/api/me/now", axum::routing::put(put_now))
         .route("/api/household", get(household))

@@ -2719,3 +2719,6 @@ body.reordering { cursor: grabbing; user-select: none; }
 .bar[data-seek]:focus-visible, .bar[data-volume]:focus-visible { outline: 2px solid var(--accent); }
 
 .player-meta { flex: 0 1 auto; } /* the like / add / more buttons sit right after the song name */
+
+/* every round button in the player lights up the same way on hover */
+.ctrl:not(.ctrl-play):hover, .icon-btn:hover { background: var(--hover); }

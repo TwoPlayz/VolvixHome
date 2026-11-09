@@ -3,7 +3,7 @@
    - your library, profile and playlists: the network first, the last copy when you're offline
    - covers: cached as they're seen
    Songs are NOT handled here: downloaded songs live in the page's own cache (downloads.js). */
-const SHELL = 'vh-shell-v2';
+const SHELL = 'vh-shell-v3';
 const DATA = 'vh-api';          // cleared when you sign out
 const FRESH = ['/api/library', '/api/me', '/api/me/data', '/api/people', '/api/shared', '/api/household', '/api/notifications', '/api/status'];
 

@@ -70,7 +70,7 @@
   function loadScripts(list, done) {
     if (!list.length) return done();
     const s = document.createElement('script');
-    s.src = list[0] + '?v=' + (window.VOLVIX_CONFIG && window.VOLVIX_CONFIG.built || '');
+    s.src = list[0] + '?v=' + (window.VH_BUILD || (window.VOLVIX_CONFIG && window.VOLVIX_CONFIG.built) || '');
     s.onload = function () { loadScripts(list.slice(1), done); };
     s.onerror = function () { failScreen('Part of the app (' + list[0] + ') didn\'t load.'); };
     document.body.appendChild(s);
