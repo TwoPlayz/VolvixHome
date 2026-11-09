@@ -31,7 +31,7 @@ jobs:
       - name: Image name (lowercase)
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/volvix-home" >> "$GITHUB_ENV"
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           # amd64 only: arm64 is built by emulation here and takes 10x longer. For a Raspberry Pi / ARM NAS, change this to
