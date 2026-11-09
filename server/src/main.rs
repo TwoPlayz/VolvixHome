@@ -1058,38 +1058,31 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
         if lidarr::in_lidarr(&item) {
             // already known to Lidarr: make sure it's wanted, then search for it now
             let album_id = item["id"].as_i64().unwrap_or(0);
+            let _ = st.http.put(&s, "artist/editor", &json!({ "artistIds": [item["artist"]["id"]], "monitored": true })).await;
             match st.http.put(&s, "album/monitor", &json!({ "albumIds": [album_id], "monitored": true })).await {
                 Ok(_) => st.http.post(&s, "command", &json!({ "name": "AlbumSearch", "albumIds": [album_id] })).await,
                 Err(e) => Err(e),
             }
         } else {
-            let mut album = item.clone();
-            album["monitored"] = json!(true);
-            album["addOptions"] = json!({ "searchForNewAlbum": true });
-            // the artist is added too if Lidarr doesn't have them yet, but only this album is wanted
-            album["artist"] = lidarr::artist_body(&item["artist"], &s, false);
-            match st.http.post(&s, "album", &album).await {
-                // adding isn't enough on its own (Lidarr may add it unmonitored and not look for it): make sure it's wanted
-                // and start the search ourselves, so "requested" really means Lidarr is looking for it
-                Ok(added) => {
-                    let mut album_id = added["id"].as_i64().unwrap_or(0);
-                    if album_id <= 0 {
-                        album_id = st.http.get(&s, &format!("album?foreignAlbumId={id}")).await.ok()
-                            .and_then(|v| v.as_array().and_then(|a| a.first().and_then(|x| x["id"].as_i64()))).unwrap_or(0);
-                    }
-                    if album_id > 0 {
-                        match st.http.put(&s, "album/monitor", &json!({ "albumIds": [album_id], "monitored": true })).await {
-                            Ok(_) => st.http.post(&s, "command", &json!({ "name": "AlbumSearch", "albumIds": [album_id] })).await.map_err(|e| format!("Lidarr added it, but couldn't start looking for it: {e}")),
-                            Err(e) => Err(format!("Lidarr added it, but couldn't mark it wanted: {e}")),
-                        }
-                    } else {
-                        Err("Lidarr added it, but then couldn't find it to start the search.".to_string())
-                    }
-                }
-                Err(e) => Err(e),
+            // New to Lidarr. Lidarr needs the artist first, then fills in their releases in the background (this takes
+            // a little while), and only then does the album exist to be wanted. So: add the artist quietly now, answer
+            // straight away, and finish the job (mark the album wanted, start the search) once Lidarr has caught up.
+            let artist_mb = item["artist"]["foreignArtistId"].as_str().unwrap_or("").to_string();
+            let existing = st.http.get(&s, &format!("artist?mbId={artist_mb}")).await.ok().and_then(|v| v.as_array().and_then(|a| a.first().cloned()));
+            let artist_id = match existing {
+                Some(a) => a["id"].as_i64().unwrap_or(0),
+                None => match st.http.post(&s, "artist", &lidarr::artist_body(&item["artist"], &s, false)).await {
+                    Ok(added) => added["id"].as_i64().unwrap_or(0),
+                    Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
+                },
+            };
+            if artist_id <= 0 {
+                return error(StatusCode::BAD_GATEWAY, "Lidarr added the artist but didn't say which one it is.");
             }
-        }
-    } else if lidarr::in_lidarr(&item) {
+            let (st2, s2, album_mb, kind_of) = (st.clone(), s.clone(), id.to_string(), item["albumType"].as_str().unwrap_or("").to_string());
+            tokio::spawn(finish_album_request(st2, s2, album_mb, artist_id, kind_of));
+            Ok(Value::Null)
+        }    } else if lidarr::in_lidarr(&item) {
         st.http.post(&s, "command", &json!({ "name": "ArtistSearch", "artistId": item["id"] })).await
     } else {
         match st.http.post(&s, "artist", &lidarr::artist_body(&item, &s, true)).await {
@@ -1115,6 +1108,7 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
         by_id: user.id.clone(),
         at: auth::now(),
         notified: false,
+        problem: None,
     };
     {
         let mut list = st.requests.lock().unwrap();
@@ -1126,6 +1120,38 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
     Json(json!({ "request": req })).into_response()
 }
 
+/// The second half of requesting an album that Lidarr didn't know: wait for Lidarr to list the artist's releases, then
+/// mark the album wanted and start the search. If it never shows up, say why on the Requests page.
+async fn finish_album_request(st: Shared, s: lidarr::Settings, album_mb: String, artist_id: i64, album_type: String) {
+    let mut album_id = 0;
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        if let Ok(list) = st.http.get(&s, &format!("album?artistId={artist_id}")).await {
+            if let Some(a) = list.as_array().and_then(|l| l.iter().find(|a| a["foreignAlbumId"].as_str() == Some(album_mb.as_str()))) {
+                album_id = a["id"].as_i64().unwrap_or(0);
+                if album_id > 0 { break; }
+            }
+        }
+    }
+    let result: Result<(), String> = if album_id > 0 {
+        async {
+            // the artist has to be monitored for Lidarr to import what it finds; only this album is wanted
+            st.http.put(&s, "artist/editor", &json!({ "artistIds": [artist_id], "monitored": true })).await?;
+            st.http.put(&s, "album/monitor", &json!({ "albumIds": [album_id], "monitored": true })).await?;
+            st.http.post(&s, "command", &json!({ "name": "AlbumSearch", "albumIds": [album_id] })).await?;
+            Ok(())
+        }.await.map_err(|e: String| format!("Lidarr has the album but couldn't start the search: {e}"))
+    } else if album_type == "Single" || album_type == "EP" {
+        Err(format!("Lidarr's metadata profile doesn't include {}s, so it never listed this release. In Lidarr → Settings → Profiles → Metadata, allow that type, then request it again.", album_type))
+    } else {
+        Err("Lidarr didn't list this release after adding the artist (it may still be loading their releases). Open the artist in Lidarr and refresh it, then request again.".into())
+    };
+    let mut list = st.requests.lock().unwrap();
+    if let Some(r) = list.iter_mut().find(|r| r.foreign_id == album_mb) {
+        r.problem = result.err();
+        lidarr::save_requests(&st.cfg.data_dir, &list);
+    }
+}
 /// Take back a request that hasn't been downloaded yet: stop its download, tell Lidarr not to want it, forget the request.
 /// Only whoever asked can do it (or someone who manages members), and not once the music has arrived.
 async fn lidarr_cancel(State(st): State<Shared>, headers: HeaderMap, Path(foreign_id): Path<String>) -> Response {

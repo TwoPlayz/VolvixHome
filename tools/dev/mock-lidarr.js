@@ -107,10 +107,18 @@ http.createServer(async (req, res) => {
       const ar = ARTISTS.find(a => a.foreignArtistId === (b && b.foreignArtistId));
       if (!ar) return send(res, 400, [{ errorMessage: 'Artist not found' }]);
       db.artists[ar.foreignArtistId] = db.nextId++;
-      log.push('add artist ' + ar.artistName + ' monitor=' + (b.addOptions && b.addOptions.monitor));
+      db.addedAt = db.addedAt || {}; db.addedAt[ar.foreignArtistId] = Date.now();   // like Lidarr, the artist's releases show up a few seconds later
+      log.push('add artist ' + ar.artistName + ' monitor=' + (b.addOptions && b.addOptions.monitor) + ' monitored=' + b.monitored);
       return send(res, 201, artistJson(ar));
     }
-    case 'GET /api/v1/album': { const al = ALBUMS.find(a => a.foreignAlbumId === u.query.foreignAlbumId); return send(res, 200, al && db.albums[al.foreignAlbumId] ? [Object.assign(albumJson(al), { statistics: { trackFileCount: fs.existsSync(albumDir(al)) ? al.songs.length : 0 } })] : []); }
+    case 'GET /api/v1/album': {
+      if (u.query.artistId) {
+        const ar = ARTISTS.find(a => db.artists[a.foreignArtistId] === Number(u.query.artistId));
+        const ready = ar && db.addedAt && Date.now() - db.addedAt[ar.foreignArtistId] > 4000;
+        if (!ready) return send(res, 200, []);
+        return send(res, 200, ALBUMS.filter(a => a.artist === ar.foreignArtistId).map(a => { db.albums[a.foreignAlbumId] = db.albums[a.foreignAlbumId] || db.nextId++; return albumJson(a); }));
+      }
+      const al = ALBUMS.find(a => a.foreignAlbumId === u.query.foreignAlbumId); return send(res, 200, al && db.albums[al.foreignAlbumId] ? [Object.assign(albumJson(al), { statistics: { trackFileCount: fs.existsSync(albumDir(al)) ? al.songs.length : 0 } })] : []); }
     case 'GET /api/v1/artist': { const ar = ARTISTS.find(a => a.foreignArtistId === u.query.mbId); return send(res, 200, ar && db.artists[ar.foreignArtistId] ? [artistJson(ar)] : []); }
     case 'PUT /api/v1/artist/editor': { const b = await readBody(req); log.push('artist editor ' + JSON.stringify(b)); return send(res, 202, {}); }
     case 'PUT /api/v1/album/monitor': { const b = await readBody(req); log.push('monitor ' + JSON.stringify(b.albumIds)); return send(res, 202, {}); }

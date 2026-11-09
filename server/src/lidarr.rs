@@ -82,6 +82,9 @@ pub struct Request {
     /// the requester has been notified that it arrived (old requests count as done)
     #[serde(default = "yes")]
     pub notified: bool,
+    /// something went wrong after the request was accepted (shown on the Requests page)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
 }
 
 pub fn load_requests(dir: &Path) -> Vec<Request> {

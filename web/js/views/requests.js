@@ -206,7 +206,7 @@ Spin.views = Spin.views || {};
           return '<div class="list-row">' + art(x.image, x.kind === 'artist', x.title) +
             '<span class="list-text"><span class="t-name">' + S.esc(x.kind === 'artist' ? 'Everything by ' + x.artist : x.title) + '</span>' +
             '<span class="t-sub">' + S.esc((x.kind === 'album' ? x.artist + ' · ' : '') + 'Requested by ' + (x.byId === S.data.me.serverId ? 'you' : x.by) + ' · ' + ago(x.at)) + '</span></span>' +
-            where + '</div>';
+            where + (x.problem ? '<span class="gm-error gm-problem">' + S.esc(x.problem) + '</span>' : '') + '</div>';
         }).join('') + '</div>' : S.emptyState('search', 'Nothing requested yet', 'Search for an artist or album. Anything not in your library can be requested from there.',
           '<a class="btn btn-primary" href="#/search">Search</a>')) +
         '</section>';
