@@ -11,6 +11,16 @@ and on phones.
   controls. You come back to where you left off.
 - **Household accounts:** sign in with just your name and a password (no username). The first person to
   open a new server becomes the admin, and the admin adds everyone else (Account → People).
+- **Household page:** see what everyone else is listening to right now (only if they share it; Settings →
+  Privacy has a switch and a private session) and the playlists they've made public.
+- **Shared playlists:** make a playlist collaborative and pick who can edit it. They get an invite
+  (Notifications) and edit the same copy. Everyone's changes are applied on the server, so two people
+  editing at once never overwrite each other.
+- **Notifications:** the bell shows playlist invites, and tells you when music you requested has arrived.
+- **Credits:** ⋯ → Credits on any song shows what's tagged in the file plus producers, engineers, mixers,
+  composers and writers from MusicBrainz; albums have Credits & info.
+- **Shuffle** is a switch for the whole player (it never starts or interrupts playback); you can **follow**
+  artists, and drag playlist or queue rows from anywhere to reorder them.
 - **Liked Songs:** a heart on the player, Now Playing and every song row adds or removes the song in one
   built-in Liked Songs playlist.
 - **Music folder:** admins pick it under Settings → Library by browsing the server's folders (or set
@@ -101,7 +111,12 @@ VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run
 | `POST /api/me/password` | `{current, new}` |
 | `GET/PUT /api/me/data` | your app data (playlists, settings) |
 | `GET/POST /api/users`, `DELETE /api/users/{id}` | household (admin) |
-| `GET /api/library`, `POST /api/library/rescan` | catalog; rescan (admin) |
+| ``GET /api/library``, ``POST /api/library/rescan`` | catalog; rescan (admin) |
+| ``GET /api/people``, ``GET /api/household`` | everyone in the household; what they're playing + their public playlists |
+| ``PUT /api/me/now`` | tell the household what you're playing (``{trackId, playing}``; no track = stop sharing) |
+| ``GET/POST /api/shared``, ``POST /api/shared/{id}/op`` | shared playlists and every change to them (add, remove, move, invite, accept…) |
+| ``GET /api/notifications``, ``POST /api/notifications/read`` | invites, and when a request has arrived |
+| ``GET /api/credits/{trackId}`` | credits for a song from MusicBrainz (cached on disk) |
 | `GET /api/stream/{trackId}` | audio, with HTTP Range for seeking |
 | `GET /api/cover/{albumId}` | album art |
 | `GET/PUT /api/lidarr` | Lidarr status; connect and choose folder/profiles (admin) |

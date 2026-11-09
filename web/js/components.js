@@ -117,7 +117,7 @@ window.Spin = window.Spin || {};
         (opts.addedBy ? '<span class="c-added">' + (adder ? S.avatar(adder, 22) + '<span>' + S.esc(adder.id === 'u_me' ? 'You' : adder.name.split(' ')[0]) + '</span>' : '') + '</span>' : '') +
         '<span class="c-dur">' + S.fmtTime(t.duration) + '</span>' +
         '<span class="c-act">' + S.likeButton(id, 'row-like', 16) + S.addButton(id, 'row-add') +
-          (opts.playlistId ? '<span class="drag-handle" data-drag title="Drag to reorder" aria-hidden="true">' + S.icon('grip', 18) + '</span>' : '') +
+          (opts.playlistId ? '<span class="drag-sign" title="Drag to reorder: grab the row anywhere" aria-hidden="true">' + S.icon('grip', 18) + '</span>' : '') +
           '<button class="row-more" data-track-menu="' + id + '" aria-label="More options for ' + S.esc(t.title) + '">' + S.icon('more', 18) + '</button></span>' +
       '</div>';
     }).join('');
@@ -140,6 +140,185 @@ window.Spin = window.Spin || {};
       btn.innerHTML = S.icon(playingThis ? 'pause' : 'play', 24);
       btn.setAttribute('aria-label', playingThis ? 'Pause' : 'Play');
     }
+    const st = S.player.state, ctx = st.context || {}, live = !!S.player.current() && st.playing;
+    // playlist page: the big play button follows what's playing from this playlist
+    const pb = S.$('[data-pl-play]');
+    if (pb) {
+      const on = live && ctx.id === pb.dataset.plPlay;
+      pb.innerHTML = S.icon(on ? 'pause' : 'play', 24);
+      pb.setAttribute('aria-label', on ? 'Pause' : 'Play');
+    }
+    // artist page
+    const ab = S.$('[data-artist-play]');
+    if (ab) {
+      const on = live && ctx.type === 'artist' && ctx.name === ab.dataset.artistPlay;
+      ab.innerHTML = S.icon(on ? 'pause' : 'play', 16) + (on ? 'Pause' : 'Play');
+    }
+    // shuffle is one switch for the whole player: every shuffle button shows whether it's on
+    S.$$('[data-album-shuffle], [data-pl-shuffle], [data-artist-shuffle]').forEach(function (b) {
+      b.classList.toggle('on', !!st.shuffle);
+      b.setAttribute('aria-pressed', st.shuffle ? 'true' : 'false');
+    });
+  };
+
+  /**
+   * Drag-to-reorder from anywhere on a row. Call it from a pointerdown handler:
+   *   S.dragRows(event, { row: '.track', scope: element, index: row => number, drop: (from, to) => … })
+   * (optional: rows() for the rows that can take a drop, scroller for the element to auto-scroll.)
+   * Mouse and pen: moving a few pixels starts the drag. Touch: press and hold briefly, so scrolling still works.
+   * Buttons and links inside the row keep working, and a drag never counts as a click.
+   */
+  S.dragRows = function (e, o) {
+    if (e.button > 0 || e.isPrimary === false) return;
+    const row = e.target.closest(o.row);
+    if (!row) return;
+    const control = e.target.closest('a, button, input, select, textarea, [role="button"], [data-go]');
+    if (control && control !== row) return;
+    const scope = o.scope || document;
+    const touch = e.pointerType === 'touch';
+    const startX = e.clientX, startY = e.clientY, from = o.index(row);
+    const scrollEl = o.scroller || S.$('#main');
+    let dragging = false, hold = null, auto = null, target = null, after = false, lastY = startY;
+
+    const rowsNow = function () { return o.rows ? o.rows() : S.$$(o.row, scope); };
+    function mark(y) {
+      lastY = y;
+      S.$$('.drop-before, .drop-after').forEach(function (r) { r.classList.remove('drop-before', 'drop-after'); });
+      const rows = rowsNow();
+      target = null;
+      for (const r of rows) {
+        const b = r.getBoundingClientRect();
+        if (y >= b.top && y <= b.bottom) { target = r; after = y > b.top + b.height / 2; break; }
+      }
+      if (!target && rows.length) {
+        if (y < rows[0].getBoundingClientRect().top) { target = rows[0]; after = false; } else { target = rows[rows.length - 1]; after = true; }
+      }
+      if (target && target !== row) target.classList.add(after ? 'drop-after' : 'drop-before');
+    }
+    function block(ev) { ev.preventDefault(); }
+    function begin() {
+      dragging = true;
+      row.classList.add('dragging');
+      document.body.classList.add('reordering');
+      try { window.getSelection().removeAllRanges(); if (navigator.vibrate) navigator.vibrate(8); } catch (err) { /* no vibration */ }
+      if (touch) document.addEventListener('touchmove', block, { passive: false });
+      // scroll while holding a row near the top or bottom edge
+      auto = setInterval(function () {
+        const b = scrollEl.getBoundingClientRect();
+        if (lastY < b.top + 60) scrollEl.scrollTop -= 12; else if (lastY > b.bottom - 60) scrollEl.scrollTop += 12;
+        mark(lastY);
+      }, 30);
+    }
+    function move(ev) {
+      if (ev.pointerId !== e.pointerId) return;
+      lastY = ev.clientY;
+      if (!dragging) {
+        const d = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+        if (touch) { if (d > 8) stop(false); return; } // moved before the hold finished: they're scrolling
+        if (d < 5) return;
+        begin();
+      }
+      mark(ev.clientY);
+    }
+    function stop(drop) {
+      clearTimeout(hold); clearInterval(auto);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      document.removeEventListener('touchmove', block);
+      if (!dragging) return;
+      document.body.classList.remove('reordering');
+      S.$$('.dragging, .drop-before, .drop-after').forEach(function (r) { r.classList.remove('dragging', 'drop-before', 'drop-after'); });
+      // the click that follows letting go must not play the row
+      const swallow = function (ev) { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener('click', swallow, true);
+      setTimeout(function () { window.removeEventListener('click', swallow, true); }, 60);
+      if (drop && target && target !== row) {
+        let to = o.index(target) + (after ? 1 : 0);
+        if (to > from) to -= 1;
+        if (to !== from) o.drop(from, to);
+      }
+    }
+    function up() { stop(true); }
+    function cancel() { stop(false); }
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    if (touch) hold = setTimeout(begin, 280);
+  };
+
+  /* ---------- credits ---------- */
+  function creditRows(list) {
+    return list.map(function (c) { return '<div class="credit-row"><dt>' + S.esc(c.role) + '</dt><dd>' + S.esc(c.names) + '</dd></div>'; }).join('');
+  }
+  function detailRows(pairs) {
+    return pairs.filter(function (p) { return p[1]; }).map(function (p) { return '<div class="credit-row"><dt>' + S.esc(p[0]) + '</dt><dd>' + S.esc(p[1]) + '</dd></div>'; }).join('');
+  }
+
+  /** Who made a song: what's tagged in the file, plus what MusicBrainz knows. */
+  S.creditsDialog = function (trackId) {
+    const t = S.data.track(trackId), al = S.data.album(t.albumId);
+    const q = S.lib.quality(al);
+    const own = t.credits || [];
+    const m = S.modal({
+      title: 'Credits',
+      body: '<div class="credits">' +
+        '<div class="credits-head"><span class="credits-art">' + S.cover(al) + '</span><div><strong>' + S.esc(t.title) + '</strong>' +
+          '<span>' + S.esc(t.artist) + '</span><span>' + S.esc(al.title) + (al.year ? ' · ' + al.year : '') + '</span></div></div>' +
+        '<dl class="credit-list">' + creditRows([{ role: 'Artist', names: t.artist }]) + creditRows(own) + '<span data-mb></span></dl>' +
+        '<p class="set-hint" data-mb-note>Looking up more on MusicBrainz…</p>' +
+        '<div class="q-label">Details</div>' +
+        '<dl class="credit-list">' + detailRows([
+          ['Album', al.title], ['Year', al.year ? String(al.year) : ''], ['Label', al.label], ['Genre', al.genre],
+          ['Format', q.detail], ['Length', t.duration ? S.fmtTime(t.duration) : ''], ['Copyright', al.copyright]
+        ]) + '</dl></div>',
+      actions: [{ label: 'Close', kind: 'secondary' }]
+    });
+    S.server.json('GET', '/api/credits/' + encodeURIComponent(trackId)).then(function (r) {
+      if (!document.body.contains(m.el)) return;
+      // MusicBrainz fills in what the file doesn't say
+      const have = own.map(function (c) { return c.role; });
+      const extra = r.credits.filter(function (c) { return have.indexOf(c.role) === -1; });
+      S.$('[data-mb]', m.el).outerHTML = creditRows(extra);
+      S.$('[data-mb-note]', m.el).textContent = r.credits.length
+        ? (extra.length ? 'More credits from MusicBrainz.' : 'MusicBrainz agrees with the file.')
+        : (own.length ? '' : 'No credits found for this song in the file or on MusicBrainz.');
+      if (!own.length && !r.credits.length) S.$('[data-mb-note]', m.el).classList.add('credits-none');
+    }).catch(function (x) {
+      if (!document.body.contains(m.el)) return;
+      S.$('[data-mb]', m.el).remove();
+      S.$('[data-mb-note]', m.el).textContent = own.length ? '' : (x.message || 'Couldn\'t reach MusicBrainz.');
+    });
+  };
+
+  /** Album info: label, catalog number, copyright, formats, and everyone credited on its songs. */
+  S.albumInfoDialog = function (albumId) {
+    const al = S.data.album(albumId);
+    const q = S.lib.quality(al);
+    const total = S.lib.totalDuration(al.trackIds);
+    // who's credited anywhere on the album, by role
+    const roles = {};
+    al.trackIds.forEach(function (id) {
+      (S.data.track(id).credits || []).forEach(function (c) {
+        if (c.role === 'ISRC') return;
+        const set = roles[c.role] = roles[c.role] || [];
+        c.names.split(', ').forEach(function (n) { if (!set.some(function (x) { return x.toLowerCase() === n.toLowerCase(); })) set.push(n); });
+      });
+    });
+    const people = Object.keys(roles).map(function (r) { return { role: r, names: roles[r].join(', ') }; });
+    S.modal({
+      title: 'Album info',
+      body: '<div class="credits"><div class="credits-head"><span class="credits-art">' + S.cover(al) + '</span><div><strong>' + S.esc(al.title) + '</strong>' +
+        '<span>' + S.esc(al.artist) + '</span></div></div>' +
+        '<dl class="credit-list">' + detailRows([
+          ['Released', al.year ? String(al.year) : ''], ['Label', al.label], ['Catalog number', al.catalogNumber], ['Genre', al.genre],
+          ['Songs', al.trackIds.length + ' · ' + S.fmtLong(total)], ['Quality', q.label + (q.detail ? ' (' + q.detail + ')' : '')], ['Copyright', al.copyright]
+        ]) + '</dl>' +
+        (people.length ? '<div class="q-label">Credits on this album</div><dl class="credit-list">' + creditRows(people) + '</dl>'
+          : '<p class="set-hint">No credits are tagged in these files. Open a song\'s ⋯ menu → Credits to look it up on MusicBrainz.</p>') +
+        '</div>',
+      actions: [{ label: 'Close', kind: 'secondary' }]
+    });
   };
 
   function trackMenu(anchor, trackId) {
@@ -165,6 +344,7 @@ window.Spin = window.Spin || {};
       } });
     }
     items.push({ label: 'Go to album', icon: 'disc', onClick: function () { S.router.go('/album/' + t.albumId); } });
+    items.push({ label: 'Credits', icon: 'book', onClick: function () { S.creditsDialog(trackId); } });
     items.push({ label: 'Go to artist', icon: 'user', onClick: function () { location.hash = S.artistUrl(t.artist); } });
     S.popover(anchor, { items: items });
   }
@@ -189,15 +369,17 @@ window.Spin = window.Spin || {};
   S.undoToast = undoToast;
 
   /** Toast with a button that takes you somewhere (e.g. the exact settings section). */
-  S.linkToast = function (message, label, path) {
+  /** Toast with a button. It goes to "path", or runs "onClick" instead when given (e.g. Join a party). */
+  S.linkToast = function (message, label, path, onClick) {
     const host = document.getElementById('toasts');
     const el = document.createElement('div');
     el.className = 'toast toast-action';
     el.innerHTML = '<span>' + S.esc(message) + '</span><button class="toast-btn">' + S.esc(label) + '</button>';
-    el.querySelector('button').addEventListener('click', function () { el.remove(); S.router.go(path); });
+    el.querySelector('button').addEventListener('click', function () { el.remove(); if (onClick) onClick(); else S.router.go(path); });
     host.appendChild(el);
-    setTimeout(function () { el.classList.add('leaving'); }, 5000);
-    setTimeout(function () { el.remove(); }, 5300);
+    const stay = onClick ? 12000 : 5000; // an invite needs longer than a confirmation
+    setTimeout(function () { el.classList.add('leaving'); }, stay);
+    setTimeout(function () { el.remove(); }, stay + 300);
   };
 
 
@@ -213,7 +395,7 @@ window.Spin = window.Spin || {};
     const playPl = e.target.closest('[data-play-playlist]');
     if (playPl) {
       e.preventDefault(); e.stopPropagation();
-      const pl = S.store.state.playlists.find(function (p) { return p.id === playPl.dataset.playPlaylist; });
+      const pl = S.pl.get(playPl.dataset.playPlaylist);
       if (pl) S.player.play(pl.tracks.map(function (x) { return x.id; }), 0, { type: 'playlist', id: pl.id, name: pl.name });
       return;
     }
@@ -232,7 +414,7 @@ window.Spin = window.Spin || {};
     }
 
     const row = e.target.closest('.track[data-track-id]');
-    if (row && !e.target.closest('a, button, [data-drag], [data-go]')) activateRow(row);
+    if (row && !e.target.closest('a, button, [data-go]')) activateRow(row);
   });
 
   document.addEventListener('keydown', function (e) {

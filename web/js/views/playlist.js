@@ -1,4 +1,4 @@
-/* Volvix Home — Playlist page: songs, reorder, add songs. (Sharing between people on the server comes later.) */
+/* Volvix Home — Playlist page: songs, reorder (drag a row from anywhere), add songs, invite people to edit. */
 window.Spin = window.Spin || {};
 Spin.views = Spin.views || {};
 (function (S) {
@@ -6,8 +6,9 @@ Spin.views = Spin.views || {};
 
   const addUi = { q: '' };
 
+  /** Owner first, then everyone who can edit. */
   function people(pl) {
-    const ids = ['u_me'].concat(pl.collaborators || []);
+    const ids = [pl.owner].concat(pl.collaborators || []).filter(function (id, i, a) { return a.indexOf(id) === i; });
     return '<span class="avatar-stack">' + ids.map(function (id) { return S.avatar(S.data.person(id), 26); }).join('') + '</span>';
   }
 
@@ -75,30 +76,25 @@ Spin.views = Spin.views || {};
               (pl.collaborative ? people(pl) : S.avatar(owner, 24)) +
               '<span><strong>' + S.esc(owner.name) + '</strong>' +
               ' · ' + ids.length + ' song' + (ids.length === 1 ? '' : 's') + (ids.length ? ', ' + S.fmtLong(total) : '') +
-              (locked ? ' · <span class="locked-count">' + S.icon('lock', 12) + locked + ' locked</span>' : '') + '</span>' +
+              ((pl.invited || []).length && isOwner ? ' · ' + pl.invited.length + ' invited' : '') + '</span>' +
             '</div>' +
           '</div>' +
         '</header>' +
 
         '<div class="action-bar">' +
-          '<button class="play-lg" data-pl-play' + (ids.some(S.lib.isTrackOwned) ? '' : ' disabled') + ' aria-label="Play">' + S.icon('play', 24) + '</button>' +
-          '<button class="icon-btn icon-btn-lg" data-pl-shuffle aria-label="Shuffle play" title="Shuffle play"' + (ids.length ? '' : ' disabled') + '>' + S.icon('shuffle', 22) + '</button>' +
-          (pl.collaborative && isOwner ? '<button class="icon-btn icon-btn-lg" data-pl-invite aria-label="Collaborators" title="Collaborators">' + S.icon('users', 22) + '</button>' : '') +
+          '<button class="play-lg" data-pl-play="' + pl.id + '"' + (ids.length ? '' : ' disabled') + ' aria-label="Play">' + S.icon('play', 24) + '</button>' +
+          '<button class="icon-btn icon-btn-lg" data-pl-shuffle aria-label="Shuffle" title="Shuffle: play this in a random order"' + (ids.length ? '' : ' disabled') + '>' + S.icon('shuffle', 22) + '</button>' +
+          (isOwner && !pl.liked ? '<button class="icon-btn icon-btn-lg" data-pl-invite aria-label="' + (pl.shared ? 'Who can edit' : 'Invite people to edit') + '" title="' + (pl.shared ? 'Who can edit' : 'Invite people to edit') + '">' + S.icon('users', 22) + '</button>' : '') +
           (!isOwner ? '<button class="btn btn-sm ' + (following ? 'btn-secondary' : 'btn-primary') + '" data-pl-follow>' + (following ? S.icon('check', 15) + 'Following' : S.icon('plus', 15) + 'Follow') + '</button>' : '') +
           '<button class="icon-btn icon-btn-lg" data-pl-more aria-label="More options">' + S.icon('more', 22) + '</button>' +
         '</div>' +
-
-        (locked ? '<div class="banner banner-slim"><span class="banner-icon">' + S.icon('lock', 18) + '</span>' +
-          '<div class="banner-text"><strong>' + locked + ' song' + (locked === 1 ? ' is' : 's are') + ' locked</strong>' +
-          '<span>They stay in the playlist and are skipped until you own the physical release.</span></div></div>' : '') +
 
         (ids.length
           ? S.trackList(ids, {
               showAlbum: true, showCover: true, playlistId: canEdit ? pl.id : null,
               addedBy: pl.collaborative ? pl.tracks.map(function (t) { return t.addedBy; }) : null,
               context: { type: 'playlist', id: pl.id, name: pl.name }
-            }) +
-            '' // the drag handle (and Move up / down in each song's menu) explains itself
+            })
           : '') +
 
         (!canEdit ? '<p class="list-note readonly-note">' + S.icon('lock', 12) + ' This is ' + S.esc(owner.name.split(' ')[0]) +
@@ -123,12 +119,12 @@ Spin.views = Spin.views || {};
       root.onclick = function (e) {
         const t = e.target;
         if (t.closest('[data-pl-play]')) {
-          const cur = S.player.current();
-          if (cur && S.player.state.context && S.player.state.context.id === pl.id) S.player.toggle();
-          else S.player.play(ids, 0, ctx);
+          const c = S.player.state.context;
+          if (S.player.current() && c && c.id === pl.id) S.player.toggle();
+          else S.player.play(ids, -1, ctx); // from the top, or a random song when shuffle is on
         }
-        else if (t.closest('[data-pl-shuffle]')) { S.player.state.shuffle = true; S.player.play(ids, Math.floor(Math.random() * ids.length), ctx); }
-        else if (t.closest('[data-pl-share]')) S.pl.shareDialog(pl.id);
+        // shuffle is a switch for how songs from here get queued; it never starts or interrupts playback
+        else if (t.closest('[data-pl-shuffle]')) S.player.toggleShuffle();
         else if (t.closest('[data-pl-follow]')) S.pl.toggleFollow(pl.id);
         else if (t.closest('[data-pl-invite]')) S.pl.inviteDialog(pl.id);
         else if (t.closest('[data-edit]')) { if (isOwner && !pl.liked) S.pl.editDialog(pl.id); }
@@ -145,11 +141,16 @@ Spin.views = Spin.views || {};
           const items = [];
           if (isOwner && !pl.liked) {
             items.push({ label: 'Edit details', icon: 'settings', onClick: function () { S.pl.editDialog(pl.id); } });
+            items.push({ label: pl.shared ? 'Who can edit' : 'Make collaborative', icon: 'users', onClick: function () { S.pl.inviteDialog(pl.id); } });
+            if (pl.shared) items.push({ label: 'Stop sharing', icon: 'x', onClick: function () { S.pl.toggleCollaborative(pl.id); } });
           }
-          if (!isOwner) {
+          if (!isOwner && pl.shared) {
+            items.push({ label: 'Leave playlist', icon: 'x', onClick: function () { S.pl.leave(pl.id); } });
+          }
+          if (!isOwner && !pl.shared) {
             items.push({ label: following ? 'Unfollow' : 'Follow', icon: following ? 'x' : 'plus', onClick: function () { S.pl.toggleFollow(pl.id); } });
             items.push({ label: 'Save a copy to my playlists', icon: 'music', onClick: function () { S.pl.duplicate(pl.id); } });
-            items.push({ label: 'Go to ' + owner.name.split(' ')[0] + '\'s profile', icon: 'user', onClick: function () { S.router.go('/user/' + owner.id); } });
+            items.push({ label: owner.name.split(' ')[0] + '\'s page', icon: 'user', onClick: function () { S.router.go('/household'); } });
           }
           if (ids.length) items.push({ label: 'Add to queue', icon: 'queue', onClick: function () { S.player.addToQueue(ids); } });
           if (isOwner && !pl.liked) {
@@ -165,60 +166,15 @@ Spin.views = Spin.views || {};
     }
   };
 
-  /* ---------- drag to reorder (pointer events: mouse, touch and pen) ---------- */
+  /* ---------- drag to reorder: grab a row anywhere (mouse, touch and pen) ---------- */
   function bindDrag(root, plId) {
     root.onpointerdown = function (e) {
-      const handle = e.target.closest('[data-drag]');
-      if (!handle) return;
-      const row = handle.closest('.track[data-pl-index]');
-      if (!row) return;
-      e.preventDefault();
-      const from = parseInt(row.dataset.plIndex, 10);
-      const main = S.$('#main');
-      let target = null, after = false, scrollTimer = null, lastY = e.clientY;
-      row.classList.add('dragging');
-      document.body.classList.add('reordering');
-
-      function mark(y) {
-        lastY = y;
-        S.$$('.drop-before, .drop-after', root).forEach(function (r) { r.classList.remove('drop-before', 'drop-after'); });
-        const rows = S.$$('.track[data-pl-index]', root);
-        target = null;
-        for (const r of rows) {
-          const b = r.getBoundingClientRect();
-          if (y >= b.top && y <= b.bottom) { target = r; after = y > b.top + b.height / 2; break; }
-        }
-        if (!target && rows.length) {
-          // above the first / below the last row
-          const first = rows[0].getBoundingClientRect(), last = rows[rows.length - 1];
-          if (y < first.top) { target = rows[0]; after = false; } else { target = last; after = true; }
-        }
-        if (target && target !== row) target.classList.add(after ? 'drop-after' : 'drop-before');
-      }
-      // scroll the page while dragging near the top/bottom edge
-      function autoScroll() {
-        const b = main.getBoundingClientRect();
-        if (lastY < b.top + 60) main.scrollTop -= 12;
-        else if (lastY > b.bottom - 60) main.scrollTop += 12;
-        mark(lastY);
-      }
-      function move(ev) { mark(ev.clientY); }
-      function up() {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
-        clearInterval(scrollTimer);
-        document.body.classList.remove('reordering');
-        S.$$('.dragging, .drop-before, .drop-after', root).forEach(function (r) { r.classList.remove('dragging', 'drop-before', 'drop-after'); });
-        if (!target || target === row) return;
-        let to = parseInt(target.dataset.plIndex, 10) + (after ? 1 : 0);
-        if (to > from) to -= 1;
-        if (to !== from) S.pl.move(plId, from, to);
-      }
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-      window.addEventListener('pointercancel', up);
-      scrollTimer = setInterval(autoScroll, 30);
+      S.dragRows(e, {
+        row: '.track[data-pl-index]',
+        scope: root,
+        index: function (row) { return parseInt(row.dataset.plIndex, 10); },
+        drop: function (from, to) { S.pl.move(plId, from, to); }
+      });
     };
   }
 })(window.Spin);

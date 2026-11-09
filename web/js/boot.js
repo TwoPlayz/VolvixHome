@@ -5,9 +5,10 @@
 
   // the app, in load order (boot.js appends these once the library is loaded)
   const SCRIPTS = [
-    'js/ui.js', 'js/data.js', 'js/store.js', 'js/router.js', 'js/components.js', 'js/player.js', 'js/playlists.js',
-    'js/nowplaying.js', 'js/views/home.js', 'js/views/search.js', 'js/views/library.js', 'js/views/album.js',
-    'js/views/artist.js', 'js/views/playlist.js', 'js/views/account.js', 'js/views/requests.js', 'js/app.js'
+    'js/ui.js', 'js/data.js', 'js/store.js', 'js/router.js', 'js/components.js', 'js/player.js', 'js/household.js',
+    'js/playlists.js', 'js/nowplaying.js', 'js/notifications.js', 'js/views/home.js', 'js/views/search.js',
+    'js/views/library.js', 'js/views/album.js', 'js/views/artist.js', 'js/views/playlist.js', 'js/views/household.js',
+    'js/views/notifications.js', 'js/views/account.js', 'js/views/requests.js', 'js/app.js'
   ];
 
   const app = document.getElementById('app');
@@ -77,8 +78,14 @@
 
   function start() {
     get('/api/me').then(function (me) {
-      return Promise.all([get('/api/library'), get('/api/me/data').catch(function () { return null; })]).then(function (r) {
-        window.VH = { user: me.user, lidarr: me.lidarr || {}, catalog: r[0], userdata: r[1] };
+      const soft = function (p, fallback) { return p.catch(function () { return fallback; }); };
+      return Promise.all([
+        get('/api/library'), soft(get('/api/me/data'), null),
+        soft(get('/api/people'), { people: [] }), soft(get('/api/shared'), { playlists: [], invites: [] }),
+        soft(get('/api/household'), { members: [] }), soft(get('/api/notifications'), { items: [], unread: 0 })
+      ]).then(function (r) {
+        window.VH = { user: me.user, lidarr: me.lidarr || {}, catalog: r[0], userdata: r[1],
+          people: r[2].people, shared: r[3], household: r[4], notifications: r[5] };
         app.innerHTML = '';
         loadScripts(SCRIPTS, function () { /* app.js starts itself */ });
       });

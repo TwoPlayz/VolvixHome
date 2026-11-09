@@ -62,7 +62,7 @@ function importAlbum(q) {
   // Lidarr → Connect → Webhook ("On Release Import")
   let token = '';
   try { token = JSON.parse(fs.readFileSync(path.join(VHDATA, 'lidarr.json'), 'utf8')).hook_token; } catch (e) {}
-  const req = http.request({ host: '127.0.0.1', port: 4747, path: '/api/hooks/lidarr?token=' + token, method: 'POST', headers: { 'Content-Type': 'application/json' } },
+  const req = http.request({ host: '127.0.0.1', port: Number(process.env.VH_PORT || 4747), path: '/api/hooks/lidarr?token=' + token, method: 'POST', headers: { 'Content-Type': 'application/json' } },
     r => log.push('webhook -> ' + r.statusCode));
   req.on('error', e => log.push('webhook error ' + e.message));
   req.end(JSON.stringify({ eventType: 'AlbumDownload', album: { title: al.title } }));

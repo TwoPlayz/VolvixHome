@@ -4,7 +4,7 @@ Spin.views = Spin.views || {};
 (function (S) {
   'use strict';
 
-  const ui = { tab: 'albums', sort: 'added' };
+  const ui = { tab: 'albums', sort: 'added', artists: 'following' };
   const TABS = [['albums', 'Albums'], ['artists', 'Artists'], ['songs', 'Songs'], ['playlists', 'Playlists']];
   const SORTS = [['added', 'Recently added'], ['title', 'Title'], ['artist', 'Artist'], ['year', 'Release year']];
 
@@ -26,7 +26,7 @@ Spin.views = Spin.views || {};
 
   function body() {
     if (ui.tab === 'playlists') {
-      const pls = S.store.state.playlists;
+      const pls = S.pl.all().concat(S.pl.followed());
       return pls.length ? '<div class="grid">' + pls.map(S.playlistCard).join('') + '</div>'
         : S.emptyState('music', 'No playlists yet', 'Make one with the + next to Playlists, or from any song\'s + button.',
           '<button class="btn btn-primary" data-new-pl>' + S.icon('plus', 16) + 'New playlist</button>');
@@ -40,8 +40,17 @@ Spin.views = Spin.views || {};
       sorted().forEach(function (a) { a.trackIds.forEach(function (id) { ids.push(id); }); });
       return S.trackList(ids.slice(0, 2000), { showCover: true, showAlbum: true, context: { type: 'library', name: 'Your Library' } });
     }
-    // artists
-    return '<div class="rows">' + S.data.artists.map(function (name) {
+    // artists: the ones you follow (Follow is on each artist's page), or everyone on the server
+    const followed = S.store.state.followedArtists.map(function (n) { return n.toLowerCase(); });
+    const names = ui.artists === 'all' ? S.data.artists : S.data.artists.filter(function (n) { return followed.indexOf(n.toLowerCase()) !== -1; });
+    const chips = '<div class="chips artist-scope">' + [['following', 'Following'], ['all', 'All artists']].map(function (c) {
+      return '<button class="chip' + (ui.artists === c[0] ? ' active' : '') + '" data-scope="' + c[0] + '">' + c[1] + '</button>';
+    }).join('') + '</div>';
+    if (!names.length) {
+      return chips + S.emptyState('user', 'You\'re not following any artists yet', 'Open an artist and press Follow. They\'ll be here.',
+        '<button class="btn btn-secondary" data-scope="all">Browse all artists</button>');
+    }
+    return chips + '<div class="rows">' + names.map(function (name) {
       const al = S.data.albumsBy(name);
       const shown = al.length ? al : S.data.appearsOn(name);
       return '<a class="list-row" href="' + S.artistUrl(name) + '">' +
@@ -69,7 +78,9 @@ Spin.views = Spin.views || {};
       root.onclick = function (e) {
         const tab = e.target.closest('[data-tab]');
         if (tab) { ui.tab = tab.dataset.tab; history.replaceState(null, '', '#/library/' + ui.tab); S.app.refresh(); return; }
-        if (e.target.closest('[data-new-pl]')) S.pl.createDialog();
+        if (e.target.closest('[data-new-pl]')) { S.pl.createDialog(); return; }
+        const scope = e.target.closest('[data-scope]');
+        if (scope) { ui.artists = scope.dataset.scope; S.$('[data-body]', root).innerHTML = body(); }
       };
       root.onchange = function (e) {
         if (e.target.matches('[data-sort]')) { ui.sort = e.target.value; S.$('[data-body]', root).innerHTML = body(); }

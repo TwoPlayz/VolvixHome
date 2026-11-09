@@ -42,33 +42,32 @@ Spin.views = Spin.views || {};
         '</header>' +
         '<div class="action-bar">' +
           '<button class="play-lg" data-album-play="' + album.id + '" aria-label="Play">' + S.icon('play', 24) + '</button>' +
-          '<button class="icon-btn icon-btn-lg" data-album-shuffle aria-label="Shuffle play" title="Shuffle play">' + S.icon('shuffle', 22) + '</button>' +
+          '<button class="icon-btn icon-btn-lg" data-album-shuffle aria-label="Shuffle" aria-pressed="false" title="Shuffle: play this in a random order">' + S.icon('shuffle', 22) + '</button>' +
           '<button class="icon-btn icon-btn-lg" data-album-add aria-label="Add album to playlist" title="Add to playlist">' + S.icon('plus', 22) + '</button>' +
           '<button class="icon-btn icon-btn-lg" data-album-more aria-label="More options">' + S.icon('more', 22) + '</button>' +
         '</div>' +
         list +
-        '<div class="album-foot"><p>' + S.esc(q.detail) + '</p></div>' +
+        '<div class="album-foot"><p>' + S.esc(q.detail) + (album.label ? ' · ℗ ' + S.esc(album.label) : '') + '</p></div>' +
         (others.length ? S.shelf('More by ' + album.artist, others.map(function (a) {
           return S.albumCard(a, { meta: '<span>' + (a.year || '') + '</span>' });
         }).join('')) : '');
 
       if (S.markPlaying) S.markPlaying();
 
-      function playAlbum(shuffle) {
-        if (shuffle && !S.player.state.shuffle) S.player.state.shuffle = true;
-        S.player.play(album.trackIds, 0, ctx);
-      }
       root.onclick = function (e) {
         if (e.target.closest('[data-album-play]')) {
           const cur = S.player.current();
-          if (cur && cur.albumId === album.id) S.player.toggle(); else playAlbum(false);
+          if (cur && cur.albumId === album.id) S.player.toggle();
+          else S.player.play(album.trackIds, -1, ctx); // from the top, or a random song when shuffle is on
         }
-        else if (e.target.closest('[data-album-shuffle]')) playAlbum(true);
+        // shuffle is a switch: it never starts or interrupts what's playing
+        else if (e.target.closest('[data-album-shuffle]')) S.player.toggleShuffle();
         else if (e.target.closest('[data-album-add]')) S.pl.addToDialog(album.trackIds);
         else if (e.target.closest('[data-album-more]')) {
           S.popover(e.target.closest('[data-album-more]'), { items: [
             { label: 'Add to queue', icon: 'queue', onClick: function () { S.player.addToQueue(album.trackIds); } },
             { label: 'Play next', icon: 'next', onClick: function () { S.player.addNext(album.trackIds); } },
+            { label: 'Credits & info', icon: 'book', onClick: function () { S.albumInfoDialog(album.id); } },
             { label: 'Go to artist', icon: 'user', onClick: function () { location.hash = S.artistUrl(album.artist); } }
           ] });
         }

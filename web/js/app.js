@@ -7,7 +7,8 @@ window.Spin.views = window.Spin.views || {};
   const NAV = [
     { route: '/home', label: 'Home', icon: 'home' },
     { route: '/search', label: 'Search', icon: 'search' },
-    { route: '/library', label: 'Your Library', short: 'Library', icon: 'library' }
+    { route: '/library', label: 'Your Library', short: 'Library', icon: 'library' },
+    { route: '/household', label: 'Household', icon: 'family' }
   ].concat(window.VH && window.VH.lidarr && window.VH.lidarr.configured ? [{ route: '/requests', label: 'Requests', icon: 'download' }] : []);
 
   let shellMounted = false;
@@ -46,6 +47,7 @@ window.Spin.views = window.Spin.views || {};
             '<button class="mobile-back" data-action="back" aria-label="Back">' + S.icon('chevronLeft', 24) + '</button>' +
             '<a class="mobile-brand" href="#/home">' + S.brand(24) + '</a>' +
             '<div class="topbar-spacer"></div>' +
+            S.notify.bellButton() +
             '<button class="avatar-btn" data-action="account-menu" aria-label="Account menu">' + S.avatar(me, 32) + '</button>' +
           '</div>' +
           '<div class="view" id="view" tabindex="-1"></div>' +
@@ -98,10 +100,12 @@ window.Spin.views = window.Spin.views || {};
   function renderSidebarPlaylists() {
     const host = S.$('[data-playlists]');
     if (!host) return;
-    host.innerHTML = S.store.state.playlists.map(function (pl) {
+    host.innerHTML = S.pl.all().concat(S.pl.followed()).map(function (pl) {
+      const n = pl.tracks.length + (pl.tracks.length === 1 ? ' song' : ' songs');
+      const sub = pl.owner !== 'u_me' ? 'By ' + S.esc(S.data.person(pl.owner).name.split(' ')[0]) + ' · ' + n : (pl.collaborative ? 'Collaborative · ' : 'Playlist · ') + n;
       return '<a class="playlist-link" href="#/playlist/' + pl.id + '" data-route="/playlist/' + pl.id + '">' +
         S.playlistCover(pl, 'thumb') +
-        '<span class="pl-text"><span class="pl-name">' + S.esc(pl.name) + '</span><span class="pl-sub">Playlist · ' + pl.tracks.length + (pl.tracks.length === 1 ? ' song' : ' songs') + '</span></span></a>';
+        '<span class="pl-text"><span class="pl-name">' + S.esc(pl.name) + '</span><span class="pl-sub">' + sub + '</span></span></a>';
     }).join('') || '<p class="pl-empty">Create your first playlist with +</p>';
     setActive(S.router.current());
   }
@@ -134,7 +138,7 @@ window.Spin.views = window.Spin.views || {};
   }
 
   /* ---------- back: in-app history, so Back never leaves the app ---------- */
-  const ROOTS = ['/home', '/search', '/library', '/requests'];
+  const ROOTS = ['/home', '/search', '/library', '/household', '/requests'];
   const trail = [];
   function track(path) {
     if (trail[trail.length - 1] === path) return;
@@ -193,6 +197,7 @@ window.Spin.views = window.Spin.views || {};
         else if (right > r.scrollLeft + r.clientWidth - 8) r.scrollLeft = right - r.clientWidth + 16;
       });
       hideSplash();
+      S.notify.updateBell();
       setActive(path);
       if (!opts || !opts.keepScroll) S.$('#main').scrollTop = 0;
       track(path);
@@ -229,6 +234,8 @@ window.Spin.views = window.Spin.views || {};
   S.router.add('/artist/:slug', S.views.artist);
   S.router.add('/playlist/:id', S.views.playlist);
   S.router.add('/requests', S.views.requests);
+  S.router.add('/household', S.views.household);
+  S.router.add('/notifications', S.views.notifications);
   S.router.add('/account/:tab', S.views.account);
   S.router.add('/account', { render: function () { S.router.replace('/account/profile'); S.app.render('/account/profile'); } });
   // old sign-in link: you're already signed in

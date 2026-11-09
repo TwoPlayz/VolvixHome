@@ -13,12 +13,14 @@ window.Spin = window.Spin || {};
       v: 1,
       theme: 'system',                 // 'system' | 'dark' | 'light'
       playlists: [],
-      followed: [],                    // playlists you follow (shared playlists: later)
+      followed: [],                    // other people's playlists you follow
+      followedArtists: [],             // artist names you follow (Library → Artists)
       recent: [],                      // album ids, most recent first
       settings: {
         gapless: true,
         normalize: false,
         privateSession: false,
+        shareActivity: true,             // let the household see what you're listening to
         allowExplicit: true
       }
     };

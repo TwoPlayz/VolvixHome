@@ -16,7 +16,7 @@ Spin.views = Spin.views || {};
     const albums = S.data.albums.filter(function (a) { return hit(a.title + ' ' + a.artist + ' ' + (a.year || '') + ' ' + (a.genre || '')); });
     const artists = S.data.artists.filter(function (name) { return hit(name); });
     const songs = Object.keys(S.data.tracks).map(S.data.track).filter(function (t) { return hit(t.title + ' ' + t.artist); });
-    const playlists = S.store.state.playlists.filter(function (p) { return hit(p.name + ' ' + (p.description || '')); });
+    const playlists = S.pl.all().concat(S.household.allPlaylists()).filter(function (p) { return hit(p.name + ' ' + (p.description || '')); });
     // exact-ish matches first
     const starts = function (text) { return norm(text).indexOf(n) === 0 ? 0 : 1; };
     albums.sort(function (a, b) { return starts(a.title) - starts(b.title); });

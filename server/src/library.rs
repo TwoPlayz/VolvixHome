@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::tag::{Accessor, ItemKey};
+use lofty::tag::{Accessor, ItemKey, Tag};
 use serde::Serialize;
 use walkdir::WalkDir;
 
@@ -24,6 +24,51 @@ pub fn id(prefix: &str, text: &str) -> String {
         h = h.wrapping_mul(0x100000001b3);
     }
     format!("{prefix}{h:012x}").chars().take(prefix.len() + 12).collect()
+}
+
+/// One line of credits: a role and who did it ("Producer" -> "Jane Doe, Sam Lee").
+#[derive(Serialize, Clone, PartialEq, Debug)]
+pub struct Credit {
+    pub role: String,
+    pub names: String,
+}
+
+/// Tag fields that name people, in the order they're shown.
+const CREDIT_ROLES: &[(ItemKey, &str)] = &[
+    (ItemKey::Performer, "Performed by"),
+    (ItemKey::Writer, "Written by"),
+    (ItemKey::Composer, "Composed by"),
+    (ItemKey::Lyricist, "Lyrics by"),
+    (ItemKey::Arranger, "Arranged by"),
+    (ItemKey::Producer, "Produced by"),
+    (ItemKey::Engineer, "Engineered by"),
+    (ItemKey::MixEngineer, "Mixed by"),
+    (ItemKey::Remixer, "Remixed by"),
+    (ItemKey::Conductor, "Conducted by"),
+    (ItemKey::Publisher, "Publisher"),
+];
+
+/// All values of a tag field, trimmed and de-duplicated, as "A, B" (None when empty).
+fn joined(tag: &Tag, key: &ItemKey) -> Option<String> {
+    let mut seen: Vec<String> = Vec::new();
+    for v in tag.get_strings(key) {
+        let v = v.trim();
+        if !v.is_empty() && !seen.iter().any(|s| s.eq_ignore_ascii_case(v)) {
+            seen.push(v.to_string());
+        }
+    }
+    if seen.is_empty() { None } else { Some(seen.join(", ")) }
+}
+
+/// Credits written in the file's tags (who wrote, produced, mixed…), plus the ISRC.
+pub fn credits_from_tag(tag: &Tag) -> Vec<Credit> {
+    let mut out: Vec<Credit> = CREDIT_ROLES.iter()
+        .filter_map(|(key, role)| joined(tag, key).map(|names| Credit { role: role.to_string(), names }))
+        .collect();
+    if let Some(isrc) = joined(tag, &ItemKey::Isrc) {
+        out.push(Credit { role: "ISRC".into(), names: isrc });
+    }
+    out
 }
 
 #[derive(Serialize, Clone)]
@@ -48,6 +93,10 @@ pub struct Album {
     pub artist: String,
     pub year: Option<u32>,
     pub genre: Option<String>,
+    pub label: Option<String>,
+    pub copyright: Option<String>,
+    #[serde(rename = "catalogNumber")]
+    pub catalog_number: Option<String>,
     #[serde(rename = "trackIds")]
     pub track_ids: Vec<String>,
     pub cover: bool,
@@ -66,6 +115,7 @@ pub struct Track {
     pub no: u32,
     pub disc: u32,
     pub duration: u32,
+    pub credits: Vec<Credit>,
 }
 
 /// What /api/library returns.
@@ -124,6 +174,10 @@ struct Scanned {
     quality: Quality,
     embedded_art: bool,
     modified: u64,
+    credits: Vec<Credit>,
+    label: Option<String>,
+    copyright: Option<String>,
+    catalog: Option<String>,
 }
 
 fn clean(s: Option<String>) -> Option<String> {
@@ -175,6 +229,10 @@ fn read_file(path: &Path, root: &Path) -> Option<Scanned> {
     let no = tag.and_then(|t| t.track()).unwrap_or(file_no);
     let disc = tag.and_then(|t| t.disk()).unwrap_or(1);
     let embedded_art = tag.map(|t| !t.pictures().is_empty()).unwrap_or(false);
+    let credits = tag.map(credits_from_tag).unwrap_or_default();
+    let label = tag.and_then(|t| joined(t, &ItemKey::Label));
+    let copyright = tag.and_then(|t| joined(t, &ItemKey::CopyrightMessage));
+    let catalog = tag.and_then(|t| joined(t, &ItemKey::CatalogNumber));
 
     let (duration, bits, khz, kbps) = match &props {
         Some(p) => (
@@ -207,6 +265,10 @@ fn read_file(path: &Path, root: &Path) -> Option<Scanned> {
         quality: Quality { codec, lossless, bits: if lossless { bits } else { None }, khz, kbps },
         embedded_art,
         modified,
+        credits,
+        label,
+        copyright,
+        catalog,
     })
 }
 
@@ -249,6 +311,9 @@ pub fn scan(root: &Path) -> Library {
                 artist: s.album_artist.clone(),
                 year: s.year,
                 genre: s.genre.clone(),
+                label: None,
+                copyright: None,
+                catalog_number: None,
                 track_ids: Vec::new(),
                 cover: false,
                 quality: s.quality.clone(),
@@ -262,6 +327,10 @@ pub fn scan(root: &Path) -> Library {
         if album.year.is_none() {
             album.year = s.year;
         }
+        // label / copyright / catalog number: the first track that has them
+        if album.label.is_none() { album.label = s.label.clone(); }
+        if album.copyright.is_none() { album.copyright = s.copyright.clone(); }
+        if album.catalog_number.is_none() { album.catalog_number = s.catalog.clone(); }
         // album quality = the best file on it
         let better = |q: &Quality, than: &Quality| {
             (q.lossless, q.bits.unwrap_or(0), q.khz.unwrap_or(0.0) as u32, q.kbps.unwrap_or(0))
@@ -292,6 +361,7 @@ pub fn scan(root: &Path) -> Library {
             no: s.no,
             disc: s.disc,
             duration: s.duration,
+            credits: s.credits,
         });
     }
 
@@ -306,6 +376,28 @@ pub fn scan(root: &Path) -> Library {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credits_come_from_tags() {
+        use lofty::tag::TagType;
+        // Vorbis comments are what FLAC / Ogg files use (plain fields for every role)
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::Composer, "Jane Doe".into());
+        tag.push(lofty::tag::TagItem::new(ItemKey::Composer, lofty::tag::ItemValue::Text("jane doe".into()))); // same person, other case
+        tag.push(lofty::tag::TagItem::new(ItemKey::Producer, lofty::tag::ItemValue::Text("Sam Lee".into())));
+        tag.push(lofty::tag::TagItem::new(ItemKey::Producer, lofty::tag::ItemValue::Text("Ana Ruiz".into())));
+        tag.insert_text(ItemKey::Isrc, "USX9P2600001".into());
+        tag.insert_text(ItemKey::Label, "Northbound Records".into());
+        let c = credits_from_tag(&tag);
+        assert_eq!(c, vec![
+            Credit { role: "Composed by".into(), names: "Jane Doe".into() },
+            Credit { role: "Produced by".into(), names: "Sam Lee, Ana Ruiz".into() },
+            Credit { role: "ISRC".into(), names: "USX9P2600001".into() },
+        ]);
+        assert_eq!(joined(&tag, &ItemKey::Label).as_deref(), Some("Northbound Records"));
+        assert_eq!(joined(&tag, &ItemKey::Lyricist), None);
+        assert!(credits_from_tag(&Tag::new(TagType::VorbisComments)).is_empty());
+    }
 
     #[test]
     fn file_names() {

@@ -18,6 +18,7 @@ mod auth;
 mod library;
 mod lidarr;
 mod musicbrainz;
+mod social;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -74,6 +75,7 @@ struct AppState {
     requests: Mutex<Vec<lidarr::Request>>,
     http: lidarr::Client,
     mb: musicbrainz::Client,
+    social: social::Social,
 }
 type Shared = Arc<AppState>;
 
@@ -581,6 +583,7 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
         by: user.name.clone(),
         by_id: user.id.clone(),
         at: auth::now(),
+        notified: false,
     };
     {
         let mut list = st.requests.lock().unwrap();
@@ -663,6 +666,184 @@ async fn lidarr_hook(State(st): State<Shared>, Query(q): Query<HashMap<String, S
         start_scan(s);
     });
     StatusCode::NO_CONTENT.into_response()
+}
+
+/* ---------------- household: people, presence, notifications, shared playlists ---------------- */
+
+fn names_map(st: &AppState) -> HashMap<String, String> {
+    st.accounts.lock().unwrap().users.iter().map(|u| (u.id.clone(), u.name.clone())).collect()
+}
+
+fn track_json(st: &AppState, id: &str) -> Option<Value> {
+    let lib = st.lib.read().unwrap();
+    lib.catalog.tracks.iter().find(|t| t.id == id).map(|t| json!({ "trackId": t.id, "title": t.title, "artist": t.artist, "albumId": t.album_id }))
+}
+
+/// Credits for a song from MusicBrainz (the file's own tags are already in the library). Cached on disk:
+/// MusicBrainz allows one request a second, and credits rarely change.
+async fn track_credits(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return error(StatusCode::BAD_REQUEST, "Bad id.");
+    }
+    let file = st.cfg.data_dir.join("cache").join("credits").join(format!("{id}.json"));
+    if let Some(v) = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        let fresh = v["at"].as_u64().map(|at| at + 30 * 86400 > auth::now()).unwrap_or(false);
+        if fresh { return Json(json!({ "credits": v["credits"] })).into_response(); }
+    }
+    let (title, artist) = match track_json(&st, &id) {
+        Some(t) => (t["title"].as_str().unwrap_or("").to_string(), t["artist"].as_str().unwrap_or("").to_string()),
+        None => return error(StatusCode::NOT_FOUND, "No such track."),
+    };
+    match st.mb.credits(&title, &artist).await {
+        Ok(list) => {
+            let credits: Vec<Value> = list.iter().map(|(r, n)| json!({ "role": r, "names": n })).collect();
+            if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
+            let _ = std::fs::write(&file, json!({ "at": auth::now(), "credits": credits }).to_string());
+            Json(json!({ "credits": credits })).into_response()
+        }
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e),
+    }
+}
+
+async fn people(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    let accounts = st.accounts.lock().unwrap();
+    let list: Vec<Value> = accounts.users.iter().map(|u| json!({ "id": u.id, "name": u.name, "admin": u.admin })).collect();
+    Json(json!({ "people": list })).into_response()
+}
+
+#[derive(Deserialize)]
+struct NowBody {
+    #[serde(default, rename = "trackId")]
+    track_id: Option<String>,
+    #[serde(default)]
+    playing: bool,
+}
+
+/// What I'm playing, for the Household page. Sending no track stops sharing (private session, or turned off).
+async fn put_now(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<NowBody>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    match body.track_id.filter(|t| track_json(&st, t).is_some()) {
+        Some(track_id) => st.social.set_presence(&user.id, Some(social::Presence { track_id, playing: body.playing, at: auth::now() })),
+        None => st.social.set_presence(&user.id, None),
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Everyone else in the household: what they're listening to, and their public playlists.
+async fn household(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, me) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let users: Vec<(String, String)> = st.accounts.lock().unwrap().users.iter().map(|u| (u.id.clone(), u.name.clone())).collect();
+    let members: Vec<Value> = users.iter().filter(|(id, _)| *id != me.id).map(|(id, name)| {
+        let now = st.social.presence_of(id).and_then(|(track_id, live, at)| {
+            track_json(&st, &track_id).map(|mut t| { t["listening"] = json!(live); t["at"] = json!(at); t })
+        });
+        json!({ "id": id, "name": name, "now": now, "playlists": st.social.public_playlists(id) })
+    }).collect();
+    Json(json!({ "members": members, "serverNow": auth::now() })).into_response()
+}
+
+async fn notifications(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let items = st.social.notes_for(&user.id);
+    let unread = items.iter().filter(|n| !n.read).count();
+    Json(json!({ "items": items, "unread": unread })).into_response()
+}
+
+#[derive(Deserialize)]
+struct ReadBody {
+    #[serde(default)]
+    ids: Option<Vec<String>>,
+}
+
+async fn notifications_read(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<ReadBody>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    st.social.mark_read(&user.id, body.ids.as_deref());
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn shared_list(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let names = names_map(&st);
+    let (mine, invites) = st.social.list_for(&user.id);
+    let invites: Vec<Value> = invites.iter().map(|s| json!({
+        "id": s.id, "name": s.name, "owner": s.owner, "ownerName": names.get(&s.owner).cloned().unwrap_or_default(), "count": s.tracks.len()
+    })).collect();
+    Json(json!({ "playlists": mine, "invites": invites })).into_response()
+}
+
+#[derive(Deserialize)]
+struct SharedNew {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    tracks: Vec<String>,
+    #[serde(default)]
+    public: bool,
+}
+
+/// Turn a playlist into a shared one (you're the owner).
+async fn shared_create(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<SharedNew>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let known: std::collections::HashSet<String> = st.lib.read().unwrap().catalog.tracks.iter().map(|t| t.id.clone()).collect();
+    let tracks: Vec<String> = body.tracks.into_iter().filter(|t| known.contains(t)).collect();
+    let pl = st.social.create(&user.id, &body.name, &body.description, tracks, body.public);
+    Json(json!({ "playlist": pl })).into_response()
+}
+
+async fn shared_op(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let names = names_map(&st);
+    match st.social.op(&user.id, &id, &body, &names) {
+        Ok(r) => Json(json!({ "playlist": r.playlist, "gone": r.gone })).into_response(),
+        Err((code, msg)) => error(StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_REQUEST), &msg),
+    }
+}
+
+/// After a scan: tell people whose Lidarr request has arrived in the library.
+fn notify_ready(st: &AppState) {
+    let mut reqs = st.requests.lock().unwrap();
+    let mut changed = false;
+    for r in reqs.iter_mut().filter(|r| !r.notified) {
+        let here = if r.kind == "album" { on_server(st, Some(&r.title), &r.artist) } else { on_server(st, None, &r.artist) };
+        if let Some(found) = here {
+            r.notified = true;
+            changed = true;
+            let text = if r.kind == "album" { format!("{} by {} is in your library", r.title, r.artist) } else { format!("{} is now in your library", r.artist) };
+            st.social.add_note(&r.by_id, "request_ready", text, json!({ "albumId": found, "kind": r.kind }));
+        }
+    }
+    if changed {
+        lidarr::save_requests(&st.cfg.data_dir, &reqs);
+    }
 }
 
 /* ---------------- music folder ---------------- */
@@ -772,6 +953,7 @@ fn start_scan(st: Shared) {
         let (a, t) = (fresh.catalog.albums.len(), fresh.catalog.tracks.len());
         *st.lib.write().unwrap() = fresh;
         println!("library: {a} albums, {t} tracks in {}", dir.display());
+        notify_ready(&st);
     });
 }
 
@@ -795,6 +977,7 @@ async fn main() {
         requests: Mutex::new(lidarr::load_requests(&cfg.data_dir)),
         http: lidarr::Client::new(),
         mb: musicbrainz::Client::new(),
+        social: social::Social::load(&cfg.data_dir),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });
@@ -833,6 +1016,14 @@ async fn main() {
         .route("/api/lidarr/queue", get(lidarr_queue))
         .route("/api/lidarr/requests", get(lidarr_requests))
         .route("/api/hooks/lidarr", post(lidarr_hook).put(lidarr_hook))
+        .route("/api/credits/{id}", get(track_credits))
+        .route("/api/people", get(people))
+        .route("/api/me/now", axum::routing::put(put_now))
+        .route("/api/household", get(household))
+        .route("/api/notifications", get(notifications))
+        .route("/api/notifications/read", post(notifications_read))
+        .route("/api/shared", get(shared_list).post(shared_create))
+        .route("/api/shared/{id}/op", post(shared_op))
         .with_state(st.clone());
 
     // everything else is the web app (single page: unknown paths get index.html)

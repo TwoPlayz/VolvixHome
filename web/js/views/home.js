@@ -40,7 +40,7 @@ Spin.views = Spin.views || {};
       const added = albums.slice().sort(function (a, b) { return b.added - a.added; });
       const quick = (recent.length ? recent : added).slice(0, 4).map(function (a) {
         return quickTile('#/album/' + a.id, S.cover(a), a.title, 'data-play-album="' + a.id + '"');
-      }).concat(state.playlists.slice(0, 2).map(function (pl) {
+      }).concat(S.pl.all().slice(0, 2).map(function (pl) {
         return quickTile('#/playlist/' + pl.id, S.playlistCover(pl), pl.name, 'data-play-playlist="' + pl.id + '"');
       }));
       // artists with the most albums first, then alphabetical
@@ -55,7 +55,7 @@ Spin.views = Spin.views || {};
         S.shelf('Recently added', added.slice(0, 12).map(function (a) {
           return S.albumCard(a, { meta: '<span>' + S.artistLink(a.artist, { inert: true }) + '</span>' });
         }).join(''), { href: '#/library' }) +
-        (state.playlists.length ? S.shelf('Your playlists', state.playlists.map(S.playlistCard).join(''), { href: '#/library/playlists' }) : '') +
+        (S.pl.all().length ? S.shelf('Your playlists', S.pl.all().map(S.playlistCard).join(''), { href: '#/library/playlists' }) : '') +
         S.shelf('Artists', topArtists.map(artistCard).join(''), { href: '#/library/artists' });
     }
   };

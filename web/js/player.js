@@ -196,7 +196,8 @@ window.Spin = window.Spin || {};
   /* ---------- public API ---------- */
   function play(ids, startIndex, context) {
     if (!ids || !ids.length) return;
-    startIndex = startIndex || 0;
+    // -1 = "from the top": the first song, or a random one when shuffle is on
+    startIndex = startIndex === -1 ? (st.shuffle ? Math.floor(Math.random() * ids.length) : 0) : (startIndex || 0);
     if (!ids.some(owned)) {
       if (isOffline() && ids.some(S.lib.isTrackOwned)) S.toast('No internet connection, and none of these are downloaded.', 'wifiOff');
       else S.toast('You don\'t own any of these songs yet', 'lock');
@@ -398,7 +399,7 @@ window.Spin = window.Spin || {};
       const ok = owned(id);
       const upcoming = i > st.index;
       return '<button class="q-row' + (ok ? '' : ' locked') + (i === st.index ? ' now' : '') + (upcoming ? ' movable' : '') + '" data-queue-index="' + i + '">' +
-        (upcoming ? '<span class="drag-handle q-grip" data-q-grip aria-hidden="true" title="Drag to reorder">' + S.icon('grip', 16) + '</span>' : '') +
+        (upcoming ? '<span class="drag-sign q-sign" aria-hidden="true" title="Drag to reorder: grab the row anywhere">' + S.icon('grip', 16) + '</span>' : '') +
         '<span class="q-cover">' + S.cover(al) + '</span>' +
         '<span class="q-text"><span class="q-name">' + S.esc(tr.title) + '</span>' +
         '<span class="q-sub">' + (ok ? '' : S.icon('lock', 11) + 'Will be skipped · ') + S.artistLink(tr.artist, { inert: true }) + '</span></span>' +
@@ -422,7 +423,6 @@ window.Spin = window.Spin || {};
 
   /* ---------- input ---------- */
   document.addEventListener('click', function (e) {
-    if (e.target.closest('[data-q-grip]')) return; // dragging, not playing
     const rm = e.target.closest('[data-q-remove]');
     if (rm) { removeAt(parseInt(rm.dataset.qRemove, 10)); return; }
     if (e.target.closest('[data-q-reshuffle]')) { reshuffle(); return; }
@@ -467,54 +467,18 @@ window.Spin = window.Spin || {};
     const rm = e.target.closest && e.target.closest('[data-q-remove]');
     if (rm && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); removeAt(parseInt(rm.dataset.qRemove, 10)); }
   }, true);
-  // drag the grip to reorder what's coming up (mouse, touch, pen)
+  // drag a row anywhere to reorder what's coming up (mouse, touch, pen)
   document.addEventListener('pointerdown', function (e) {
-    const grip = e.target.closest('[data-q-grip]');
-    if (!grip) return;
-    const row = grip.closest('[data-queue-index]');
-    const body = row && row.closest('.q-body');
-    if (!body) return;
-    e.preventDefault();
-    const from = parseInt(row.dataset.queueIndex, 10);
-    let target = null, after = false, lastY = e.clientY;
-    row.classList.add('dragging');
-    document.body.classList.add('reordering');
-    function mark(y) {
-      lastY = y;
-      S.$$('.drop-before, .drop-after', body).forEach(function (r) { r.classList.remove('drop-before', 'drop-after'); });
-      const rows = S.$$('.q-row.movable', body);
-      target = null;
-      for (const r of rows) {
-        const b = r.getBoundingClientRect();
-        if (y >= b.top && y <= b.bottom) { target = r; after = y > b.top + b.height / 2; break; }
-      }
-      if (!target && rows.length) {
-        if (y < rows[0].getBoundingClientRect().top) { target = rows[0]; after = false; } else { target = rows[rows.length - 1]; after = true; }
-      }
-      if (target && target !== row) target.classList.add(after ? 'drop-after' : 'drop-before');
-    }
-    const scroller = setInterval(function () {
-      const b = body.getBoundingClientRect();
-      if (lastY < b.top + 50) body.scrollTop -= 10; else if (lastY > b.bottom - 50) body.scrollTop += 10;
-    }, 30);
-    function move(ev) { mark(ev.clientY); }
-    function up() {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-      clearInterval(scroller);
-      document.body.classList.remove('reordering');
-      row.classList.remove('dragging');
-      if (!target || target === row) { renderQueue(); return; }
-      let to = parseInt(target.dataset.queueIndex, 10) + (after ? 1 : 0);
-      if (to > from) to -= 1;
-      moveInQueue(from, to);
-    }
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
+    const body = e.target.closest('.q-body');
+    if (!body || !e.target.closest('.q-row.movable')) return;
+    S.dragRows(e, {
+      row: '.q-row.movable',
+      scope: body,
+      scroller: body,
+      index: function (row) { return parseInt(row.dataset.queueIndex, 10); },
+      drop: function (from, to) { moveInQueue(from, to); }
+    });
   });
-
   /** Quality as a small icon button: bars for Low → Hi-Res, accent for Hi-Res, dot for a downloaded copy. */
   function qualityButton(btn, q) {
     btn.innerHTML = S.qualityIcon(q, 18);
@@ -585,6 +549,8 @@ window.Spin = window.Spin || {};
     isCurrent: function (id) { const t = current(); return !!t && t.id === id; },
     current: current,
     render: render,
+    /** Shuffle on/off for the whole player (it never starts or stops anything by itself). */
+    toggleShuffle: function () { setShuffle(!st.shuffle); },
     audio: audio,
     seekTo: function (sec) { setPos(sec); renderProgress(); },
     moveInQueue: moveInQueue,

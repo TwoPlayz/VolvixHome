@@ -24,12 +24,13 @@ window.Spin = window.Spin || {};
   /* ---------- catalog ---------- */
   const TRACKS = {};
   (VH.catalog.tracks || []).forEach(function (t) {
-    TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: false };
+    TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: false, credits: t.credits || [] };
   });
   const ALBUMS = (VH.catalog.albums || []).map(function (a) {
     const q = a.quality || {};
     return {
       id: a.id, title: a.title, artist: a.artist, year: a.year || null, genre: a.genre || null,
+      label: a.label || null, copyright: a.copyright || null, catalogNumber: a.catalogNumber || null,
       trackIds: (a.trackIds || []).filter(function (id) { return TRACKS[id]; }),
       cover: !!a.cover, added: a.added || 0, art: artFor(a.id),
       format: 'digital',
@@ -42,16 +43,21 @@ window.Spin = window.Spin || {};
   ALBUMS.forEach(function (a) { byId[a.id] = a; });
 
   const ME = { id: 'u_me', serverId: VH.user.id, name: VH.user.name, username: VH.user.username, admin: !!VH.user.admin, pfp: null };
+  // everyone in the household (server ids); you are also 'u_me' inside playlists and the UI
+  const PEOPLE = {};
+  (VH.people || []).forEach(function (p) { PEOPLE[p.id] = { id: p.id, name: p.name, admin: !!p.admin }; });
 
   S.data = {
     albums: ALBUMS,
     tracks: TRACKS,
     artists: (VH.catalog.artists || []).map(function (r) { return r.name; }),
     me: ME,
-    people: { u_me: ME },
+    people: PEOPLE,
+    /** Everyone except you. */
+    others: function () { return Object.keys(PEOPLE).filter(function (id) { return id !== ME.serverId; }).map(function (id) { return PEOPLE[id]; }); },
     album: function (id) { return byId[id] || null; },
     track: function (id) { return TRACKS[id] || null; },
-    person: function (id) { return id === 'u_me' || id === ME.serverId ? ME : { id: id, name: 'Someone', username: '' }; },
+    person: function (id) { return id === 'u_me' || id === ME.serverId ? ME : (PEOPLE[id] || { id: id, name: 'Someone' }); },
     single: function () { return null; },
     singlesOf: function () { return []; },
     albumsBy: function (artist) {

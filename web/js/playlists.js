@@ -1,16 +1,19 @@
-/* Volvix — playlist model + dialogs (create, edit, delete, add-to, share, collaborators). */
+/* Volvix Home — playlists.
+ *   - your own playlists live in your app data (state.playlists)
+ *   - playlists you share with other people live on the server (S.shared) so everyone edits the same copy
+ *   - other people's public playlists come from the Household page data (read-only)
+ * Everything here works on all three the same way; shared ones send each change to the server. */
 window.Spin = window.Spin || {};
 (function (S) {
   'use strict';
 
-  function list() { return S.store.state.playlists; }
-  /** Your playlists first, then other people's (read-only). */
+  const LIKED_ID = 'pl_liked';
+
+  function local() { return S.store.state.playlists; }
+  /** Everything of yours: your own playlists, plus the ones you share. */
+  function list() { return local().concat(S.shared.all()); }
   function get(id) {
-    return list().find(function (p) { return p.id === id; }) ||
-      S.data.friendPlaylists.find(function (p) { return p.id === id; }) || null;
-  }
-  function friendsForSharing() {
-    return S.social ? S.social.friends() : [];
+    return list().find(function (p) { return p.id === id; }) || S.household.playlist(id) || null;
   }
 
   function commit(fn) {
@@ -18,25 +21,27 @@ window.Spin = window.Spin || {};
     S.app.refreshSidebar();
     S.app.refresh();
   }
+  /** After a change to a shared playlist: redraw now, and re-sync if the server disagreed. */
+  function redraw() { S.app.refreshSidebar(); S.app.refresh(); }
+  function sharedFailed(e) {
+    S.toast(e && e.message ? e.message : 'That didn\'t go through', 'x');
+    S.shared.refresh().then(redraw).catch(function () {});
+  }
+  function sharedOp(id, body) {
+    return S.shared.op(id, body).then(function (r) { redraw(); return r; }).catch(function (e) { sharedFailed(e); throw e; });
+  }
 
-  const LIKED_ID = 'pl_liked';
   function newId() { return 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
-  function lockedNote(ids) {
-    const locked = ids.filter(function (id) { return !S.lib.isTrackOwned(id); }).length;
-    if (!locked) return '';
-    return locked === 1 ? ' · 1 song is locked until you own it' : ' · ' + locked + ' songs are locked until you own them';
-  }
+  function lockedNote() { return ''; } // everything here is yours: nothing is locked
 
   S.pl = {
     all: list,
     get: get,
-    /** Playlists you can add to: your own + collaborative ones you're on. */
-    editable: function () {
-      return list().filter(function (p) { return p.owner === 'u_me' || (p.collaborative && p.collaborators.indexOf('u_me') !== -1); });
-    },
+    /** Playlists you can add to: your own + shared ones you're on. */
+    editable: function () { return list().filter(S.pl.canEdit); },
     canEdit: function (pl) {
-      return pl.owner === 'u_me' || (pl.collaborative && pl.collaborators.indexOf('u_me') !== -1);
+      return pl.owner === 'u_me' || (pl.collaborative && (pl.collaborators || []).indexOf('u_me') !== -1);
     },
     isFollowed: function (id) { return S.store.state.followed.indexOf(id) !== -1; },
     followed: function () { return S.store.state.followed.map(get).filter(Boolean); },
@@ -55,19 +60,12 @@ window.Spin = window.Spin || {};
       S.router.go('/playlist/' + pl.id);
     },
     trackIds: function (pl) { return pl.tracks.map(function (t) { return t.id; }); },
-    lockedCount: function (pl) { return pl.tracks.filter(function (t) { return !S.lib.isTrackOwned(t.id); }).length; },
-    shareUrl: function (pl) { return 'https://volvix.app/p/' + S.pl.shareId(pl); },
-    /** Short id used in share links: pl_sunday → sunday. */
-    shareId: function (pl) { return pl.id.replace(/^pl_/, ''); },
-    /** Find a playlist from a share-link id. */
-    fromShareId: function (sid) { return get(sid) || get('pl_' + sid) || null; },
-    /** Demo: the public page someone sees when they open the link without signing in. */
-    previewUrl: function (pl) { return location.pathname + '?preview=1&signedout=1#/p/' + S.pl.shareId(pl); },
+    lockedCount: function () { return 0; },
 
     create: function (data, trackIds) {
       const pl = {
-        id: newId(), name: data.name || 'New Playlist', description: data.description || '',
-        owner: 'u_me', collaborative: !!data.collaborative, collaborators: [],
+        id: newId(), name: data.name || 'New Playlist', description: data.description || '', public: !!data.public,
+        owner: 'u_me', collaborative: false, collaborators: [],
         tracks: (trackIds || []).map(function (id) { return { id: id, addedBy: 'u_me' }; })
       };
       // new playlists go under Liked Songs, which stays first
@@ -75,15 +73,84 @@ window.Spin = window.Spin || {};
       return pl;
     },
     update: function (id, patch) {
-      commit(function () { Object.assign(get(id), patch); });
+      const pl = get(id);
+      if (pl.shared) {
+        const body = { op: 'update' };
+        ['name', 'description', 'public'].forEach(function (k) { if (k in patch) body[k] = patch[k]; });
+        return sharedOp(id, body);
+      }
+      commit(function () { Object.assign(pl, patch); });
     },
     remove: function (id) {
       if (id === LIKED_ID) return; // Liked Songs is built in
+      const pl = get(id);
+      if (pl && pl.shared) { sharedOp(id, { op: 'delete' }); return; }
       commit(function (s) { s.playlists = s.playlists.filter(function (p) { return p.id !== id; }); });
+    },
+    /** Adds tracks, skipping duplicates. Returns number actually added. */
+    addTracks: function (id, ids) {
+      const pl = get(id);
+      const have = S.pl.trackIds(pl);
+      const fresh = ids.filter(function (t, i) { return have.indexOf(t) === -1 && ids.indexOf(t) === i; });
+      if (!fresh.length) return 0;
+      if (pl.shared) { sharedOp(id, { op: 'add', ids: fresh }); return fresh.length; }
+      commit(function () { fresh.forEach(function (t) { pl.tracks.push({ id: t, addedBy: 'u_me' }); }); });
+      return fresh.length;
+    },
+    removeAt: function (id, index) {
+      const pl = get(id);
+      const t = pl.tracks[index];
+      if (pl.shared) {
+        pl.tracks.splice(index, 1); redraw();                 // show it gone right away
+        sharedOp(id, { op: 'remove', index: index, trackId: t.id }).catch(function () {});
+        return t;
+      }
+      commit(function () { pl.tracks.splice(index, 1); });
+      return t;
+    },
+    insertAt: function (id, index, entry) {
+      const pl = get(id);
+      if (pl.shared) {
+        pl.tracks.splice(index, 0, entry); redraw();
+        sharedOp(id, { op: 'insert', index: index, entry: { id: entry.id, addedBy: entry.addedBy === 'u_me' ? S.data.me.serverId : entry.addedBy } }).catch(function () {});
+        return;
+      }
+      commit(function () { pl.tracks.splice(index, 0, entry); });
+    },
+    move: function (id, from, to) {
+      if (from === to) return;
+      const pl = get(id);
+      const apply = function () { const item = pl.tracks.splice(from, 1)[0]; pl.tracks.splice(to, 0, item); };
+      if (pl.shared) { apply(); redraw(); sharedOp(id, { op: 'move', from: from, to: to }).catch(function () {}); return; }
+      commit(apply);
+    },
+
+    /* ----- sharing with the household ----- */
+    /** Make one of your playlists shared (you stay the owner). Resolves with the shared playlist. */
+    makeShared: function (id) {
+      const pl = get(id);
+      if (pl.shared) return Promise.resolve(pl);
+      return S.shared.create(pl).then(function (sh) {
+        commit(function (s) { s.playlists = s.playlists.filter(function (p) { return p.id !== id; }); });
+        return sh;
+      });
+    },
+    /** Hand a shared playlist back to just you. Everyone else loses access. */
+    unshare: function (id) {
+      return S.shared.op(id, { op: 'unshare' }).then(function (r) {
+        const sh = S.shared.fromServer(r.playlist);
+        commit(function (s) {
+          s.playlists.push({ id: sh.id, name: sh.name, description: sh.description, public: sh.public, owner: 'u_me', collaborative: false, collaborators: [], tracks: sh.tracks });
+        });
+      }).catch(function (e) { sharedFailed(e); });
+    },
+    leave: function (id) {
+      return S.shared.op(id, { op: 'leave' }).then(function () { redraw(); S.toast('You left the playlist'); if (S.router.current() === '/playlist/' + id) S.router.go('/library'); })
+        .catch(function (e) { sharedFailed(e); });
     },
 
     /* ----- Liked Songs: one built-in playlist, filled by the heart button ----- */
-    liked: function () { return list().find(function (p) { return p.id === LIKED_ID; }) || null; },
+    liked: function () { return local().find(function (p) { return p.id === LIKED_ID; }) || null; },
     isLiked: function (trackId) {
       const p = S.pl.liked();
       return !!p && p.tracks.some(function (t) { return t.id === trackId; });
@@ -118,35 +185,6 @@ window.Spin = window.Spin || {};
         b.setAttribute('aria-label', label); b.title = label;
         b.innerHTML = S.icon(liked ? 'heartFill' : 'heart', parseInt(b.dataset.size || '18', 10));
       });
-    },
-    /** Adds tracks, skipping duplicates. Returns number actually added. */
-    addTracks: function (id, ids) {
-      const pl = get(id);
-      const have = S.pl.trackIds(pl);
-      const fresh = ids.filter(function (t, i) { return have.indexOf(t) === -1 && ids.indexOf(t) === i; });
-      if (fresh.length) {
-        commit(function () {
-          fresh.forEach(function (t) { pl.tracks.push({ id: t, addedBy: 'u_me' }); });
-        });
-      }
-      return fresh.length;
-    },
-    removeAt: function (id, index) {
-      const pl = get(id);
-      const t = pl.tracks[index];
-      commit(function () { pl.tracks.splice(index, 1); });
-      return t;
-    },
-    insertAt: function (id, index, entry) {
-      commit(function () { get(id).tracks.splice(index, 0, entry); });
-    },
-    move: function (id, from, to) {
-      if (from === to) return;
-      commit(function () {
-        const tracks = get(id).tracks;
-        const item = tracks.splice(from, 1)[0];
-        tracks.splice(to, 0, item);
-      });
     }
   };
 
@@ -174,7 +212,8 @@ window.Spin = window.Spin || {};
       body: '<div class="stack form-modal">' +
         field('pl-name', 'Name', '', { placeholder: 'My playlist' }) +
         field('pl-desc', 'Description', '', { textarea: true, placeholder: 'Add an optional description' }) +
-        switchRow('pl-collab', 'Collaborative', 'Friends you invite can add and remove songs.', false) +
+        switchRow('pl-collab', 'Collaborative', 'People you invite can add, remove and reorder songs.', false) +
+        switchRow('pl-public', 'Visible to the household', 'Everyone here can see it on the Household page.', false) +
         '</div>',
       actions: [
         { label: 'Cancel', kind: 'secondary' },
@@ -186,15 +225,20 @@ window.Spin = window.Spin || {};
     name.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(m.close); });
 
     function submit(close) {
+      const collab = S.$('#pl-collab', m.el).checked;
       const pl = S.pl.create({
         name: name.value.trim() || 'My Playlist #' + (list().length + 1),
         description: S.$('#pl-desc', m.el).value.trim(),
-        collaborative: S.$('#pl-collab', m.el).checked
+        public: S.$('#pl-public', m.el).checked
       }, trackIds);
       close();
-      S.toast('Created "' + pl.name + '"' + (trackIds && trackIds.length ? lockedNote(trackIds) : ''), 'check');
-      if (!trackIds) S.router.go('/playlist/' + pl.id);
-      if (pl.collaborative && !trackIds) setTimeout(function () { S.pl.inviteDialog(pl.id); }, 150);
+      S.toast('Created "' + pl.name + '"', 'check');
+      if (!collab) { if (!trackIds) S.router.go('/playlist/' + pl.id); return; }
+      // a collaborative playlist lives on the server so everyone edits the same copy
+      S.pl.makeShared(pl.id).then(function (sh) {
+        if (!trackIds) S.router.go('/playlist/' + sh.id);
+        setTimeout(function () { S.pl.inviteDialog(sh.id); }, 150);
+      }).catch(function (e) { S.toast(e.message, 'x'); });
     }
   };
 
@@ -205,6 +249,7 @@ window.Spin = window.Spin || {};
       body: '<div class="stack form-modal">' +
         field('pl-name', 'Name', pl.name) +
         field('pl-desc', 'Description', pl.description, { textarea: true, placeholder: 'Add an optional description' }) +
+        switchRow('pl-public', 'Visible to the household', 'Everyone here can see it on the Household page.', !!pl.public) +
         '</div>',
       actions: [
         { label: 'Cancel', kind: 'secondary' },
@@ -215,7 +260,7 @@ window.Spin = window.Spin || {};
     name.focus(); name.select();
     name.addEventListener('keydown', function (e) { if (e.key === 'Enter') save(m.close); });
     function save(close) {
-      S.pl.update(id, { name: name.value.trim() || pl.name, description: S.$('#pl-desc', m.el).value.trim() });
+      S.pl.update(id, { name: name.value.trim() || pl.name, description: S.$('#pl-desc', m.el).value.trim(), public: S.$('#pl-public', m.el).checked });
       close();
       S.toast('Playlist updated', 'check');
     }
@@ -223,10 +268,11 @@ window.Spin = window.Spin || {};
 
   S.pl.deleteDialog = function (id) {
     const pl = get(id);
+    const others = (pl.collaborators || []).length;
     S.modal({
       title: 'Delete playlist?',
       body: '<p>This will delete <strong>' + S.esc(pl.name) + '</strong>' +
-        (pl.collaborative && pl.collaborators.length ? ' for you and ' + pl.collaborators.length + ' collaborator' + (pl.collaborators.length > 1 ? 's' : '') : '') +
+        (pl.shared && others ? ' for you and ' + others + ' collaborator' + (others > 1 ? 's' : '') : '') +
         '. Your music stays in your library.</p>',
       actions: [
         { label: 'Cancel', kind: 'secondary' },
@@ -250,7 +296,7 @@ window.Spin = window.Spin || {};
       return '<button class="pick-row" data-pick="' + p.id + '"' + (all ? ' disabled' : '') + '>' +
         '<span class="pick-art">' + S.playlistCover(p) + '</span>' +
         '<span class="pick-text"><span class="t-name">' + S.esc(p.name) + '</span>' +
-        '<span class="t-sub">' + (p.collaborative ? 'Collaborative · ' : '') + p.tracks.length + ' songs</span></span>' +
+        '<span class="t-sub">' + (p.collaborative ? 'Collaborative · ' : '') + p.tracks.length + (p.tracks.length === 1 ? ' song' : ' songs') + '</span></span>' +
         (all ? '<span class="pick-state">' + S.icon('check', 16) + 'Added</span>' : '') +
       '</button>';
     }).join('');
@@ -274,73 +320,59 @@ window.Spin = window.Spin || {};
     });
   };
 
-  S.pl.shareDialog = function (id) {
-    const pl = get(id);
-    const url = S.pl.shareUrl(pl);
-    const locked = S.pl.lockedCount(pl);
-    const friends = friendsForSharing().filter(function (p) { return p.id !== pl.owner; });
-    const m = S.modal({
-      title: 'Share "' + pl.name + '"',
-      body:
-        '<div class="share-link"><span class="share-url">' + S.esc(url) + '</span>' +
-          '<button class="btn btn-primary btn-sm" data-copy>' + S.icon('external', 14) + 'Copy link</button></div>' +
-        '<div class="share-note">' + S.icon('lock', 15) +
-          '<span>Listeners only hear the songs they own. Everything else shows as locked and is skipped' +
-          (locked ? ' (you have ' + locked + ' locked here yourself)' : '') + '.</span></div>' +
-        '<div class="share-preview">' + S.icon('eye', 15) + '<span>People without Volvix see a preview page with every song and a sign-up button.</span>' +
-          '<a class="btn btn-ghost btn-sm" href="' + S.esc(S.pl.previewUrl(pl)) + '" target="_blank" rel="noopener">Open preview</a></div>' +
-        '<div class="q-label share-label">Send to a friend</div>' +
-        '<div class="share-friends">' + friends.map(function (f) {
-          return '<button class="share-friend" data-send="' + f.id + '">' + S.avatar(f, 44) + '<span>' + S.esc(f.name.split(' ')[0]) + '</span></button>';
-        }).join('') + '</div>',
-      actions: [{ label: 'Done', kind: 'secondary' }]
-    });
-    m.el.addEventListener('click', function (e) {
-      if (e.target.closest('[data-copy]')) {
-        try { if (navigator.clipboard) navigator.clipboard.writeText(url).catch(function () {}); } catch (err) { /* ignore */ }
-        S.toast('Link copied', 'check');
-      }
-      const send = e.target.closest('[data-send]');
-      if (send && !send.classList.contains('sent')) {
-        send.classList.add('sent');
-        send.insertAdjacentHTML('beforeend', '<span class="sent-badge">' + S.icon('check', 12) + '</span>');
-        S.toast('Sent to ' + S.data.person(send.dataset.send).name, 'check');
-      }
-    });
-  };
-
+  /** Choose who can edit a playlist. People you pick get an invite and join when they accept. */
   S.pl.inviteDialog = function (id) {
-    const pl = get(id);
-    const friends = friendsForSharing();
+    let pl = get(id);
+    if (!pl.shared) {
+      // it only becomes shared (and moves to the server) once you invite someone
+      S.pl.makeShared(id).then(function (sh) { S.pl.inviteDialog(sh.id); }).catch(function (e) { S.toast(e.message, 'x'); });
+      return;
+    }
+    const people = S.data.others();
+    const collab = pl.collaborators || [], invited = pl.invited || [];
+    const state = function (p) { return collab.indexOf(p.id) !== -1 ? 'collab' : invited.indexOf(p.id) !== -1 ? 'invited' : 'none'; };
     const m = S.modal({
-      title: 'Collaborators',
-      body: '<p>Collaborators can add, remove and reorder songs. Each person only hears the songs they own.</p>' +
-        '<div class="pick-list">' + friends.map(function (f) {
-          const on = pl.collaborators.indexOf(f.id) !== -1;
-          return '<label class="pick-row pick-check">' + S.avatar(f, 40) +
-            '<span class="pick-text"><span class="t-name">' + S.esc(f.name) + '</span><span class="t-sub">@' + S.esc(f.username) +
-            (f.relation === 'family' ? ' · Family' : '') + '</span></span>' +
-            '<input type="checkbox" value="' + f.id + '"' + (on ? ' checked' : '') + '></label>';
-        }).join('') + '</div>',
+      title: 'Who can edit "' + pl.name + '"?',
+      body: people.length
+        ? '<p class="modal-text">People you pick get an invite. Once they accept they can add, remove and reorder songs.</p>' +
+          '<div class="pick-list">' + people.map(function (p) {
+            const st = state(p);
+            return '<label class="pick-row pick-check">' + S.avatar(p, 40) +
+              '<span class="pick-text"><span class="t-name">' + S.esc(p.name) + '</span>' +
+              '<span class="t-sub">' + (st === 'collab' ? 'Can edit' : st === 'invited' ? 'Invited, waiting to accept' : 'Not invited') + '</span></span>' +
+              '<input type="checkbox" value="' + p.id + '"' + (st !== 'none' ? ' checked' : '') + '></label>';
+          }).join('') + '</div>'
+        : '<p class="modal-text">No one else is in your household yet. An admin can add people under Account → People.</p>',
       actions: [
         { label: 'Cancel', kind: 'secondary' },
-        { label: 'Save', kind: 'primary', onClick: function (close) {
+        people.length ? { label: 'Save', kind: 'primary', onClick: function (close) {
           const chosen = S.$$('input[type=checkbox]:checked', m.el).map(function (c) { return c.value; });
-          S.pl.update(id, { collaborators: chosen, collaborative: true });
+          const current = collab.concat(invited);
+          const add = chosen.filter(function (x) { return current.indexOf(x) === -1; });
+          const drop = current.filter(function (x) { return chosen.indexOf(x) === -1; });
           close();
-          S.toast(chosen.length ? 'Invited ' + chosen.length + ' collaborator' + (chosen.length > 1 ? 's' : '') : 'Collaborative: invite friends anytime', 'users');
-        } }
+          const chain = add.length ? S.shared.op(id, { op: 'invite', userIds: add }) : Promise.resolve();
+          drop.reduce(function (p, u) { return p.then(function () { return S.shared.op(id, { op: 'uninvite', userId: u }); }); }, chain)
+            .then(function () {
+              redraw();
+              if (add.length) S.toast('Invited ' + add.map(function (u) { return S.data.person(u).name.split(' ')[0]; }).join(', '), 'users');
+              else if (drop.length) S.toast('Updated who can edit');
+            }).catch(sharedFailed);
+        } } : { label: 'Done', kind: 'primary' }
       ]
     });
   };
 
   S.pl.toggleCollaborative = function (id) {
     const pl = get(id);
-    if (pl.collaborative) {
-      S.pl.update(id, { collaborative: false, collaborators: [] });
-      S.toast('Playlist is no longer collaborative');
-    } else {
-      S.pl.inviteDialog(id);
-    }
+    if (!pl.shared) { S.pl.inviteDialog(id); return; }
+    S.modal({
+      title: 'Stop sharing this playlist?',
+      body: '<p class="modal-text">It becomes just yours again. ' + ((pl.collaborators || []).length ? 'Everyone you invited loses access.' : '') + '</p>',
+      actions: [
+        { label: 'Cancel', kind: 'secondary' },
+        { label: 'Stop sharing', kind: 'danger', onClick: function (close) { close(); S.pl.unshare(id).then(function () { S.toast('Playlist is no longer collaborative'); }); } }
+      ]
+    });
   };
 })(window.Spin);

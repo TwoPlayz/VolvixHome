@@ -93,6 +93,80 @@ impl Client {
     }
 }
 
+impl Client {
+    /// Who made a song, from MusicBrainz: find the recording, then read its relationships
+    /// (producer, engineer, mixer, performers, and via its work: composer, lyricist, writer).
+    /// Returns (role, names) pairs, or an empty list when MusicBrainz doesn't know the song.
+    pub async fn credits(&self, title: &str, artist: &str) -> Result<Vec<(String, String)>, String> {
+        let q = format!("recording:%22{}%22%20AND%20artist:%22{}%22", encode(title), encode(artist));
+        let found = self.get(&format!("recording?query={q}&fmt=json&limit=5")).await?;
+        let want = norm(title);
+        let best = found["recordings"].as_array().cloned().unwrap_or_default().into_iter()
+            .filter(|r| r["score"].as_u64().unwrap_or(0) >= 85 && norm(r["title"].as_str().unwrap_or("")) == want)
+            .next();
+        let Some(id) = best.as_ref().and_then(|r| r["id"].as_str()) else { return Ok(vec![]) };
+        let rec = self.get(&format!("recording/{id}?inc=artist-rels+work-rels+work-level-rels&fmt=json")).await?;
+        Ok(parse_credits(&rec))
+    }
+}
+
+fn norm(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() { Some(f) => f.to_uppercase().collect::<String>() + c.as_str(), None => String::new() }
+}
+
+/// Turn a recording's relationships into credits, grouped by role in the order they first appear.
+fn parse_credits(rec: &Value) -> Vec<(String, String)> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    let mut add = |role: String, name: &str| {
+        if name.is_empty() { return; }
+        match out.iter_mut().find(|(r, _)| *r == role) {
+            Some((_, names)) => { if !names.iter().any(|n| n.eq_ignore_ascii_case(name)) { names.push(name.to_string()); } }
+            None => out.push((role, vec![name.to_string()])),
+        }
+    };
+    let attrs = |rel: &Value| -> Vec<String> {
+        rel["attributes"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| a.as_str().map(String::from)).collect()
+    };
+    for rel in rec["relations"].as_array().cloned().unwrap_or_default() {
+        let ty = rel["type"].as_str().unwrap_or("");
+        if let Some(name) = rel["artist"]["name"].as_str() {
+            let a = attrs(&rel);
+            let role = match ty {
+                "producer" => "Produced by".to_string(),
+                "engineer" => if a.iter().any(|x| x == "mix") { "Mixed by".into() } else if a.iter().any(|x| x == "mastering") { "Mastered by".into() }
+                    else if a.iter().any(|x| x == "recording") { "Recorded by".into() } else { "Engineered by".into() },
+                "mix" => "Mixed by".into(),
+                "recording" => "Recorded by".into(),
+                "mastering" => "Mastered by".into(),
+                "arranger" => "Arranged by".into(),
+                "conductor" => "Conducted by".into(),
+                "remixer" => "Remixed by".into(),
+                "performer" => "Performed by".into(),
+                "vocal" => a.first().map(|x| capitalize(x)).unwrap_or_else(|| "Vocals".into()),
+                "instrument" => a.first().map(|x| capitalize(x)).unwrap_or_else(|| "Instruments".into()),
+                _ => continue,
+            };
+            add(role, name);
+        }
+        // the song's written side lives on its work
+        if ty == "performance" {
+            for wr in rel["work"]["relations"].as_array().cloned().unwrap_or_default() {
+                let (Some(name), Some(wty)) = (wr["artist"]["name"].as_str(), wr["type"].as_str()) else { continue };
+                let role = match wty {
+                    "composer" => "Composed by", "lyricist" => "Lyrics by", "writer" => "Written by", "arranger" => "Arranged by", _ => continue,
+                };
+                add(role.to_string(), name);
+            }
+        }
+    }
+    out.into_iter().map(|(role, names)| (role, names.join(", "))).collect()
+}
+
 pub struct SearchResults {
     pub songs: Vec<Value>,
     pub albums: Vec<Value>,
@@ -220,6 +294,31 @@ fn parse_songs(v: &Value) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credits_from_relationships() {
+        let rec = json!({ "relations": [
+            { "type": "producer", "artist": { "name": "Sam Lee" } },
+            { "type": "engineer", "attributes": ["mix"], "artist": { "name": "Ana Ruiz" } },
+            { "type": "engineer", "attributes": ["recording"], "artist": { "name": "Bo Chen" } },
+            { "type": "vocal", "attributes": ["lead vocals"], "artist": { "name": "Odessa Rowe" } },
+            { "type": "instrument", "attributes": ["guitar"], "artist": { "name": "Kit Moss" } },
+            { "type": "instrument", "attributes": ["guitar"], "artist": { "name": "kit moss" } },
+            { "type": "performance", "work": { "relations": [
+                { "type": "composer", "artist": { "name": "Odessa Rowe" } },
+                { "type": "lyricist", "artist": { "name": "Jane Doe" } },
+                { "type": "lyricist", "artist": { "name": "Odessa Rowe" } },
+                { "type": "publisher", "artist": { "name": "Ignored" } }
+            ] } },
+            { "type": "video", "artist": { "name": "Not a credit" } }
+        ] });
+        let c = parse_credits(&rec);
+        let roles: Vec<&str> = c.iter().map(|(r, _)| r.as_str()).collect();
+        assert_eq!(roles, vec!["Produced by", "Mixed by", "Recorded by", "Lead vocals", "Guitar", "Composed by", "Lyrics by"]);
+        assert_eq!(c[4].1, "Kit Moss", "same person in another case isn't repeated");
+        assert_eq!(c[6].1, "Jane Doe, Odessa Rowe");
+        assert!(parse_credits(&json!({})).is_empty());
+    }
 
     #[test]
     fn encodes_queries() {

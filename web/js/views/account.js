@@ -16,6 +16,9 @@ Spin.views = Spin.views || {};
       '<div class="set-text"><strong>' + title + '</strong>' + (sub ? '<span>' + sub + '</span>' : '') + '</div>' +
       '<div class="set-control">' + control + '</div></div>';
   }
+  function toggle(key, on) {
+    return '<span class="switch"><input type="checkbox" data-setting="' + key + '"' + (on ? ' checked' : '') + '><span class="switch-ui"></span></span>';
+  }
   function seg(key, value, options) {
     return '<div class="seg-ctl" role="radiogroup">' + options.map(function (o) {
       return '<button class="' + (o[0] === value ? 'on' : '') + '" data-seg="' + key + '" data-value="' + o[0] + '" role="radio" aria-checked="' + (o[0] === value) + '">' +
@@ -164,6 +167,10 @@ Spin.views = Spin.views || {};
     return group('Appearance',
         row('Theme', st.theme === 'system' ? 'Matches your device\'s light or dark setting.' : 'Always ' + st.theme + '.',
           seg('theme', st.theme, [['system', 'System', 'monitor'], ['dark', 'Dark', 'moon'], ['light', 'Light', 'sun']]), { icon: 'sun' })) +
+      group('Privacy',
+        row('Share what I\'m listening to', 'Others in your household see your current song on the Household page.', toggle('shareActivity', st.settings.shareActivity !== false), { icon: 'users' }) +
+        row('Private session', 'Stops sharing, and keeps what you play out of Recently played, until you turn it off.', toggle('privateSession', !!st.settings.privateSession), { icon: 'eyeOff' }),
+        { id: 'privacy' }) +
       group('Library',
         (S.data.me.admin ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
           '<button class="btn btn-secondary btn-sm" data-act="pick-folder">Change</button>', { icon: 'library' }) : '') +
@@ -191,6 +198,14 @@ Spin.views = Spin.views || {};
           }).join('') + '</nav>' +
           '<div class="acct-body">' + (tab[0] === 'people' ? householdTab() : tab[0] === 'settings' ? settingsTab() : profileTab()) + '</div>' +
         '</div>';
+
+      root.onchange = function (e) {
+        const key = e.target.dataset && e.target.dataset.setting;
+        if (!key) return;
+        S.store.update(function (s) { s.settings[key] = e.target.checked; });
+        if (S.household) S.household.syncPresence();
+        S.toast(key === 'privateSession' ? (e.target.checked ? 'Private session on' : 'Private session off') : (e.target.checked ? 'Sharing what you play' : 'Not sharing what you play'));
+      };
 
       root.onclick = function (e) {
         const segBtn = e.target.closest('[data-seg]');

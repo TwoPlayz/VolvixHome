@@ -1,4 +1,4 @@
-﻿// Writes a small test library in Lidarr's layout: Artist/Album (Year)/NN - Title.wav, with RIFF INFO tags.
+// Writes a small test library in Lidarr's layout: Artist/Album (Year)/NN - Title.wav, with RIFF INFO tags.
 const fs = require('fs'), path = require('path');
 const root = process.argv[2];
 const lib = [
@@ -25,7 +25,7 @@ for (const [artist, album, year, songs, base] of lib) {
   fs.mkdirSync(dir, { recursive: true });
   songs.forEach((t, i) => {
     const file = path.join(dir, String(i + 1).padStart(2, '0') + ' - ' + t + '.wav');
-    fs.writeFileSync(file, wav(12 + i * 3, base + i * 40, { INAM: t, IART: artist, IPRD: album, ITRK: i + 1, ICRD: year, IGNR: 'Indie' }));
+    fs.writeFileSync(file, wav(12 + i * 3, base + i * 40, { INAM: t, IART: artist, IPRD: album, ITRK: i + 1, ICRD: year, IGNR: 'Indie', IMUS: artist + ' & Jane Doe', IPRO: 'Sam Lee', IWRI: 'Jane Doe', ICOP: '(c) ' + year + ' ' + artist }));
   });
 }
 // an untagged file: names must come from the folders

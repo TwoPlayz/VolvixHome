@@ -83,6 +83,9 @@ pub struct Request {
     #[serde(rename = "byId")]
     pub by_id: String,
     pub at: u64,
+    /// the requester has been notified that it arrived (old requests count as done)
+    #[serde(default = "yes")]
+    pub notified: bool,
 }
 
 pub fn load_requests(dir: &Path) -> Vec<Request> {
