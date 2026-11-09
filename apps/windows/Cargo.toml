@@ -14,7 +14,7 @@ wry = "0.57"
 tao = "0.37"
 serde_json = "1"
 dirs = "5"
-tray-icon = "0.19"
+tray-icon = "0.26"
 winreg = "0.52"
 ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
