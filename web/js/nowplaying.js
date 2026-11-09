@@ -104,8 +104,8 @@ window.Spin = window.Spin || {};
     render();
     void el.offsetHeight; // start from the off-screen position so the slide plays
     el.classList.add('np-shown');
-    const c = el.querySelector('[data-np-close]');
-    if (c) c.focus({ preventScroll: true });
+    el.setAttribute('tabindex', '-1');
+    el.focus({ preventScroll: true }); // focus the sheet itself, not the close button (no ring on it)
   }
   function close() {
     if (!open) return;

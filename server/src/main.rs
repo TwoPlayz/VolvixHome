@@ -193,11 +193,14 @@ struct Login {
 
 /// Basic hardening headers on every response.
 async fn security_headers(req: Request, next: axum::middleware::Next) -> Response {
+    let is_api = req.uri().path().starts_with("/api/");
     let mut res = next.run(req).await;
     let h = res.headers_mut();
     h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
     h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
     h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    // the app's own files are checked with the server every time, so an update shows up straight away
+    if !is_api && !h.contains_key(header::CACHE_CONTROL) { h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache")); }
     res
 }
 

@@ -97,7 +97,12 @@
   }
 
   // lets the app open without a connection (see sw.js)
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () { /* not allowed here: fine */ });
+  if ('serviceWorker' in navigator) {
+    // when a newer service worker takes over (an app update), reload once so the page runs the new files
+    const had = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (had && !window.__vhReloaded) { window.__vhReloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('/sw.js').catch(function () { /* not allowed here: fine */ });
+  }
 
   start();
 })();

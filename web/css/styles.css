@@ -2703,3 +2703,7 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .track.dragging, .q-row.dragging { opacity: 0 !important; }
 .drag-shifting { transition: transform .16s ease; }
 body.reordering { cursor: grabbing; user-select: none; }
+
+/* no stray focus ring on the Now Playing sheet or its buttons after a tap (keyboard focus still shows) */
+.np:focus { outline: none; }
+.np .icon-btn:focus:not(:focus-visible), .np .ctrl:focus:not(:focus-visible) { outline: none; box-shadow: none; }
