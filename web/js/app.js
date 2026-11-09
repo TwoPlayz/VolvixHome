@@ -22,7 +22,6 @@ window.Spin.views = window.Spin.views || {};
 
     appEl.innerHTML =
       '<div class="app">' +
-        '<button class="skip-link" data-action="skip">Skip to content</button>' +
         '<aside class="sidebar">' +
           '<div class="sidebar-head"><a href="#/home" aria-label="Volvix Home">' + S.brand(28) + '</a></div>' +
           '<nav class="nav" aria-label="Main">' + NAV.map(function (n) {
@@ -68,7 +67,7 @@ window.Spin.views = window.Spin.views || {};
   function playerBar() {
     return '<footer class="player" aria-label="Player">' +
       '<div class="player-track">' +
-        '<div class="player-art" data-p="art">' + S.icon('disc', 22) + '</div>' +
+        '<button class="player-art" data-p="art" data-np-open aria-label="Open Now Playing">' + S.icon('disc', 22) + '</button>' +
         '<div class="player-meta"><div class="player-title" data-p="title">Not playing</div>' +
         '<div class="player-sub" data-p="sub">Pick something from your library</div></div>' +
         '<button class="ctrl like-btn player-like" data-p="like" data-like="" data-size="18" aria-label="Add to Liked Songs" title="Add to Liked Songs" hidden>' + S.icon('heart', 18) + '</button>' +
@@ -82,7 +81,7 @@ window.Spin.views = window.Spin.views || {};
           ctrl('next', 'Next', 'next') + ctrl('repeat', 'Repeat', 'repeat') +
         '</div>' +
         '<div class="player-progress"><span class="time" data-p="pos">0:00</span>' +
-          '<div class="bar" data-seek role="slider" aria-label="Seek"><div class="bar-fill" data-p="progress-fill" style="width:0%"></div></div>' +
+          '<div class="bar" data-seek role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-keyshortcuts="ArrowLeft ArrowRight"><div class="bar-fill" data-p="progress-fill" style="width:0%"></div></div>' +
           '<span class="time" data-p="dur">0:00</span></div>' +
       '</div>' +
       '<div class="player-right">' +
@@ -91,7 +90,7 @@ window.Spin.views = window.Spin.views || {};
         '<button class="ctrl party-btn" data-player="party" aria-label="Start a listening party" title="Start a listening party">' + S.icon('party', 18) + '</button>' +
         ctrl('queue', 'Queue', 'queue') +
         '<div class="volume"><button class="ctrl" data-player="mute" aria-label="Mute">' + S.icon('volume', 18) + '</button>' +
-          '<div class="bar" data-volume role="slider" aria-label="Volume"><div class="bar-fill" data-p="volume-fill" style="width:70%"></div></div></div>' +
+          '<div class="bar" data-volume role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="70" aria-keyshortcuts="ArrowUp ArrowDown"><div class="bar-fill" data-p="volume-fill" style="width:70%"></div></div></div>' +
       '</div>' +
       '<div class="mini-progress"><div data-p="mini-progress"></div></div>' +
     '</footer>';
@@ -251,6 +250,18 @@ window.Spin.views = window.Spin.views || {};
 
   /* ---------- start ---------- */
   bindShell();
+  // Tab past the last control goes back to the first (and Shift+Tab from the first to the last), instead of leaving the page
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Tab' || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (document.querySelector('.modal-scrim, .popover')) return; // dialogs and menus manage their own focus
+    const list = Array.from(document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      .filter(function (n) { return n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden'; });
+    if (!list.length) return;
+    const a = document.activeElement;
+    if (!e.shiftKey && a === list[list.length - 1]) { e.preventDefault(); list[0].focus(); }
+    else if (e.shiftKey && a === list[0]) { e.preventDefault(); list[list.length - 1].focus(); }
+  });
+
   S.router.start();
 
   // the server rescans by itself (and when Lidarr imports): tell people when the library changed under them

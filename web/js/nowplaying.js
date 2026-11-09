@@ -59,7 +59,7 @@ window.Spin = window.Spin || {};
         '<button class="np-add np-more" data-np-info aria-label="More" title="More">' + S.icon('more', 22) + '</button>' +
       '</div>' +
       '<div class="np-progress">' +
-        '<div class="bar" data-seek role="slider" aria-label="Seek"><div class="bar-fill" data-np-fill></div></div>' +
+        '<div class="bar" data-seek role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar-fill" data-np-fill></div></div>' +
         '<div class="np-times"><span data-np-pos>0:00</span><span data-np-dur>' + S.fmtTime(t.duration) + '</span></div>' +
       '</div>' +
       '<div class="np-controls">' +
@@ -90,6 +90,8 @@ window.Spin = window.Spin || {};
     if (fill) fill.style.width = Math.min(100, (pos / t.duration) * 100) + '%';
     const p = el.querySelector('[data-np-pos]');
     if (p) p.textContent = S.fmtTime(pos);
+    const bar = el.querySelector('[data-seek]');
+    if (bar) { bar.setAttribute('aria-valuenow', Math.round(Math.min(100, (pos / t.duration) * 100) || 0)); bar.setAttribute('aria-valuetext', S.fmtTime(pos) + ' of ' + S.fmtTime(t.duration)); }
   }
 
   let hideTimer = null;
@@ -155,6 +157,18 @@ window.Spin = window.Spin || {};
     e.stopPropagation();
     show();
   }, true);
+
+  // the small cover in the player bar is a real button: on a phone it opens Now Playing, on a computer it goes to the album
+  function labelOpener() { S.$$('[data-np-open]').forEach(function (b) { b.setAttribute('aria-label', phone.matches ? 'Open Now Playing' : 'Go to album'); }); }
+  labelOpener();
+  phone.addEventListener && phone.addEventListener('change', labelOpener);
+  S.player.hooks.push(labelOpener);
+  document.addEventListener('click', function (e) {
+    const b = e.target.closest('[data-np-open]');
+    if (!b || phone.matches) return; // on a phone the click handler above opens it
+    const t = S.player.current();
+    if (t) { e.preventDefault(); location.hash = '#/album/' + t.albumId; }
+  });
 
   document.addEventListener('click', function (e) {
     if (!el || !open || !el.contains(e.target)) return;

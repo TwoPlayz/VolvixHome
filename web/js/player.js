@@ -487,6 +487,7 @@ window.Spin = window.Spin || {};
     mediaSession(t, album);
     const vol = S.$('[data-p="volume-fill"]');
     if (vol) vol.style.width = (st.muted ? 0 : st.volume * 100) + '%';
+    S.$$('[data-volume]').forEach(function (b) { b.setAttribute('aria-valuenow', Math.round((st.muted ? 0 : st.volume) * 100)); b.setAttribute('aria-valuetext', Math.round((st.muted ? 0 : st.volume) * 100) + ' percent'); });
     const volBtn = S.$('[data-player="mute"]');
     if (volBtn) volBtn.classList.toggle('muted', st.muted || st.volume === 0);
 
@@ -510,6 +511,7 @@ window.Spin = window.Spin || {};
     S.$('[data-p="mini-progress"]').style.width = pct + '%';
     S.$('[data-p="pos"]').textContent = S.fmtTime(st.pos);
     S.$('[data-p="dur"]').textContent = S.fmtTime(dur);
+    S.$$('[data-seek]').forEach(function (b) { b.setAttribute('aria-valuenow', Math.round(pct)); b.setAttribute('aria-valuetext', S.fmtTime(st.pos) + ' of ' + S.fmtTime(dur)); });
     S.player.progressHooks.forEach(function (fn) { fn(); });
   }
 
@@ -660,6 +662,23 @@ window.Spin = window.Spin || {};
     function up() { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); }
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
+  });
+
+  // keyboard on the seek and volume bars: arrows move by 10 seconds / 5 percent (Home, End jump to the ends)
+  document.addEventListener('keydown', function (e) {
+    const bar = e.target.closest && e.target.closest('[data-seek], [data-volume]');
+    if (!bar || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key, up = k === 'ArrowRight' || k === 'ArrowUp', down = k === 'ArrowLeft' || k === 'ArrowDown';
+    if (!up && !down && k !== 'Home' && k !== 'End') return;
+    e.preventDefault();
+    if (bar.hasAttribute('data-seek')) {
+      const t = current(); if (!t) return;
+      const dur = durationOf(t);
+      userSeek(k === 'Home' ? 0 : k === 'End' ? Math.max(0, dur - 1) : Math.max(0, Math.min(dur, st.pos + (up ? 10 : -10))));
+    } else {
+      st.volume = k === 'Home' ? 0 : k === 'End' ? 1 : Math.max(0, Math.min(1, Math.round((st.volume + (up ? 0.05 : -0.05)) * 100) / 100));
+      st.muted = false; render();
+    }
   });
 
   document.addEventListener('keydown', function (e) {

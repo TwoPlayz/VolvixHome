@@ -2707,3 +2707,15 @@ body.reordering { cursor: grabbing; user-select: none; }
 /* no stray focus ring on the Now Playing sheet or its buttons after a tap (keyboard focus still shows) */
 .np:focus { outline: none; }
 .np .icon-btn:focus:not(:focus-visible), .np .ctrl:focus:not(:focus-visible) { outline: none; box-shadow: none; }
+
+/* keyboard focus: rings stay fully visible and match each button's shape */
+.player-title a:focus-visible, .player-sub a:focus-visible, .player-title a:focus, .player-sub a:focus { outline-offset: -2px; border-radius: 4px; }
+.player-title, .player-sub { padding: 2px 3px; margin: -2px -3px; }  /* room inside the clipped line for the ring */
+.player-art { cursor: pointer; border: 0; padding: 0; }
+.player-art:focus-visible { outline-offset: -3px; }
+.ctrl, .icon-btn, .row-more, .row-add, .row-like, .player-more, .np-more, .np-add { border-radius: 50%; }
+.ctrl:focus-visible, .icon-btn:focus-visible, .row-more:focus-visible, .row-add:focus-visible, .row-like:focus-visible { outline-offset: -2px; }
+.bar:focus-visible { outline-offset: 6px; border-radius: 3px; }
+.bar[data-seek]:focus-visible, .bar[data-volume]:focus-visible { outline: 2px solid var(--accent); }
+
+.player-meta { flex: 0 1 auto; } /* the like / add / more buttons sit right after the song name */
