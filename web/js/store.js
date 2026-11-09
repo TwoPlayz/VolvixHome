@@ -13,6 +13,7 @@ window.Spin = window.Spin || {};
       v: 1,
       theme: 'system',                 // 'system' | 'dark' | 'light'
       playlists: [],
+      stats: { tracks: {}, years: {} },  // your plays (see stats.js)
       followed: [],                    // other people's playlists you follow
       followedArtists: [],             // artist names you follow (Library → Artists)
       recent: [],                      // album ids, most recent first

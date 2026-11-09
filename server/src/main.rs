@@ -18,9 +18,11 @@ mod auth;
 mod library;
 mod lidarr;
 mod lyrics;
+mod maintenance;
 mod musicbrainz;
 mod party;
 mod social;
+mod vault;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -78,6 +80,8 @@ struct AppState {
     http: lidarr::Client,
     mb: musicbrainz::Client,
     lyrics: lyrics::Client,
+    /// recent failed sign-ins by name: (count, first at). Eight in ten minutes locks that name for a while.
+    fails: Mutex<HashMap<String, (u32, u64)>>,
     social: social::Social,
     parties: party::Parties,
 }
@@ -183,7 +187,26 @@ struct Login {
     password: String,
 }
 
+/// Basic hardening headers on every response.
+async fn security_headers(req: Request, next: axum::middleware::Next) -> Response {
+    let mut res = next.run(req).await;
+    let h = res.headers_mut();
+    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    res
+}
+
 async fn login(State(st): State<Shared>, Json(body): Json<Login>) -> Response {
+    let who_key = (if body.name.trim().is_empty() { &body.username } else { &body.name }).trim().to_lowercase();
+    {
+        let fails = st.fails.lock().unwrap();
+        if let Some((n, first)) = fails.get(&who_key) {
+            if *n >= 8 && auth::now() < first + 600 {
+                return error(StatusCode::TOO_MANY_REQUESTS, "Too many tries. Wait a few minutes and try again.");
+            }
+        }
+    }
     let found = {
         let accounts = st.accounts.lock().unwrap();
         let who = if body.name.trim().is_empty() { &body.username } else { &body.name };
@@ -191,10 +214,18 @@ async fn login(State(st): State<Shared>, Json(body): Json<Login>) -> Response {
     };
     match found {
         Some(user) => {
+            st.fails.lock().unwrap().remove(&who_key);
             let token = st.accounts.lock().unwrap().start_session(&user.id);
             signed_in_response(&user, &token)
         }
         None => {
+            {
+                let mut fails = st.fails.lock().unwrap();
+                let now = auth::now();
+                let e = fails.entry(who_key).or_insert((0, now));
+                if now > e.1 + 600 { *e = (0, now); }
+                e.0 += 1;
+            }
             tokio::time::sleep(Duration::from_millis(400)).await; // slow down guessing
             error(StatusCode::UNAUTHORIZED, "Name or password is incorrect.")
         }
@@ -393,7 +424,7 @@ async fn get_data(State(st): State<Shared>, headers: HeaderMap) -> Response {
         Ok(u) => u,
         Err(r) => return r,
     };
-    let body = std::fs::read_to_string(user_data_path(&st, &user.id)).unwrap_or_else(|_| "null".into());
+    let body = vault::read(&user_data_path(&st, &user.id)).unwrap_or_else(|| "null".into());
     ([(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
@@ -406,8 +437,7 @@ async fn put_data(State(st): State<Shared>, headers: HeaderMap, body: String) ->
         return error(StatusCode::BAD_REQUEST, "Expected JSON.");
     }
     let path = user_data_path(&st, &user.id);
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, body).and_then(|_| std::fs::rename(&tmp, &path)).is_err() {
+    if !vault::write(&path, &body) {
         return error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't save.");
     }
     StatusCode::NO_CONTENT.into_response()
@@ -1273,12 +1303,34 @@ async fn main() {
         http: lidarr::Client::new(),
         mb: musicbrainz::Client::new(),
         lyrics: lyrics::Client::new(),
+        fails: Mutex::new(HashMap::new()),
         social: social::Social::load(&cfg.data_dir),
         parties: party::Parties::new(),
         lib: RwLock::new(Library::default()),
         cfg: cfg.clone(),
     });
     start_scan(st.clone());
+    if vault::enabled() { println!("data at rest: encrypted (VH_DATA_KEY is set)"); }
+    // nightly housekeeping (see maintenance.rs): expired sign-ins, a dated backup, old cache
+    {
+        let s = st.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            loop {
+                let keep = std::env::var("VH_BACKUP_KEEP").ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(7);
+                s.accounts.lock().unwrap().purge_expired();
+                if keep > 0 {
+                    match maintenance::backup(&s.cfg.data_dir, auth::now(), keep) {
+                        Ok(p) => println!("backup: {}", p.display()),
+                        Err(e) => eprintln!("backup failed: {e}"),
+                    }
+                }
+                let n = maintenance::clean_cache(&s.cfg.data_dir, 120);
+                if n > 0 { println!("cache: removed {n} old look-ups"); }
+                tokio::time::sleep(Duration::from_secs(86400)).await;
+            }
+        });
+    }
     // parties: move on to the next song when one ends, and resend the state every 5 s so devices stay in step
     {
         let s = st.clone();
@@ -1350,7 +1402,7 @@ async fn main() {
 
     // everything else is the web app (single page: unknown paths get index.html)
     let web = ServeDir::new(&cfg.web_dir).fallback(ServeFile::new(cfg.web_dir.join("index.html")));
-    let app = api.fallback_service(web);
+    let app = api.fallback_service(web).layer(axum::middleware::from_fn(security_headers));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
     let listener = match tokio::net::TcpListener::bind(addr).await {

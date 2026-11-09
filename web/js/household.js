@@ -15,7 +15,7 @@ window.Spin = window.Spin || {};
       id: s.id, name: s.name, description: s.description || '', owner: toMe(s.owner),
       collaborative: true, shared: true, public: !!s.public,
       collaborators: (s.collaborators || []).map(toMe), invited: s.invited || [], rev: s.rev || 0,
-      tracks: (s.tracks || []).map(function (t) { return { id: t.id, addedBy: toMe(t.addedBy) }; })
+      tracks: (s.tracks || []).map(function (t) { return { id: t.id, addedBy: toMe(t.addedBy), at: t.at || 0 }; })
     };
   }
   let sharedList = ((VH.shared && VH.shared.playlists) || []).map(fromServer);
@@ -70,7 +70,7 @@ window.Spin = window.Spin || {};
         if (p) {
           return { id: p.id, name: p.name, description: p.description || '', owner: m.id, collaborative: (p.collaborators || []).length > 0,
             collaborators: p.collaborators || [], public: true, household: true,
-            tracks: (p.tracks || []).map(function (t) { return { id: t.id, addedBy: toMe(t.addedBy) }; }) };
+            tracks: (p.tracks || []).map(function (t) { return { id: t.id, addedBy: toMe(t.addedBy), at: t.at || 0 }; }) };
         }
       }
       return null;

@@ -95,7 +95,7 @@ window.Spin = window.Spin || {};
       const fresh = ids.filter(function (t, i) { return have.indexOf(t) === -1 && ids.indexOf(t) === i; });
       if (!fresh.length) return 0;
       if (pl.shared) { sharedOp(id, { op: 'add', ids: fresh }); return fresh.length; }
-      commit(function () { fresh.forEach(function (t) { pl.tracks.push({ id: t, addedBy: 'u_me' }); }); });
+      commit(function () { fresh.forEach(function (t) { pl.tracks.push({ id: t, addedBy: 'u_me', at: Math.floor(Date.now() / 1000) }); }); });
       return fresh.length;
     },
     removeAt: function (id, index) {
@@ -113,7 +113,7 @@ window.Spin = window.Spin || {};
       const pl = get(id);
       if (pl.shared) {
         pl.tracks.splice(index, 0, entry); redraw();
-        sharedOp(id, { op: 'insert', index: index, entry: { id: entry.id, addedBy: entry.addedBy === 'u_me' ? S.data.me.serverId : entry.addedBy } }).catch(function () {});
+        sharedOp(id, { op: 'insert', index: index, entry: { id: entry.id, addedBy: entry.addedBy === 'u_me' ? S.data.me.serverId : entry.addedBy, at: entry.at || undefined } }).catch(function () {});
         return;
       }
       commit(function () { pl.tracks.splice(index, 0, entry); });
@@ -166,7 +166,7 @@ window.Spin = window.Spin || {};
           p = { id: LIKED_ID, name: 'Liked Songs', description: 'Songs you\'ve liked.', owner: 'u_me', collaborative: false, collaborators: [], liked: true, tracks: [] };
           s.playlists.unshift(p);
         }
-        if (on) p.tracks.unshift({ id: trackId, addedBy: 'u_me' });
+        if (on) p.tracks.unshift({ id: trackId, addedBy: 'u_me', at: Math.floor(Date.now() / 1000) });
         else p.tracks = p.tracks.filter(function (t) { return t.id !== trackId; });
       });
       S.app.refreshSidebar();

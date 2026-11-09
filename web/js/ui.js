@@ -248,6 +248,13 @@ window.Spin = window.Spin || {};
     return '<span class="avatar" style="' + style + ';background:' + AVATAR_COLORS[hash % AVATAR_COLORS.length] + '">' + S.esc(initials) + '</span>';
   };
 
+  /** Seconds since 1970 -> "Mar 4, 2026" (this year drops the year). */
+  S.fmtDay = function (sec) {
+    if (!sec) return '';
+    const d = new Date(sec * 1000), now = new Date();
+    return d.toLocaleDateString(undefined, d.getFullYear() === now.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
   /* ---------- toasts ---------- */
   S.toast = function (message, icon) {
     const host = document.getElementById('toasts');

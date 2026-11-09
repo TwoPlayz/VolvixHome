@@ -93,6 +93,7 @@ Spin.views = Spin.views || {};
           ? S.trackList(ids, {
               showAlbum: true, showCover: true, playlistId: canEdit ? pl.id : null,
               addedBy: pl.collaborative ? pl.tracks.map(function (t) { return t.addedBy; }) : null,
+              addedAt: pl.tracks.map(function (t) { return t.at || 0; }),
               context: { type: 'playlist', id: pl.id, name: pl.name }
             })
           : '') +

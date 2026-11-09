@@ -135,6 +135,7 @@ window.Spin.views = window.Spin.views || {};
         { label: 'Account', icon: 'user', onClick: function () { S.router.go('/account/profile'); } },
         me.admin ? { label: 'Members', icon: 'family', onClick: function () { S.router.go('/account/members'); } } : null,
         { label: 'Settings', icon: 'settings', onClick: function () { S.router.go('/account/settings'); } },
+        { label: 'Rewind', icon: 'history', onClick: function () { S.router.go('/rewind'); } },
         { sep: true },
         { label: 'Sign out', icon: 'logout', onClick: function () { S.server.logout(); } }
       ]
@@ -237,6 +238,8 @@ window.Spin.views = window.Spin.views || {};
   S.router.add('/album/:id', S.views.album);
   S.router.add('/artist/:slug', S.views.artist);
   S.router.add('/credit/:name', S.views.credit);
+  S.router.add('/rewind/:year', S.views.rewind);
+  S.router.add('/rewind', S.views.rewind);
   S.router.add('/playlist/:id', S.views.playlist);
   S.router.add('/requests', S.views.requests);
   S.router.add('/household', S.views.household);

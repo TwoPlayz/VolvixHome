@@ -50,6 +50,7 @@ Spin.views = Spin.views || {};
 
       root.innerHTML =
         '<header class="page-head"><h1 class="page-title">' + greeting() + '</h1></header>' +
+        S.rewindBanner() +
         '<div class="quick-grid">' + quick.join('') + '</div>' +
         (recent.length ? S.shelf('Recently played', recent.slice(0, 12).map(function (a) { return S.albumCard(a); }).join(''), { href: '#/library' }) : '') +
         S.shelf('Recently added', added.slice(0, 12).map(function (a) {

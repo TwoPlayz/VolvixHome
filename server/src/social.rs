@@ -17,13 +17,7 @@ use serde_json::{json, Value};
 use crate::auth::{now, random_hex};
 
 fn write_json(path: &Path, value: &impl Serialize) {
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_string_pretty(value).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
+    crate::vault::write(path, &serde_json::to_string_pretty(value).unwrap_or_default());
 }
 
 /* ---------------- notifications ---------------- */
@@ -62,6 +56,9 @@ pub struct Entry {
     pub id: String,
     #[serde(rename = "addedBy")]
     pub added_by: String,
+    /// when it was added (seconds); 0 for songs added before this was tracked
+    #[serde(default)]
+    pub at: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -108,7 +105,7 @@ impl Social {
         let mut shared = HashMap::new();
         if let Ok(rd) = std::fs::read_dir(dir.join("shared")) {
             for e in rd.flatten() {
-                if let Some(s) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<Shared>(&t).ok()) {
+                if let Some(s) = crate::vault::read(&e.path()).and_then(|t| serde_json::from_str::<Shared>(&t).ok()) {
                     shared.insert(s.id.clone(), s);
                 }
             }
@@ -140,7 +137,7 @@ impl Social {
     }
 
     fn load_notes(&self, uid: &str) -> Vec<Note> {
-        std::fs::read_to_string(self.notes_path(uid)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+        crate::vault::read(&self.notes_path(uid)).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
     }
 
     /// Returns the new notification's id.
@@ -207,7 +204,7 @@ impl Social {
             collaborators: vec![],
             invited: vec![],
             public,
-            tracks: tracks.into_iter().map(|id| Entry { id, added_by: uid.to_string() }).collect(),
+            tracks: tracks.into_iter().map(|id| Entry { id, added_by: uid.to_string(), at: crate::auth::now() }).collect(),
             rev: 1,
         };
         write_json(&self.shared_path(&s.id), &s);
@@ -275,7 +272,7 @@ impl Social {
                 if !pl.can_edit(uid) { return Err(forbidden()); }
                 for v in body["ids"].as_array().cloned().unwrap_or_default() {
                     if let Some(t) = v.as_str() {
-                        if !pl.tracks.iter().any(|e| e.id == t) { pl.tracks.push(Entry { id: t.to_string(), added_by: uid.to_string() }); }
+                        if !pl.tracks.iter().any(|e| e.id == t) { pl.tracks.push(Entry { id: t.to_string(), added_by: uid.to_string(), at: crate::auth::now() }); }
                     }
                 }
             }
@@ -293,7 +290,8 @@ impl Social {
                 let i = (body["index"].as_u64().unwrap_or(0) as usize).min(pl.tracks.len());
                 let t = body["entry"]["id"].as_str().ok_or((400u16, "Missing song.".to_string()))?;
                 let by = body["entry"]["addedBy"].as_str().unwrap_or(uid).to_string();
-                pl.tracks.insert(i, Entry { id: t.to_string(), added_by: by });
+                let at = body["entry"]["at"].as_u64().unwrap_or_else(crate::auth::now);
+                pl.tracks.insert(i, Entry { id: t.to_string(), added_by: by, at });
             }
             "move" => {
                 if !pl.can_edit(uid) { return Err(forbidden()); }
@@ -317,14 +315,14 @@ impl Social {
         let mut out: Vec<Value> = self.shared.lock().unwrap().values().filter(|s| s.owner == uid && s.public).map(|s| json!({
             "id": s.id, "name": s.name, "description": s.description, "owner": uid, "shared": true,
             "collaborators": s.collaborators, "count": s.tracks.len(),
-            "tracks": s.tracks.iter().map(|e| json!({ "id": e.id, "addedBy": e.added_by })).collect::<Vec<_>>()
+            "tracks": s.tracks.iter().map(|e| json!({ "id": e.id, "addedBy": e.added_by, "at": e.at })).collect::<Vec<_>>()
         })).collect();
         let blob = self.dir.join("userdata").join(format!("{uid}.json"));
-        if let Some(v) = std::fs::read_to_string(blob).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        if let Some(v) = crate::vault::read(&blob).and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
             for p in v["playlists"].as_array().cloned().unwrap_or_default() {
                 if p["public"].as_bool() != Some(true) || p["liked"].as_bool() == Some(true) { continue; }
                 let tracks: Vec<Value> = p["tracks"].as_array().cloned().unwrap_or_default().iter()
-                    .filter_map(|t| t["id"].as_str().map(|id| json!({ "id": id, "addedBy": uid }))).collect();
+                    .filter_map(|t| t["id"].as_str().map(|id| json!({ "id": id, "addedBy": uid, "at": t["at"].as_u64().map(|a| if a > 100_000_000_000 { a / 1000 } else { a }).unwrap_or(0) }))).collect();
                 out.push(json!({
                     "id": p["id"], "name": p["name"], "description": p["description"], "owner": uid, "shared": false,
                     "collaborators": [], "count": tracks.len(), "tracks": tracks

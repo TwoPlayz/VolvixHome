@@ -5,7 +5,7 @@
 //! an album into the music folder, its webhook (Settings → Connect) tells Volvix Home to rescan, so the
 //! album shows up within seconds.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -40,8 +40,7 @@ impl Settings {
     }
 
     pub fn load(dir: &Path) -> Settings {
-        let mut s: Settings = std::fs::read_to_string(dir.join("lidarr.json"))
-            .ok()
+        let mut s: Settings = crate::vault::read(&dir.join("lidarr.json"))
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_else(|| Settings { everyone_can_request: true, ..Default::default() });
         if let Ok(u) = std::env::var("VH_LIDARR_URL") {
@@ -62,10 +61,7 @@ impl Settings {
     }
 
     pub fn save(&self, dir: &Path) {
-        let tmp = dir.join("lidarr.json.tmp");
-        if std::fs::write(&tmp, serde_json::to_string_pretty(self).unwrap_or_default()).is_ok() {
-            let _ = std::fs::rename(&tmp, dir.join("lidarr.json"));
-        }
+        crate::vault::write(&dir.join("lidarr.json"), &serde_json::to_string_pretty(self).unwrap_or_default());
     }
 }
 
@@ -89,15 +85,11 @@ pub struct Request {
 }
 
 pub fn load_requests(dir: &Path) -> Vec<Request> {
-    std::fs::read_to_string(dir.join("requests.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    crate::vault::read(&dir.join("requests.json")).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
 pub fn save_requests(dir: &Path, list: &[Request]) {
-    let path: PathBuf = dir.join("requests.json");
-    let tmp = dir.join("requests.json.tmp");
-    if std::fs::write(&tmp, serde_json::to_string_pretty(list).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
+    crate::vault::write(&dir.join("requests.json"), &serde_json::to_string_pretty(list).unwrap_or_default());
 }
 
 /* ---------------- HTTP ---------------- */

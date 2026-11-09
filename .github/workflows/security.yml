@@ -1,0 +1,48 @@
+﻿# Scheduled security checks (the "cron jobs" that run on GitHub; the server's own nightly jobs are in maintenance.rs).
+#  - weekly: audit the Rust dependencies of the server and the Windows app for known vulnerabilities
+#  - weekly: rebuild and publish the Docker image, so security fixes in the base system reach your server
+#    (pull the new image on your NAS, or let Watchtower do it)
+name: Security
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'   # Mondays 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit the server
+        run: cd server && cargo audit
+      - name: Audit the Windows app
+        run: cd apps/windows && cargo audit
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name (lowercase)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/volvix-home" >> "$GITHUB_ENV"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          pull: true          # fetch fresh base images
+          no-cache: true
+          tags: ${{ env.IMAGE }}:latest

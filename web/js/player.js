@@ -107,6 +107,7 @@ window.Spin = window.Spin || {};
     if (!st.playing) return;
     if (st.sleepAt && Date.now() >= st.sleepAt) { st.sleepAt = 0; S.toast('Sleep timer: paused', 'moon'); toggle(); return; }
     st.pos = audio.currentTime || st.pos;
+    if (S.stats && !audio.paused) S.stats.tick(t, TICK / 1000);
     renderProgress();
     saveResume(false);
     mediaPosition();
@@ -421,7 +422,7 @@ window.Spin = window.Spin || {};
     const album = t && S.data.album(t.albumId);
     const art = S.$('[data-p="art"]');
     // nothing loaded (first launch, or the queue was cleared): no player bar at all
-    document.documentElement.classList.toggle('player-empty', !t);
+    document.documentElement.classList.toggle('player-empty', !t && !remote); // the player only goes away when nothing's playing and you're not in a party
     if (!art) return;
 
     art.innerHTML = album ? S.cover(album) : S.icon('disc', 22);

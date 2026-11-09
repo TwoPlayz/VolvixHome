@@ -81,7 +81,7 @@ pub struct Accounts {
 
 impl Accounts {
     pub fn load(dir: &Path) -> Accounts {
-        let read = |name: &str| std::fs::read_to_string(dir.join(name)).ok();
+        let read = |name: &str| crate::vault::read(&dir.join(name));
         let users = read("users.json").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         let mut sessions: HashMap<String, Session> = read("sessions.json").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         let cutoff = now().saturating_sub(SESSION_DAYS * 86400);
@@ -92,10 +92,7 @@ impl Accounts {
     fn save(&self) {
         // write to a temp file first so a crash never leaves a half-written file
         let write = |name: &str, body: String| {
-            let tmp = self.dir.join(format!("{name}.tmp"));
-            if std::fs::write(&tmp, body).is_ok() {
-                let _ = std::fs::rename(&tmp, self.dir.join(name));
-            }
+            crate::vault::write(&self.dir.join(name), &body);
         };
         write("users.json", serde_json::to_string_pretty(&self.users).unwrap_or_default());
         write("sessions.json", serde_json::to_string_pretty(&self.sessions).unwrap_or_default());
@@ -181,6 +178,14 @@ impl Accounts {
         Ok(())
     }
 
+    /// Forget sign-ins past their time.
+    pub fn purge_expired(&mut self) {
+        let cutoff = now().saturating_sub(SESSION_DAYS * 86400);
+        let before = self.sessions.len();
+        self.sessions.retain(|_, s| s.created > cutoff);
+        if self.sessions.len() != before { self.save(); }
+    }
+
     pub fn set_hide_explicit(&mut self, user_id: &str, on: bool) -> Result<(), String> {
         self.users.iter_mut().find(|u| u.id == user_id).ok_or("No such user")?.hide_explicit = on;
         self.save();
@@ -219,19 +224,19 @@ impl Accounts {
 
     pub fn start_session(&mut self, user_id: &str) -> String {
         let token = random_hex(32);
-        self.sessions.insert(token.clone(), Session { user_id: user_id.to_string(), created: now() });
+        self.sessions.insert(crate::vault::sha256_hex(&token), Session { user_id: user_id.to_string(), created: now() });
         self.save();
         token
     }
 
     pub fn end_session(&mut self, token: &str) {
-        if self.sessions.remove(token).is_some() {
+        if self.sessions.remove(&crate::vault::sha256_hex(token)).is_some() {
             self.save();
         }
     }
 
     pub fn user_for_token(&self, token: &str) -> Option<&User> {
-        let s = self.sessions.get(token)?;
+        let s = self.sessions.get(&crate::vault::sha256_hex(token))?;
         if s.created + SESSION_DAYS * 86400 < now() {
             return None;
         }

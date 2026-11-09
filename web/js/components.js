@@ -75,12 +75,13 @@ window.Spin = window.Spin || {};
     opts = opts || {};
     const listId = 'tl' + Math.random().toString(36).slice(2, 8);
     S.trackList.lists[listId] = { ids: trackIds.slice(), context: opts.context || null };
-    const cls = 'tracks' + (opts.showAlbum ? ' with-album' : '') + (opts.addedBy ? ' with-added' : '') + (opts.playlistId ? ' editable' : '');
+    const cls = 'tracks' + (opts.showAlbum ? ' with-album' : '') + ((opts.addedBy || opts.addedAt) ? ' with-added' : '') + (opts.playlistId ? ' editable' : '');
 
     const head = '<div class="track-head" aria-hidden="true">' +
+      (opts.playlistId ? '<span class="c-drag"></span>' : '') +
       '<span class="c-num">#</span><span>Title</span>' +
       (opts.showAlbum ? '<span class="c-album">Album</span>' : '') +
-      (opts.addedBy ? '<span class="c-added">Added by</span>' : '') +
+      ((opts.addedBy || opts.addedAt) ? '<span class="c-added">' + (opts.addedBy ? 'Added by' : 'Date added') + '</span>' : '') +
       '<span class="c-dur">' + S.icon('history', 15) + '</span><span></span></div>';
 
     const dlSet = S.dl ? S.dl.trackSet() : {};
@@ -97,6 +98,7 @@ window.Spin = window.Spin || {};
       const plAttr = opts.playlistId ? ' data-pl="' + opts.playlistId + '" data-pl-index="' + i + '"' : '';
       const adder = opts.addedBy ? S.data.person(opts.addedBy[i]) : null;
       return '<div class="track' + (owned ? '' : ' locked') + (unavailable ? ' unavailable' : '') + (current ? ' playing' : '') + '" role="button" tabindex="0" data-track-id="' + id + '" data-list="' + listId + '" data-index="' + i + '"' + plAttr + '>' +
+        (opts.playlistId ? '<span class="drag-sign" title="Drag to reorder: grab the row anywhere" aria-hidden="true">' + S.icon('grip', 18) + '</span>' : '') +
         '<span class="c-num"><span class="num">' + (opts.numbered === false ? '' : (opts.useTrackNo ? t.no : i + 1)) + '</span>' +
           '<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>' +
           '<span class="row-play">' + S.icon('play', 14) + '</span></span>' +
@@ -114,10 +116,10 @@ window.Spin = window.Spin || {};
           })() +
         '</span>' +
         (opts.showAlbum ? '<a class="c-album" href="#/album/' + album.id + '">' + S.esc(album.title) + '</a>' : '') +
-        (opts.addedBy ? '<span class="c-added">' + (adder ? S.avatar(adder, 22) + '<span>' + S.esc(adder.id === 'u_me' ? 'You' : adder.name.split(' ')[0]) + '</span>' : '') + '</span>' : '') +
+        ((opts.addedBy || opts.addedAt) ? '<span class="c-added">' + (adder ? S.avatar(adder, 22) + '<span>' + S.esc(adder.id === 'u_me' ? 'You' : adder.name.split(' ')[0]) + '</span>' : '') +
+          (opts.addedAt && opts.addedAt[i] ? '<span class="c-when">' + S.fmtDay(opts.addedAt[i]) + '</span>' : '') + '</span>' : '') +
         '<span class="c-dur">' + S.fmtTime(t.duration) + '</span>' +
         '<span class="c-act">' + S.likeButton(id, 'row-like', 16) + S.addButton(id, 'row-add') +
-          (opts.playlistId ? '<span class="drag-sign" title="Drag to reorder: grab the row anywhere" aria-hidden="true">' + S.icon('grip', 18) + '</span>' : '') +
           '<button class="row-more" data-track-menu="' + id + '" aria-label="More options for ' + S.esc(t.title) + '">' + S.icon('more', 18) + '</button></span>' +
       '</div>';
     }).join('');
@@ -328,7 +330,12 @@ window.Spin = window.Spin || {};
           ['Album', al.title, S.albumLink(al)], ['Year', al.year ? String(al.year) : ''], ['Label', al.label], ['Genre', al.genre],
           ['Format', q.detail], ['Length', t.duration ? S.fmtTime(t.duration) : ''], ['Copyright', al.copyright],
           ['ISRC', ((own.find(function (c) { return c.role === 'ISRC'; }) || {}).names) || '']
-        ]) + '</dl></div>',
+        ]) + '</dl>' + (function () {
+          const mine = S.stats && S.stats.get(trackId);
+          return '<div class="q-label">Your listening</div><dl class="credit-list">' + (mine
+            ? detailRows([['Plays', String(mine.n)], ['First played', S.fmtDay(mine.first)], ['Last played', S.fmtDay(mine.last)]])
+            : detailRows([['Plays', 'Not played yet']])) + '</dl>';
+        })() + '</div>',
       actions: [{ label: 'Close', kind: 'secondary' }]
     });
     S.server.json('GET', '/api/credits/' + encodeURIComponent(trackId)).then(function (r) {
