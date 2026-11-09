@@ -84,6 +84,7 @@ window.Spin = window.Spin || {};
       return fetch('/api/library', { credentials: 'same-origin' }).then(function (r) { if (!r.ok) throw new Error('library'); return r.json(); }).then(function (cat) {
         buildCatalog(cat);
         if (S.creditIndexReset) S.creditIndexReset();
+        if (S.player && S.player.heal) S.player.heal();
         return { albums: ALBUMS.length, tracks: Object.keys(TRACKS).length };
       });
     },

@@ -104,7 +104,7 @@ window.Spin = window.Spin || {};
         i = (i + n) % n;
       }
       if (owned(st.queue[i])) return { index: i, skipped: skipped };
-      skipped++;
+      if (S.data.track(st.queue[i])) skipped++; // a song that's gone from the library is passed over without a word
     }
     return { index: -1, skipped: skipped };
   }
@@ -277,6 +277,12 @@ window.Spin = window.Spin || {};
 
   function play(ids, startIndex, context) {
     if (!ids || !ids.length) return;
+    // songs that have left the library (still listed in a playlist or Liked Songs) are not part of what plays
+    if (ids.some(function (id) { return !S.data.track(id); })) {
+      if (startIndex > 0) startIndex -= ids.slice(0, startIndex).filter(function (id) { return !S.data.track(id); }).length;
+      ids = ids.filter(function (id) { return !!S.data.track(id); });
+      if (!ids.length) { S.toast('Those songs aren\'t in your library any more', 'lock'); return; }
+    }
     if (intercept('play', [ids, startIndex, context])) return;
     // -1 = "from the top": the first song, or a random one when shuffle is on
     startIndex = startIndex === -1 ? (st.shuffle ? Math.floor(Math.random() * ids.length) : 0) : (startIndex || 0);
@@ -315,6 +321,7 @@ window.Spin = window.Spin || {};
 
   function toggle() {
     if (intercept('toggle', [])) return;
+    if (st.index >= 0 && !current()) { heal(); return; }
     if (!current()) {
       // nothing loaded: start the most recent album
       const recent = (S.store.state.recent || [])[0];
@@ -336,7 +343,30 @@ window.Spin = window.Spin || {};
     render();
   }
 
+  /** The library changed under the player (a song was removed): drop what no longer exists, and if the song that was
+   *  playing is gone, move to the next one, or clear the player, instead of getting stuck on nothing. */
+  function heal() {
+    if (remote || !st.queue.length) return;
+    const gone = function (id) { return !S.data.track(id); };
+    if (!st.queue.some(gone)) return;
+    const curGone = st.index >= 0 && gone(st.queue[st.index]);
+    let before = 0;
+    st.queue.forEach(function (id, i) { if (i < st.index && !gone(id)) before++; });
+    st.queue = st.queue.filter(function (id) { return !gone(id); });
+    if (st.original) st.original = st.original.filter(function (id) { return !gone(id); });
+    if (!curGone) { st.index = st.index >= 0 ? before : st.index; renderQueue(); return; }
+    st.index = before - 1; // so that seeking forward lands on the song after the missing one
+    const r = seek(st.index, 1);
+    if (r.index < 0) { clearPlayer(); S.toast('That song is no longer in your library', 'x'); return; }
+    st.index = r.index; xfadeDone = null; st.pos = 0;
+    load(current(), 0);
+    if (st.playing) { startAudio(); startTimer(); }
+    S.toast('A song was removed from your library, so playback moved on', 'x');
+    render();
+  }
+
   function next(auto) {
+    if (st.index >= 0 && !current()) { heal(); return; }
     if (!current()) return;
     if (!auto && intercept('next', [])) return;
     const r = seek(st.index, 1);
@@ -358,6 +388,7 @@ window.Spin = window.Spin || {};
   }
 
   function prev() {
+    if (st.index >= 0 && !current()) { heal(); return; }
     if (!current()) return;
     if (intercept('prev', [])) return;
     if (st.pos > 3) { setPos(0); renderProgress(); return; }
@@ -720,6 +751,7 @@ window.Spin = window.Spin || {};
     prev: prev,
     addNext: function (ids) { insert(ids, true); },
     addToQueue: function (ids) { insert(ids, false); },
+    heal: heal,
     isCurrent: function (id) { const t = current(); return !!t && t.id === id; },
     current: current,
     render: render,

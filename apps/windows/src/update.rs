@@ -72,7 +72,8 @@ pub fn run(on: &dyn Fn(State)) -> State {
     let a = agent();
     let release: Value = match a.get(&format!("https://api.github.com/repos/{REPO}/releases/latest")).set("Accept", "application/vnd.github+json").call() {
         Ok(r) => match r.into_json() { Ok(v) => v, Err(_) => return State::Failed("Couldn't read the update information.".into()) },
-        Err(ureq::Error::Status(404, _)) => return State::UpToDate, // nothing published yet
+        Err(ureq::Error::Status(404, _)) => return State::Failed("GitHub has no published release to update from. Publish one by pushing a v* tag, and the repository must be public, since the app can't sign in to GitHub.".into()),
+        Err(ureq::Error::Status(403, _)) | Err(ureq::Error::Status(429, _)) => return State::Failed("GitHub is limiting update checks right now. Try again in a little while.".into()),
         Err(_) => return State::Failed("Couldn't reach GitHub.".into()),
     };
     let tag = release["tag_name"].as_str().unwrap_or("");
