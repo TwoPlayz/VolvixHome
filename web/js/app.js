@@ -72,6 +72,7 @@ window.Spin.views = window.Spin.views || {};
         '<div class="player-sub" data-p="sub">Pick something from your library</div></div>' +
         '<button class="ctrl like-btn player-like" data-p="like" data-like="" data-size="18" aria-label="Add to Liked Songs" title="Add to Liked Songs" hidden>' + S.icon('heart', 18) + '</button>' +
         '<button class="ctrl player-add" data-p="add" data-add-current aria-label="Add to playlist" title="Add to playlist" hidden>' + S.icon('plus', 18) + '</button>' +
+        '<button class="ctrl player-more" data-p="more" data-player="info" aria-label="More" title="More" hidden>' + S.icon('more', 18) + '</button>' +
       '</div>' +
       '<div class="player-center">' +
         '<div class="player-controls">' +
@@ -85,7 +86,6 @@ window.Spin.views = window.Spin.views || {};
       '</div>' +
       '<div class="player-right">' +
         '<button class="ctrl q-btn" data-player="quality" data-p="quality" aria-label="Audio quality" title="Audio quality">' + S.qualityIcon({ id: 'lossless', lossless: true }, 18) + '</button>' +
-        ctrl('info', 'Song info', 'info') +
         '<button class="ctrl party-btn" data-player="party" aria-label="Start a listening party" title="Start a listening party">' + S.icon('party', 18) + '</button>' +
         ctrl('queue', 'Queue', 'queue') +
         '<div class="volume"><button class="ctrl" data-player="mute" aria-label="Mute">' + S.icon('volume', 18) + '</button>' +
@@ -234,6 +234,7 @@ window.Spin.views = window.Spin.views || {};
   S.router.add('/library/:tab', S.views.library);
   S.router.add('/album/:id', S.views.album);
   S.router.add('/artist/:slug', S.views.artist);
+  S.router.add('/credit/:name', S.views.credit);
   S.router.add('/playlist/:id', S.views.playlist);
   S.router.add('/requests', S.views.requests);
   S.router.add('/household', S.views.household);

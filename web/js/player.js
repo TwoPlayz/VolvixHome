@@ -402,15 +402,11 @@ window.Spin = window.Spin || {};
     S.$('[data-p="sub"]').innerHTML = t ? S.artistLink(t.artist) : 'Pick something from your library';
     const like = S.$('[data-p="like"]');
     if (like) { like.hidden = !t; like.dataset.like = t ? t.id : ''; }
+    const more = S.$('[data-p="more"]');
+    if (more) more.hidden = !t;
     const add = S.$('[data-p="add"]');
-    if (add) {
-      add.hidden = !t;
-      const inOne = t && S.pl && S.pl.editable().some(function (p) { return S.pl.trackIds(p).indexOf(t.id) !== -1; });
-      add.innerHTML = S.icon(inOne ? 'check' : 'plus', 18);
-      add.classList.toggle('on', !!inOne);
-      add.title = inOne ? 'In your playlists · add to another' : 'Add to playlist';
-      add.setAttribute('aria-label', add.title);
-    }
+    if (add) add.hidden = !t;
+    if (S.pl && S.pl.syncAdds) S.pl.syncAdds();
 
     const playing = st.playing && !!t;
     S.$$('[data-player="toggle"]').forEach(function (b) {

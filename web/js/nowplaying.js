@@ -48,7 +48,7 @@ window.Spin = window.Spin || {};
       '<div class="np-head" data-np-grab>' +
         '<button class="icon-btn" data-np-close aria-label="Close now playing">' + S.icon('chevronDown', 24) + '</button>' +
         '<div class="np-from"><span>Playing from</span><strong>' + S.esc(from) + '</strong></div>' +
-        '<button class="icon-btn" data-np-info aria-label="Song info" title="Song info">' + S.icon('info', 22) + '</button>' +
+        '<span class="np-head-spacer"></span>' +
       '</div>' +
       '<div class="np-art">' + S.cover(album) + '</div>' +
       '<div class="np-meta">' +
@@ -56,6 +56,7 @@ window.Spin = window.Spin || {};
           '<div class="np-artist">' + S.artistLink(t.artist) + '</div></div>' +
         S.likeButton(t.id, 'np-add np-like', 22) +
         '<button class="add-pl np-add' + (inPl ? ' on' : '') + '" data-add-pl="' + t.id + '" aria-label="Add to playlist" title="Add to playlist">' + S.icon(inPl ? 'check' : 'plus', 22) + '</button>' +
+        '<button class="np-add np-more" data-np-info aria-label="More" title="More">' + S.icon('more', 22) + '</button>' +
       '</div>' +
       '<div class="np-progress">' +
         '<div class="bar" data-seek role="slider" aria-label="Seek"><div class="bar-fill" data-np-fill></div></div>' +

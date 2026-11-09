@@ -252,7 +252,6 @@ window.Spin = window.Spin || {};
     const t = S.player.current();
     if (!t) return;
     S.popover(anchor, {
-      header: '<div class="q-pop"><div class="menu-name">' + S.esc(t.title) + '</div><div class="menu-sub">' + S.esc(t.artist) + '</div></div>',
       items: [
         S.lyrics && S.lyrics.open ? { label: 'Lyrics', icon: 'lyrics', onClick: function () { S.lyrics.open(t.id); } } : null,
         { label: 'Credits', icon: 'book', onClick: function () { S.creditsDialog(t.id); } }
@@ -265,11 +264,48 @@ window.Spin = window.Spin || {};
   });
 
   /* ---------- credits ---------- */
-  function creditRows(list) {
-    return list.map(function (c) { return '<div class="credit-row"><dt>' + S.esc(c.role) + '</dt><dd>' + S.esc(c.names) + '</dd></div>'; }).join('');
+  // everyone credited on a song in the library (by file tags), lower-cased -> display name
+  let creditIdx = null;
+  function creditIndex() {
+    if (creditIdx) return creditIdx;
+    creditIdx = {};
+    Object.keys(S.data.tracks).forEach(function (id) {
+      (S.data.tracks[id].credits || []).forEach(function (c) {
+        if (c.role === 'ISRC') return;
+        c.names.split(', ').forEach(function (n) { n = n.trim(); if (n && !creditIdx[n.toLowerCase()]) creditIdx[n.toLowerCase()] = n; });
+      });
+    });
+    return creditIdx;
   }
+  /** Every song in the library a person is credited on (as artist or by role). */
+  S.creditedSongs = function (name) {
+    const low = name.toLowerCase(), out = [], roles = {};
+    Object.keys(S.data.tracks).forEach(function (id) {
+      const t = S.data.tracks[id];
+      const rs = [];
+      if (t.artist.toLowerCase() === low) rs.push('Artist');
+      (t.credits || []).forEach(function (c) {
+        if (c.role !== 'ISRC' && c.names.split(', ').some(function (n) { return n.trim().toLowerCase() === low; })) rs.push(c.role);
+      });
+      if (rs.length) { out.push(id); rs.forEach(function (r) { roles[r] = (roles[r] || 0) + 1; }); }
+    });
+    return { ids: out, roles: roles };
+  };
+  /** A person's name as a link: their artist page, or their credits page, or plain text if we know nothing else. */
+  S.personLink = function (name) {
+    const low = name.toLowerCase();
+    const artist = S.data.artists.find(function (n) { return n.toLowerCase() === low; });
+    if (artist) return S.link(S.artistUrl(artist), S.esc(name));
+    if (creditIndex()[low]) return S.link('#/credit/' + encodeURIComponent(name), S.esc(name));
+    return S.esc(name);
+  };
+  function nameList(names) { return names.split(', ').map(function (n) { return S.personLink(n.trim()); }).join(', '); }
+  function creditRows(list) {
+    return list.map(function (c) { return '<div class="credit-row"><dt>' + S.esc(c.role) + '</dt><dd>' + nameList(c.names) + '</dd></div>'; }).join('');
+  }
+  /** pairs are [label, text] or [label, text, html]; html is trusted markup that replaces the text. */
   function detailRows(pairs) {
-    return pairs.filter(function (p) { return p[1]; }).map(function (p) { return '<div class="credit-row"><dt>' + S.esc(p[0]) + '</dt><dd>' + S.esc(p[1]) + '</dd></div>'; }).join('');
+    return pairs.filter(function (p) { return p[1]; }).map(function (p) { return '<div class="credit-row"><dt>' + S.esc(p[0]) + '</dt><dd>' + (p[2] || S.esc(p[1])) + '</dd></div>'; }).join('');
   }
 
   /** Who made a song: what's tagged in the file, plus what MusicBrainz knows. */
@@ -280,14 +316,18 @@ window.Spin = window.Spin || {};
     const m = S.modal({
       title: 'Credits',
       body: '<div class="credits">' +
-        '<div class="credits-head"><span class="credits-art">' + S.cover(al) + '</span><div><strong>' + S.esc(t.title) + '</strong>' +
-          '<span>' + S.esc(t.artist) + '</span><span>' + S.esc(al.title) + (al.year ? ' · ' + al.year : '') + '</span></div></div>' +
-        '<dl class="credit-list">' + creditRows([{ role: 'Artist', names: t.artist }]) + creditRows(own) + '<span data-mb></span></dl>' +
-        '<p class="set-hint" data-mb-note>Looking up more on MusicBrainz…</p>' +
+        '<div class="credits-head"><a class="credits-art" href="#/album/' + al.id + '" aria-label="Go to the album">' + S.cover(al) + '</a><div>' +
+          '<strong>' + S.esc(t.title) + '</strong>' +
+          '<span class="credits-artist">' + S.personLink(t.artist) + '</span>' +
+          '<span>' + S.albumLink(al) + (al.year ? ' · ' + al.year : '') + '</span></div></div>' +
+        '<div class="q-label">Credits</div>' +
+        '<dl class="credit-list">' + '<div class="credit-row"><dt>Artist</dt><dd>' + S.personLink(t.artist) + '</dd></div>' + creditRows(own.filter(function (c) { return c.role !== 'ISRC'; })) + '<span data-mb></span></dl>' +
+        '<p class="set-hint" data-mb-note><span class="chip-src">MusicBrainz</span> Looking up more…</p>' +
         '<div class="q-label">Details</div>' +
         '<dl class="credit-list">' + detailRows([
-          ['Album', al.title], ['Year', al.year ? String(al.year) : ''], ['Label', al.label], ['Genre', al.genre],
-          ['Format', q.detail], ['Length', t.duration ? S.fmtTime(t.duration) : ''], ['Copyright', al.copyright]
+          ['Album', al.title, S.albumLink(al)], ['Year', al.year ? String(al.year) : ''], ['Label', al.label], ['Genre', al.genre],
+          ['Format', q.detail], ['Length', t.duration ? S.fmtTime(t.duration) : ''], ['Copyright', al.copyright],
+          ['ISRC', ((own.find(function (c) { return c.role === 'ISRC'; }) || {}).names) || '']
         ]) + '</dl></div>',
       actions: [{ label: 'Close', kind: 'secondary' }]
     });
@@ -297,8 +337,9 @@ window.Spin = window.Spin || {};
       const have = own.map(function (c) { return c.role; });
       const extra = r.credits.filter(function (c) { return have.indexOf(c.role) === -1; });
       S.$('[data-mb]', m.el).outerHTML = creditRows(extra);
-      S.$('[data-mb-note]', m.el).textContent = r.credits.length
-        ? (extra.length ? 'More credits from MusicBrainz.' : 'MusicBrainz agrees with the file.')
+      const chip = '<span class="chip-src">MusicBrainz</span> ';
+      S.$('[data-mb-note]', m.el).innerHTML = r.credits.length
+        ? chip + (extra.length ? 'Added credits the file doesn\'t have.' : 'Matches what\'s in the file.')
         : (own.length ? '' : 'No credits found for this song in the file or on MusicBrainz.');
       if (!own.length && !r.credits.length) S.$('[data-mb-note]', m.el).classList.add('credits-none');
     }).catch(function (x) {
@@ -325,8 +366,8 @@ window.Spin = window.Spin || {};
     const people = Object.keys(roles).map(function (r) { return { role: r, names: roles[r].join(', ') }; });
     S.modal({
       title: 'Album info',
-      body: '<div class="credits"><div class="credits-head"><span class="credits-art">' + S.cover(al) + '</span><div><strong>' + S.esc(al.title) + '</strong>' +
-        '<span>' + S.esc(al.artist) + '</span></div></div>' +
+      body: '<div class="credits"><div class="credits-head"><a class="credits-art" href="#/album/' + al.id + '" aria-label="Go to the album">' + S.cover(al) + '</a><div><strong>' + S.albumLink(al) + '</strong>' +
+        '<span class="credits-artist">' + S.personLink(al.artist) + '</span></div></div>' +
         '<dl class="credit-list">' + detailRows([
           ['Released', al.year ? String(al.year) : ''], ['Label', al.label], ['Catalog number', al.catalogNumber], ['Genre', al.genre],
           ['Songs', al.trackIds.length + ' · ' + S.fmtLong(total)], ['Quality', q.label + (q.detail ? ' (' + q.detail + ')' : '')], ['Copyright', al.copyright]

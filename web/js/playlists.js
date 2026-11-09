@@ -20,9 +20,10 @@ window.Spin = window.Spin || {};
     S.store.update(fn);
     S.app.refreshSidebar();
     S.app.refresh();
+    if (S.pl && S.pl.syncAdds) S.pl.syncAdds();
   }
   /** After a change to a shared playlist: redraw now, and re-sync if the server disagreed. */
-  function redraw() { S.app.refreshSidebar(); S.app.refresh(); }
+  function redraw() { S.app.refreshSidebar(); S.app.refresh(); if (S.pl && S.pl.syncAdds) S.pl.syncAdds(); }
   function sharedFailed(e) {
     S.toast(e && e.message ? e.message : 'That didn\'t go through', 'x');
     S.shared.refresh().then(redraw).catch(function () {});
@@ -170,9 +171,22 @@ window.Spin = window.Spin || {};
       });
       S.app.refreshSidebar();
       S.pl.syncHearts();
+      S.pl.syncAdds();
       // if the Liked Songs page is open, its list changes too
       if (/^\/playlist\/pl_liked/.test(S.router.current())) S.app.refresh();
       S.toast(on ? 'Added to Liked Songs' : 'Removed from Liked Songs', on ? 'heartFill' : 'heart');
+    },
+    /** Make the player's + button (and the phone one) show a check when the playing song is in a playlist. */
+    syncAdds: function () {
+      const t = S.player && S.player.current && S.player.current();
+      const inOne = !!t && S.pl.editable().some(function (p) { return S.pl.trackIds(p).indexOf(t.id) !== -1; });
+      const title = inOne ? 'In your playlists · add to another' : 'Add to playlist';
+      S.$$('[data-p="add"], .np-add[data-add-pl]').forEach(function (b) {
+        const small = b.classList.contains('np-add') ? 22 : 18;
+        b.innerHTML = S.icon(inOne ? 'check' : 'plus', small);
+        b.classList.toggle('on', inOne);
+        b.title = title; b.setAttribute('aria-label', title);
+      });
     },
     /** Make every heart button on screen match what's liked. */
     syncHearts: function () {

@@ -603,8 +603,8 @@ a:focus-visible:not(.btn):not(.card):not(.list-row):not(.nav-item):not(.playlist
 @keyframes eq { from { height: 25%; } to { height: 100%; } }
 
 /* track list */
-.tracks { --cols: 40px minmax(0, 1fr) 64px 72px; }
-.tracks.with-album { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 64px 72px; }
+.tracks { --cols: 40px minmax(0, 1fr) 64px 108px; }
+.tracks.with-album { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 64px 108px; }
 .c-act { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 /* one-tap add to playlist */
 .add-pl {
@@ -870,7 +870,7 @@ button.quality-badge:hover { color: var(--text); border-color: var(--text-2); }
 .banner-slim { padding: 10px 14px; }
 .banner-slim .banner-icon { width: 34px; height: 34px; }
 
-.tracks.with-added { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 120px 64px 72px; }
+.tracks.with-added { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 120px 64px 108px; }
 .c-added { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-2); font-size: 13px; }
 .c-added span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track.dragging { opacity: .4; }
@@ -1417,10 +1417,6 @@ select.input {
 .sleeve-head .thumb { width: 64px; }
 .sleeve-head h2 { margin: 2px 0; font-size: 22px; }
 .sleeve-notes p { color: var(--text); line-height: 1.6; margin: 0 0 12px; }
-.credits { margin: 0; }
-.credits div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-.credits dt { color: var(--text-2); }
-.credits dd { margin: 0; color: var(--text); font-weight: 600; text-align: right; }
 /* a fixed height (not max-height) so the two columns scroll inside it instead of spilling out */
 .sleeve-lyrics { display: grid; grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; height: min(360px, calc(100vh - 340px)); min-height: 200px; }
 .sl-tracks, .sl-text { min-height: 0; }
@@ -1630,7 +1626,7 @@ select.input {
   .promo-cta { margin-left: 60px; }
 
   .track-head { display: none; }
-  .tracks, .tracks.with-album, .tracks.with-added { --cols: 28px minmax(0, 1fr) 72px; }
+  .tracks, .tracks.with-album, .tracks.with-added { --cols: 28px minmax(0, 1fr) 108px; }
   .track { gap: 10px; padding: 0 4px; }
   .track .c-album, .track .c-dur, .track .c-added { display: none; }
   .drag-hint { display: none; }
@@ -1729,8 +1725,8 @@ select.input {
 html.np-open .toasts { z-index: 80; }
 
 /* drag handle for reordering playlists (mouse and touch) */
-.tracks.editable { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 64px 104px; }
-.tracks.editable.with-added { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 120px 64px 104px; }
+.tracks.editable { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 64px 140px; }
+.tracks.editable.with-added { --cols: 40px minmax(0, 1.4fr) minmax(0, 1fr) 120px 64px 140px; }
 .drag-handle {
   width: 28px; height: 32px; display: grid; place-items: center; flex: none; border-radius: 6px;
   color: var(--text-3); cursor: grab; touch-action: none;
@@ -2257,7 +2253,7 @@ code.scope { margin-left: 4px; font-size: 11px; color: var(--text-3); }
 @media (max-width: 760px) {
   .player-add { display: none; }
   .player { cursor: pointer; }
-  .tracks.editable, .tracks.editable.with-added { --cols: 28px minmax(0, 1fr) 104px; }
+  .tracks.editable, .tracks.editable.with-added { --cols: 28px minmax(0, 1fr) 140px; }
 }
 
 @media (hover: none) {
@@ -2570,3 +2566,23 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .choice input { margin-top: 3px; accent-color: var(--accent); }
 .choice span { display: flex; flex-direction: column; gap: 2px; }
 .choice em { font-style: normal; font-size: 13px; color: var(--text-2); }
+/* the three song-row buttons (like, add, more) keep their size; the last column is wide enough for all three */
+.c-act > * { flex: none; }
+.row-more, .row-add, .row-like { flex: none; }
+.player-more { flex: none; }
+@media (max-width: 760px) { .player-more { display: none; } }
+.np-more { width: 40px; height: 40px; }
+/* credits dialog: bigger cover, clickable names, source chips */
+.credits { display: flex; flex-direction: column; gap: 12px; width: 100%; min-width: 0; }
+.credits-head { gap: 16px; }
+.credits-art { width: 96px; height: 96px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.25); display: block; }
+.credits-head strong { font-size: 18px; line-height: 1.2; }
+.credits-head strong a, .credits-head span a, .credit-row dd a { color: inherit; }
+.credits a:hover, .credits a:focus-visible { text-decoration: underline; color: var(--text); }
+.credit-row dd { margin: 0; line-height: 1.4; }
+.chip-src { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--hover); color: var(--text-2); font-size: 11px; font-weight: 600; margin-right: 4px; }
+.credit-roles { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.np-head-spacer { width: 40px; }
+
+.credit-row dd a, .credits-artist a { color: var(--text); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.credit-row dd a:hover, .credits-artist a:hover { text-decoration-color: currentColor; }
