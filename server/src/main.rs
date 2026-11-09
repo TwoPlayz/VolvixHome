@@ -661,13 +661,12 @@ async fn lidarr_search(State(st): State<Shared>, headers: HeaderMap, Query(q): Q
         Ok(u) => u,
         Err(r) => return r,
     };
+    // Searching only needs MusicBrainz, so everyone can look. Getting it needs Lidarr (and permission).
     let s = st.lidarr.lock().unwrap().clone();
-    if !can_request(&user, &s) {
-        return error(StatusCode::FORBIDDEN, "Ask an admin to get music for you.");
-    }
+    let (configured, can) = (s.configured(), s.configured() && can_request(&user, &s));
     let term = q.get("term").map(|t| t.trim().to_string()).unwrap_or_default();
     if term.chars().count() < 2 {
-        return Json(json!({ "artists": [], "albums": [] })).into_response();
+        return Json(json!({ "artists": [], "albums": [], "songs": [], "canRequest": can, "configured": configured })).into_response();
     }
     // Searching is MusicBrainz (the database Lidarr uses); requesting hands the ids to Lidarr.
     let found = match st.mb.search(&term).await {
@@ -701,7 +700,7 @@ async fn lidarr_search(State(st): State<Shared>, headers: HeaderMap, Query(q): Q
         v["requested"] = json!(is_requested(sg));
         v
     }).collect();
-    Json(json!({ "songs": songs, "artists": artists, "albums": albums })).into_response()
+    Json(json!({ "songs": songs, "artists": artists, "albums": albums, "canRequest": can, "configured": configured })).into_response()
 }
 
 #[derive(Deserialize)]

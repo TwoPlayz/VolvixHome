@@ -1,4 +1,4 @@
-﻿/* Volvix Home — Cast (Chromecast and other Google Cast TVs / speakers) and AirPlay.
+/* Volvix Home — Cast (Chromecast and other Google Cast TVs / speakers) and AirPlay.
  *  Cast: Chrome / Edge on a computer or Android (not inside the Windows app or on iPhone). The device fetches the song
  *  itself from this server, using a short-lived signed link, so open Volvix Home at your server's network address
  *  (not "localhost"). While casting, this player keeps the queue and controls everything, but stays silent.
@@ -135,5 +135,12 @@ window.Spin = window.Spin || {};
     });
   };
   C.stop = function () { try { cast.framework.CastContext.getInstance().endCurrentSession(true); } catch (e) { /* ignore */ } };
+  // AirPlay speakers can't fetch a downloaded copy (it lives inside the app), so while AirPlay is on, play from the server
+  S.player.audio.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () {
+    const wireless = !!S.player.audio.webkitCurrentPlaybackTargetIsWireless;
+    if (S.player.streamOnly === wireless) return;
+    S.player.streamOnly = wireless;
+    if (S.dl && S.player.current() && S.dl.has(S.player.current().id)) S.player.reloadSource();
+  });
   C.airplayPicker = function () { try { S.player.audio.webkitShowPlaybackTargetPicker(); } catch (e) { S.toast('AirPlay isn\'t available here.', 'x'); } };
 })(window.Spin);

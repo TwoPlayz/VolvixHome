@@ -15,12 +15,20 @@ Spin.views = Spin.views || {};
     return '<span class="gm-art' + (round ? ' round' : '') + '">' + (img ? '<img src="' + S.esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') +
       '<span class="gm-initials">' + S.esc(initials) + '</span></span>';
   }
+  let canGet = L.canRequest, lidarrOn = L.configured; // set from each search: can this person download?
+  /** Shown instead of a Get button when downloading isn't set up for them. */
+  function noGet() {
+    return S.data.me.admin && !lidarrOn
+      ? '<a class="btn btn-secondary btn-sm" href="#/account/settings">Connect Lidarr</a>'
+      : '<span class="gm-state">' + (lidarrOn ? 'Admins only' : 'Ask an admin') + '</span>';
+  }
   function stateButton(item, kind) {
     if (item.onServer) {
       const href = kind === 'album' ? '#/album/' + item.onServer : S.artistUrl(item.onServer);
       return '<a class="btn btn-secondary btn-sm" href="' + href + '">' + S.icon('check', 14) + 'In your library</a>';
     }
     if (item.requested || item.monitored) return '<span class="gm-state">' + S.icon('download', 14) + 'Requested</span>';
+    if (!canGet) return noGet();
     return '<button class="btn btn-primary btn-sm" data-get="' + kind + '" data-id="' + S.esc(item.foreignId) + '">' + S.icon('download', 14) + (kind === 'artist' ? 'Get all' : 'Get') + '</button>';
   }
   function albumCard(a) {
@@ -34,6 +42,7 @@ Spin.views = Spin.views || {};
     let action;
     if (s.onServer) action = '<a class="btn btn-secondary btn-sm" href="#/album/' + s.onServer + '">' + S.icon('check', 14) + 'In your library</a>';
     else if (s.requested) action = '<span class="gm-state">' + S.icon('download', 14) + 'Requested</span>';
+    else if (!canGet) action = noGet();
     else {
       const btns = [];
       if (s.singleId) btns.push('<button class="btn btn-primary btn-sm" data-get="album" data-id="' + S.esc(s.singleId) + '" data-label="' + S.esc(s.title) + ' (single)">' + S.icon('download', 14) + 'Get the single</button>');
@@ -55,15 +64,16 @@ Spin.views = Spin.views || {};
   let seq = 0;
   /** Fill `host` with Lidarr results for `q` (Search calls this, debounced). */
   function searchInto(host, q) {
-    if (!L.canRequest || !host) return;
+    if (!host) return;
     const mine = ++seq;
     host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p>Searching…</p></div></div></section>';
     S.server.json('GET', '/api/lidarr/search?term=' + encodeURIComponent(q)).then(function (r) {
       if (mine !== seq) return; // a newer search took over
+      canGet = !!r.canRequest; lidarrOn = !!r.configured;
       const songs = r.songs || [];
       if (!r.artists.length && !r.albums.length && !songs.length) { host.innerHTML = ''; return; }
       host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2>' +
-          '<p>Not in your library yet. Lidarr gets it and adds it here when it\'s done.</p></div></div>' +
+          '<p>' + (canGet ? 'Not in your library yet. Lidarr gets it and adds it here when it\'s done.' : lidarrOn ? 'Not in your library yet. Only admins can ask for new music.' : S.data.me.admin ? 'Not in your library yet. Connect Lidarr in Settings to download it.' : 'Not in your library yet. Ask an admin to connect Lidarr so it can be downloaded.') + '</p></div></div>' +
         (r.artists.length ? '<div class="gm-list">' + r.artists.slice(0, 3).map(artistRow).join('') + '</div>' : '') +
         (songs.length ? '<h3 class="gm-sub">Songs</h3><div class="gm-list">' + songs.map(songCard).join('') + '</div>' : '') +
         (r.albums.length ? '<h3 class="gm-sub">Albums</h3><div class="gm-grid">' + r.albums.map(albumCard).join('') + '</div>' : '') +

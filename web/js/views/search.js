@@ -62,7 +62,7 @@ Spin.views = Spin.views || {};
     if (show('playlists') && r.playlists.length) html += section('Playlists', '<div class="grid">' + r.playlists.map(S.playlistCard).join('') + '</div>');
     if (html) return html;
     // with Lidarr, music you don't have yet is listed right below, so a quiet line is enough
-    if (S.lidarr && S.lidarr.canRequest && ui.q.trim().length >= 2) return '<p class="search-none">Nothing in your library for "' + S.esc(ui.q) + '".</p>';
+    if (ui.q.trim().length >= 2 && !(S.dl && S.dl.isOffline())) return '<p class="search-none">Nothing in your library for "' + S.esc(ui.q) + '".</p>';
     return S.emptyState('search', 'No results for "' + ui.q + '"', 'Check the spelling, or try fewer words.');
   }
 
@@ -88,7 +88,7 @@ Spin.views = Spin.views || {};
       function lookFurther() {
         clearTimeout(lidarrTimer);
         const host = S.$('[data-get-music]', root);
-        if (!S.lidarr || !S.lidarr.canRequest || ui.q.trim().length < 2 || (ui.type !== 'all' && ui.type !== 'albums' && ui.type !== 'artists' && ui.type !== 'songs')) { if (host) host.innerHTML = ''; return; }
+        if (ui.q.trim().length < 2 || (S.dl && S.dl.isOffline()) || (ui.type !== 'all' && ui.type !== 'albums' && ui.type !== 'artists' && ui.type !== 'songs')) { if (host) host.innerHTML = ''; return; }
         lidarrTimer = setTimeout(function () { S.getMusic.searchInto(host, ui.q.trim()); }, 600);
       }
       function update() {

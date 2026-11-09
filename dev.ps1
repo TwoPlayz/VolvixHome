@@ -33,6 +33,8 @@ try {
     $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-mb.js'), '3100') -PassThru -WindowStyle Hidden
     $procs += Start-Process node -ArgumentList @((Join-Path $root 'tools/dev/mock-lrclib.js'), '3101') -PassThru -WindowStyle Hidden
     $env:VH_MUSICBRAINZ_URL = 'http://127.0.0.1:3100/ws/2'
+    $env:VH_LIDARR_URL = 'http://127.0.0.1:8686'   # already connected, so Search -> Get works right away
+    $env:VH_LIDARR_API_KEY = 'testkey'
     $env:VH_LRCLIB_URL = 'http://127.0.0.1:3101'
     Write-Host 'Fake Lidarr (port 8686), MusicBrainz (3100) and LRCLIB (3101) are running.'
     Write-Host 'In the app: Settings -> Lidarr -> address 127.0.0.1:8686, API key  testkey'

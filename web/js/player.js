@@ -36,7 +36,7 @@ window.Spin = window.Spin || {};
     if (!t) return;
     if (loadedId !== t.id) {
       loadedId = t.id; pendingBlob = null;
-      if (S.dl && S.dl.has(t.id)) {
+      if (S.dl && S.dl.has(t.id) && !(S.player.streamOnly && navigator.onLine !== false)) {
         // a song downloaded to this device plays from there (no connection needed)
         const id = t.id; pendingBlob = id;
         audio.removeAttribute('src'); audio.load();
@@ -718,6 +718,15 @@ window.Spin = window.Spin || {};
     removeFromQueue: removeAt,
     reshuffle: reshuffle,
     qualityButton: qualityButton,
+    streamOnly: false,  // AirPlay can't reach a downloaded copy kept inside the app, so play from the server while it's on
+    /** Load the current song again (used when the source should change, e.g. AirPlay switched on). */
+    reloadSource: function () {
+      const t = current();
+      if (!t || remote) return;
+      const pos = audio.currentTime || st.pos, was = st.playing;
+      loadedId = null; load(t, pos);
+      if (was && !pendingBlob) startAudio();
+    },
     silent: false,      // the sound comes from a cast device: this one keeps time but stays quiet
     seekHooks: [],      // called with the new position when the person seeks
     hooks: [],          // called after every full render (used by v7 extras)
