@@ -178,29 +178,33 @@ window.Spin = window.Spin || {};
     if (control && control !== row) return;
     const scope = o.scope || document;
     const touch = e.pointerType === 'touch';
-    const startX = e.clientX, startY = e.clientY, from = o.index(row);
+    const startX = e.clientX, startY = e.clientY;
     const scrollEl = o.scroller || S.$('#main');
-    let dragging = false, hold = null, auto = null, target = null, after = false, lastY = startY;
+    let dragging = false, hold = null, auto = null, lastY = startY, ghost = null;
+    let items = [], fromPos = -1, toPos = -1, grab = 0, step = 0, scroll0 = 0;
 
     const rowsNow = function () { return o.rows ? o.rows() : S.$$(o.row, scope); };
-    function mark(y) {
-      lastY = y;
-      S.$$('.drop-before, .drop-after').forEach(function (r) { r.classList.remove('drop-before', 'drop-after'); });
-      const rows = rowsNow();
-      target = null;
-      for (const r of rows) {
-        const b = r.getBoundingClientRect();
-        if (y >= b.top && y <= b.bottom) { target = r; after = y > b.top + b.height / 2; break; }
-      }
-      if (!target && rows.length) {
-        if (y < rows[0].getBoundingClientRect().top) { target = rows[0]; after = false; } else { target = rows[rows.length - 1]; after = true; }
-      }
-      if (target && target !== row) target.classList.add(after ? 'drop-after' : 'drop-before');
-    }
-    function block(ev) { ev.preventDefault(); }
+
+    /** Pick the row up: a see-through copy follows the pointer, and the others make room as it passes. */
     function begin() {
       dragging = true;
+      const rows = rowsNow();
+      scroll0 = scrollEl.scrollTop;
+      items = rows.map(function (r) { const b = r.getBoundingClientRect(); return { el: r, top: b.top + scroll0, h: b.height, idx: o.index(r) }; });
+      fromPos = rows.indexOf(row); toPos = fromPos;
+      const rb = row.getBoundingClientRect();
+      grab = startY - rb.top;
+      // distance from one row to the next (its height plus any gap)
+      step = rb.height;
+      for (let j = 1; j < items.length; j++) step = j === 1 ? Math.abs(items[1].top - items[0].top) : Math.min(step, Math.abs(items[j].top - items[j - 1].top));
+      if (items.length < 2) step = rb.height;
+      ghost = row.cloneNode(true);
+      ghost.classList.add('drag-ghost');
+      ghost.style.width = rb.width + 'px'; ghost.style.height = rb.height + 'px';
+      ghost.style.left = rb.left + 'px'; ghost.style.top = rb.top + 'px';
+      row.parentNode.appendChild(ghost);
       row.classList.add('dragging');
+      rows.forEach(function (r) { r.classList.add('drag-shifting'); });
       document.body.classList.add('reordering');
       try { window.getSelection().removeAllRanges(); if (navigator.vibrate) navigator.vibrate(8); } catch (err) { /* no vibration */ }
       if (touch) document.addEventListener('touchmove', block, { passive: false });
@@ -208,8 +212,29 @@ window.Spin = window.Spin || {};
       auto = setInterval(function () {
         const b = scrollEl.getBoundingClientRect();
         if (lastY < b.top + 60) scrollEl.scrollTop -= 12; else if (lastY > b.bottom - 60) scrollEl.scrollTop += 12;
-        mark(lastY);
+        place(lastY);
       }, 30);
+    }
+    function block(ev) { ev.preventDefault(); }
+
+    /** Move the copy under the pointer and slide the other rows up or down to open a gap where it would land. */
+    function place(y) {
+      lastY = y;
+      if (!ghost) return;
+      ghost.style.top = (y - grab) + 'px';
+      // where the copy's middle sits, in the same coordinates as the rows' starting positions (client + scroll)
+      const mid = (y - grab) + scrollEl.scrollTop + items[fromPos].h / 2;
+      let to = 0;
+      for (let j = 0; j < items.length; j++) {
+        if (j !== fromPos && items[j].top + items[j].h / 2 < mid) to++;
+      }      toPos = Math.max(0, Math.min(items.length - 1, to));
+      items.forEach(function (it, j) {
+        if (j === fromPos) return;
+        let dy = 0;
+        if (fromPos < toPos && j > fromPos && j <= toPos) dy = -step;
+        else if (fromPos > toPos && j >= toPos && j < fromPos) dy = step;
+        it.el.style.transform = dy ? 'translateY(' + dy + 'px)' : '';
+      });
     }
     function move(ev) {
       if (ev.pointerId !== e.pointerId) return;
@@ -220,7 +245,7 @@ window.Spin = window.Spin || {};
         if (d < 5) return;
         begin();
       }
-      mark(ev.clientY);
+      place(ev.clientY);
     }
     function stop(drop) {
       clearTimeout(hold); clearInterval(auto);
@@ -230,16 +255,13 @@ window.Spin = window.Spin || {};
       document.removeEventListener('touchmove', block);
       if (!dragging) return;
       document.body.classList.remove('reordering');
-      S.$$('.dragging, .drop-before, .drop-after').forEach(function (r) { r.classList.remove('dragging', 'drop-before', 'drop-after'); });
+      if (ghost) ghost.remove();
+      items.forEach(function (it) { it.el.classList.remove('dragging', 'drag-shifting'); it.el.style.transform = ''; });
       // the click that follows letting go must not play the row
       const swallow = function (ev) { ev.stopPropagation(); ev.preventDefault(); };
       window.addEventListener('click', swallow, true);
       setTimeout(function () { window.removeEventListener('click', swallow, true); }, 60);
-      if (drop && target && target !== row) {
-        let to = o.index(target) + (after ? 1 : 0);
-        if (to > from) to -= 1;
-        if (to !== from) o.drop(from, to);
-      }
+      if (drop && toPos !== fromPos && toPos >= 0) o.drop(items[fromPos].idx, items[toPos].idx);
     }
     function up() { stop(true); }
     function cancel() { stop(false); }
@@ -248,7 +270,6 @@ window.Spin = window.Spin || {};
     window.addEventListener('pointercancel', cancel);
     if (touch) hold = setTimeout(begin, 280);
   };
-
   /** The (i) menu next to what's playing: just things about this song. Lyrics joins it when lyrics exist. */
   S.songInfoMenu = function (anchor) {
     const t = S.player.current();

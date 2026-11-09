@@ -201,8 +201,6 @@ window.Spin = window.Spin || {};
     const a = album.art || {};
     // generated art sits underneath, so there's never an empty square while the real cover loads (or if there is none)
     return '<div class="cover cover--' + (a.variant || 'plain') + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '">' +
-      '<span class="cover-title">' + S.esc(album.title) + '</span>' +
-      '<span class="cover-artist">' + S.esc(album.artist) + '</span>' +
       (album.cover && S.server ? '<img class="cover-img" src="' + S.server.coverUrl(album.id) + '" alt="" loading="lazy" decoding="async" onerror="this.remove()">' : '') +
       '</div>';
   };

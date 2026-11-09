@@ -2696,3 +2696,10 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 }
 
 :root { --tabbar-h: 59px; }
+
+/* dragging a row: it's picked up (a see-through copy follows the pointer) and the other rows slide out of the way */
+.drag-ghost { position: fixed !important; z-index: 300; margin: 0 !important; opacity: .72; pointer-events: none; background: var(--surface-3) !important;
+  border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); transform: scale(1.015); }
+.track.dragging, .q-row.dragging { opacity: 0 !important; }
+.drag-shifting { transition: transform .16s ease; }
+body.reordering { cursor: grabbing; user-select: none; }

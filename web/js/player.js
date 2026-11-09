@@ -9,6 +9,7 @@ window.Spin = window.Spin || {};
   const st = {
     queue: [],        // track ids in play order
     original: null,   // un-shuffled order, kept while shuffle is on
+    userQ: 0,         // songs added one at a time by the person: they sit right after the current song, in the order added
     index: -1,
     playing: false,
     pos: 0,           // seconds into the current track
@@ -278,6 +279,7 @@ window.Spin = window.Spin || {};
     }
     st.queue = queue;
     st.context = context || null;
+    st.userQ = 0;
 
     let i = startIndex, skipped = 0;
     while (i < queue.length && !owned(queue[i])) { i++; skipped++; }
@@ -313,7 +315,7 @@ window.Spin = window.Spin || {};
   function clearPlayer() {
     st.playing = false; stopTimer(); audio.pause();
     audio.removeAttribute('src'); audio.load(); loadedId = null;
-    st.queue = []; st.index = -1; st.original = null; st.pos = 0; st.context = null; st.queueOpen = false;
+    st.queue = []; st.index = -1; st.original = null; st.userQ = 0; st.pos = 0; st.context = null; st.queueOpen = false;
     render();
   }
 
@@ -331,6 +333,7 @@ window.Spin = window.Spin || {};
       return;
     }
     st.index = r.index;
+    st.userQ = Math.max(0, st.userQ - 1); // one of the person's own picks has just been reached
     load(current(), 0);
     if (st.playing) { startAudio(); startTimer(); }
     render();
@@ -343,14 +346,14 @@ window.Spin = window.Spin || {};
     const r = seek(st.index, -1);
     skippedToast(r.skipped);
     if (r.index < 0) { setPos(0); renderProgress(); return; }
-    st.index = r.index;
+    st.index = r.index; st.userQ = 0;
     load(current(), 0);
     if (st.playing) startAudio();
     render();
   }
 
   function setShuffle(on) {
-    st.shuffle = on;
+    st.shuffle = on; st.userQ = 0;
     // in a party the queue is shared, so shuffle only decides how songs you start or add are ordered
     if (remote) { S.toast(on ? 'Shuffle on' : 'Shuffle off', 'shuffle'); render(); return; }
     if (st.index >= 0) {
@@ -381,9 +384,13 @@ window.Spin = window.Spin || {};
     if (!ids.length) return;
     if (intercept(atNext ? 'addNext' : 'addToQueue', [ids])) return;
     if (st.index < 0) { play(ids, 0, null); return; }
-    const at = atNext ? st.index + 1 : st.queue.length;
+    // one song at a time goes to the front: right after the current song, and after the songs added before it.
+    // A whole album or playlist goes to the end of the queue.
+    const mine = atNext || ids.length === 1;
+    const at = mine ? st.index + 1 + (atNext ? 0 : st.userQ) : st.queue.length;
     st.queue.splice.apply(st.queue, [at, 0].concat(ids));
-    S.toast(atNext ? 'Playing next' : 'Added to queue', 'queue');
+    if (mine) st.userQ += ids.length;
+    S.toast(mine ? (at === st.index + 1 ? 'Playing next' : 'Added after your other picks') : 'Added to queue', 'queue');
     renderQueue();
   }
 
@@ -430,6 +437,7 @@ window.Spin = window.Spin || {};
   function playAt(queueIndex) {
     if (intercept('playAt', [queueIndex])) return;
     if (!owned(st.queue[queueIndex])) { S.toast('Locked: this song will be skipped', 'lock'); return; }
+    st.userQ = queueIndex > st.index ? Math.max(0, st.userQ - (queueIndex - st.index)) : 0;
     st.index = queueIndex; st.playing = true;
     load(current(), 0); startAudio();
     startTimer(); render();
@@ -526,8 +534,8 @@ window.Spin = window.Spin || {};
         (upcoming ? '<span class="q-remove" role="button" tabindex="0" data-q-remove="' + i + '" aria-label="Remove from queue" title="Remove from queue">' + S.icon('x', 15) + '</span>' : '') +
         '</button>';
     }
-    const upcoming = [];
-    for (let i = st.index + 1; i < st.queue.length; i++) upcoming.push(row(st.queue[i], i));
+    const upcoming = [], mineRows = [];
+    for (let i = st.index + 1; i < st.queue.length; i++) (i <= st.index + st.userQ ? mineRows : upcoming).push(row(st.queue[i], i));
 
     panel.innerHTML =
       '<div class="q-head"><h2>Queue</h2><div class="q-head-actions">' +
@@ -535,8 +543,9 @@ window.Spin = window.Spin || {};
         '<button class="icon-btn" data-player="queue" aria-label="Close queue">' + S.icon('x', 18) + '</button></div></div>' +
       '<div class="q-body">' +
         (t ? '<div class="q-label">Now playing</div>' + row(st.queue[st.index], st.index) : '<p class="q-empty">Nothing playing.</p>') +
+        (mineRows.length ? '<div class="q-label">Next in queue</div>' + mineRows.join('') : '') +
         (upcoming.length ? '<div class="q-label">Next' + (st.context && st.context.name ? ' from ' + S.esc(st.context.name) : '') + '</div>' + upcoming.join('') : '') +
-        (t && !upcoming.length ? '<p class="q-empty">' + (st.repeat === 'all' ? 'Repeat is on: the queue starts over.' : 'Nothing else queued.') + '</p>' : '') +
+        (t && !upcoming.length && !mineRows.length ? '<p class="q-empty">' + (st.repeat === 'all' ? 'Repeat is on: the queue starts over.' : 'Nothing else queued.') + '</p>' : '') +
       '</div>';
   }
 
@@ -566,6 +575,9 @@ window.Spin = window.Spin || {};
   function moveInQueue(from, to) {
     if (from <= st.index || to <= st.index || from === to) return;
     if (intercept('move', [from, to])) return;
+    const lo = st.index + 1, hi = st.index + st.userQ;
+    const fromIn = from >= lo && from <= hi, toIn = to >= lo && to <= hi;
+    if (fromIn && !toIn) st.userQ--; else if (!fromIn && toIn) st.userQ++;
     const id = st.queue.splice(from, 1)[0];
     st.queue.splice(to, 0, id);
     renderQueue(); saveResume(true);
@@ -573,6 +585,7 @@ window.Spin = window.Spin || {};
   function removeAt(i) {
     if (i <= st.index) return;
     if (intercept('remove', [i])) return;
+    if (i >= st.index + 1 && i <= st.index + st.userQ) st.userQ--;
     st.queue.splice(i, 1);
     renderQueue(); saveResume(true);
     const first = S.$('[data-q-remove]'); if (first && document.activeElement === document.body) first.focus();
@@ -582,6 +595,7 @@ window.Spin = window.Spin || {};
     const upcoming = st.queue.slice(st.index + 1);
     if (upcoming.length < 2) return;
     st.queue = st.queue.slice(0, st.index + 1).concat(shuffleArray(upcoming));
+    st.userQ = 0;
     S.toast('Reshuffled what\'s coming up', 'shuffle');
     renderQueue(); saveResume(true);
   }
