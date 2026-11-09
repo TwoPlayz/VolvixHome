@@ -238,6 +238,8 @@ window.Spin.views = window.Spin.views || {};
   S.router.add('/artist/:slug', S.views.artist);
   S.router.add('/credit/:name', S.views.credit);
   S.router.add('/browse/:kind/:value', S.views.browse);
+  S.router.add('/get/artist/:id', S.views.discoverArtist);
+  S.router.add('/get/album/:id', S.views.discoverAlbum);
   S.router.add('/mix/:id', S.views.mix);
   S.router.add('/rewind/:year', S.views.rewind);
   S.router.add('/rewind', S.views.rewind);

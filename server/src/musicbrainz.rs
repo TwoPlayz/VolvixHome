@@ -80,9 +80,9 @@ impl Client {
     pub async fn search(&self, term: &str) -> Result<SearchResults, String> {
         let q = encode(term);
         let (rec_path, rg_path, ar_path) = (
-            format!("recording?query={q}&fmt=json&limit=12"),
-            format!("release-group?query={q}%20AND%20(primarytype:album%20OR%20primarytype:ep)&fmt=json&limit=14"),
-            format!("artist?query={q}&fmt=json&limit=6"),
+            format!("recording?query={q}&fmt=json&limit=30"),
+            format!("release-group?query={q}%20AND%20(primarytype:album%20OR%20primarytype:ep)&fmt=json&limit=25"),
+            format!("artist?query={q}&fmt=json&limit=12"),
         );
         let (recordings, groups, artists) = tokio::join!(self.get(&rec_path), self.get(&rg_path), self.get(&ar_path));
         Ok(SearchResults {
@@ -94,6 +94,42 @@ impl Client {
 }
 
 impl Client {
+    /// An artist and everything they've released (albums, EPs and singles), newest first.
+    pub async fn artist_page(&self, mbid: &str) -> Result<Value, String> {
+        let a = self.get(&format!("artist/{mbid}?fmt=json")).await?;
+        let g = self.get(&format!("release-group?artist={mbid}&type=album%7Cep%7Csingle&inc=artist-credits&fmt=json&limit=100")).await?;
+        let mut albums = parse_albums(&g);
+        albums.sort_by(|x, y| y["year"].as_str().unwrap_or("0").cmp(x["year"].as_str().unwrap_or("0")));
+        Ok(json!({ "foreignId": mbid, "name": a["name"], "type": a["type"], "disambiguation": a["disambiguation"], "country": a["country"], "albums": albums }))
+    }
+
+    /// One release-group: its details and the songs on it (from its earliest official release).
+    pub async fn album_page(&self, rgid: &str) -> Result<Value, String> {
+        let rg = self.get(&format!("release-group/{rgid}?inc=artist-credits&fmt=json")).await?;
+        let rels = self.get(&format!("release?release-group={rgid}&status=official&inc=recordings&fmt=json&limit=25")).await?;
+        let mut best: Option<&Value> = None;
+        let list = rels["releases"].as_array().cloned().unwrap_or_default();
+        for r in &list {
+            let has = r["media"].as_array().map(|m| m.iter().any(|d| d["tracks"].as_array().map(|t| !t.is_empty()).unwrap_or(false))).unwrap_or(false);
+            if !has { continue; }
+            let earlier = best.map(|b| r["date"].as_str().filter(|d| !d.is_empty()).unwrap_or("9999") < b["date"].as_str().filter(|d| !d.is_empty()).unwrap_or("9999")).unwrap_or(true);
+            if earlier { best = Some(r); }
+        }
+        let mut tracks = Vec::new();
+        if let Some(r) = best {
+            for (di, d) in r["media"].as_array().cloned().unwrap_or_default().iter().enumerate() {
+                for t in d["tracks"].as_array().cloned().unwrap_or_default().iter() {
+                    tracks.push(json!({ "disc": d["position"].as_u64().unwrap_or(di as u64 + 1), "no": t["position"], "title": t["title"], "lengthMs": t["length"] }));
+                }
+            }
+        }
+        Ok(json!({
+            "foreignId": rgid, "title": rg["title"], "artist": artist_credit(&rg), "artistId": artist_id(&rg),
+            "year": year(rg["first-release-date"].as_str()), "type": rg["primary-type"], "secondary": rg["secondary-types"],
+            "image": cover(rgid), "tracks": tracks
+        }))
+    }
+
     /// Who made a song, from MusicBrainz: find the recording, then read its relationships
     /// (producer, engineer, mixer, performers, and via its work: composer, lyricist, writer).
     /// Returns (role, names) pairs, or an empty list when MusicBrainz doesn't know the song.
@@ -240,6 +276,10 @@ fn artist_credit(v: &Value) -> String {
         .to_string()
 }
 
+fn artist_id(v: &Value) -> Option<String> {
+    v["artist-credit"].as_array().and_then(|cs| cs.first()).and_then(|c| c["artist"]["id"].as_str()).map(String::from)
+}
+
 fn year(date: Option<&str>) -> Option<String> {
     date.and_then(|d| d.get(0..4)).filter(|y| y.len() == 4).map(String::from)
 }
@@ -255,9 +295,9 @@ fn parse_albums(v: &Value) -> Vec<Value> {
         .map(|g| {
             let id = g["id"].as_str().unwrap_or("");
             json!({
-                "foreignId": id, "title": g["title"], "artist": artist_credit(g),
+                "foreignId": id, "title": g["title"], "artist": artist_credit(g), "artistId": artist_id(g),
                 "year": year(g["first-release-date"].as_str()),
-                "type": g["primary-type"], "image": cover(id)
+                "type": g["primary-type"], "secondary": g["secondary-types"], "image": cover(id)
             })
         })
         .collect()

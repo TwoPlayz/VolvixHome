@@ -804,6 +804,43 @@ fn on_server(st: &AppState, title: Option<&str>, artist: &str) -> Option<String>
     }
 }
 
+/// An artist from MusicBrainz and what they've released, each marked: already here, or already asked for.
+async fn discover_artist(State(st): State<Shared>, headers: HeaderMap, Path(mbid): Path<String>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    if !mbid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return error(StatusCode::BAD_REQUEST, "Bad id."); }
+    let mut v = match st.mb.artist_page(&mbid).await { Ok(v) => v, Err(e) => return error(StatusCode::BAD_GATEWAY, &e) };
+    let s = st.lidarr.lock().unwrap().clone();
+    let requested: Vec<String> = st.requests.lock().unwrap().iter().map(|r| r.foreign_id.clone()).collect();
+    let name = v["name"].as_str().unwrap_or("").to_string();
+    v["onServer"] = json!(on_server(&st, None, &name));
+    v["requested"] = json!(requested.iter().any(|r| *r == mbid));
+    if let Some(list) = v["albums"].as_array_mut() {
+        for a in list.iter_mut() {
+            let title = a["title"].as_str().unwrap_or("").to_string();
+            a["onServer"] = json!(on_server(&st, Some(&title), &name));
+            a["requested"] = json!(a["foreignId"].as_str().map(|id| requested.iter().any(|r| r == id)).unwrap_or(false));
+        }
+    }
+    v["canRequest"] = json!(s.configured() && can_request(&user, &s));
+    v["configured"] = json!(s.configured());
+    Json(v).into_response()
+}
+
+/// One album from MusicBrainz with its songs.
+async fn discover_album(State(st): State<Shared>, headers: HeaderMap, Path(rgid): Path<String>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    if !rgid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return error(StatusCode::BAD_REQUEST, "Bad id."); }
+    let mut v = match st.mb.album_page(&rgid).await { Ok(v) => v, Err(e) => return error(StatusCode::BAD_GATEWAY, &e) };
+    let s = st.lidarr.lock().unwrap().clone();
+    let requested: Vec<String> = st.requests.lock().unwrap().iter().map(|r| r.foreign_id.clone()).collect();
+    let (title, artist) = (v["title"].as_str().unwrap_or("").to_string(), v["artist"].as_str().unwrap_or("").to_string());
+    v["onServer"] = json!(on_server(&st, Some(&title), &artist));
+    v["requested"] = json!(requested.iter().any(|r| *r == rgid));
+    v["canRequest"] = json!(s.configured() && can_request(&user, &s));
+    v["configured"] = json!(s.configured());
+    Json(v).into_response()
+}
+
 /// Is a song (by title + artist) already in the library? Returns its album id.
 fn track_on_server(st: &AppState, title: &str, artist: &str) -> Option<String> {
     let lib = st.lib.read().unwrap();
@@ -1786,6 +1823,8 @@ async fn main() {
         .route("/api/artist/image/{slug}", get(artist_image))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))
         .route("/api/lidarr/search", get(lidarr_search))
+        .route("/api/discover/artist/{id}", get(discover_artist))
+        .route("/api/discover/album/{id}", get(discover_album))
         .route("/api/lidarr/request", post(lidarr_request))
         .route("/api/lidarr/queue", get(lidarr_queue))
         .route("/api/lidarr/requests", get(lidarr_requests))

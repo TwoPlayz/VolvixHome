@@ -8,6 +8,7 @@ const ALBUMS = [
   { id: 'mb-atlas', title: 'Midnight Atlas', artist: 'Odessa Rowe', type: 'Album', date: '2026-02-06', songs: ['North Star', 'Paper Maps', 'Night Ferry'] },
   { id: 'mb-firstlight', title: 'First Light', artist: 'Harbor Lights', type: 'Album', date: '2017-05-12', songs: ['Dawn Chorus', 'Harbor Wall'] },
   { id: 'mb-tidewater', title: 'Tidewater', artist: 'Harbor Lights', type: 'Album', date: '2025-03-01', songs: ['Low Tide'] },
+  { id: 'mb-quiet', title: 'Quiet Maps', artist: 'Odessa Rowe', type: 'Album', date: '2022-04-01', songs: ['Cartographer', 'Blue Hour', 'Last Train Home', 'Paper Moon'] },
   { id: 'mb-static', title: 'Static Bloom', artist: 'The Velvet Static', type: 'Album', date: '2023-09-15', songs: ['Polaroid', 'Echo Park Drive'] },
 ];
 const SINGLES = [
@@ -31,10 +32,23 @@ http.createServer((req, res) => {
   const u = url.parse(req.url, true), p = u.pathname;
   const q = decodeURIComponent(u.query.query || '').replace(/%20/g, ' ').replace(/(recording|artist|release):/gi, '').replace(/ and .*/i, '');
   const send = v => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(v)); };
+  const credit = name => [{ name, artist: { id: (ARTISTS.find(a => a.name === name) || {}).id, name } }];
   const al = p.match(/^\/ws\/2\/artist\/(mb-.+)$/);
-  if (al) return send({ id: al[1], relations: ARTIST_URLS[al[1]] || [] });
+  if (al) { const a = ARTISTS.find(x => x.id === al[1]) || {}; return send({ id: al[1], name: a.name, type: a.type, country: 'US', disambiguation: '', relations: ARTIST_URLS[al[1]] || [] }); }
+  // browse: everything an artist released
+  if (p === '/ws/2/release-group' && u.query.artist) {
+    const a = ARTISTS.find(x => x.id === u.query.artist) || {};
+    return send({ 'release-groups': ALBUMS.concat(SINGLES).filter(x => x.artist === a.name).map(x => ({ id: x.id, title: x.title, 'primary-type': x.type, 'first-release-date': x.date, 'artist-credit': credit(x.artist) })) });
+  }
+  const rgl = p.match(/^\/ws\/2\/release-group\/(mb-.+)$/);
+  if (rgl) { const x = ALBUMS.concat(SINGLES).find(y => y.id === rgl[1]); return x ? send({ id: x.id, title: x.title, 'primary-type': x.type, 'first-release-date': x.date, 'artist-credit': credit(x.artist) }) : (res.writeHead(404), res.end()); }
+  if (p === '/ws/2/release' && u.query['release-group']) {
+    const x = ALBUMS.concat(SINGLES).find(y => y.id === u.query['release-group']);
+    const songs = x ? (x.songs || [x.song]) : [];
+    return send({ releases: x ? [{ id: 'rel-' + x.id, date: x.date, media: [{ position: 1, tracks: songs.map((s, i) => ({ position: i + 1, title: s, length: 200000 + i * 7000 })) }] }] : [] });
+  }
   if (p === '/ws/2/artist') return send({ artists: ARTISTS.filter(a => matchAll(a.name, q)).map(a => ({ id: a.id, name: a.name, type: a.type, country: 'US' })) });
-  if (p === '/ws/2/release-group') return send({ 'release-groups': ALBUMS.filter(a => matchAll(a.title + ' ' + a.artist, q)).map(a => ({ id: a.id, title: a.title, 'primary-type': a.type, 'first-release-date': a.date, 'artist-credit': [{ name: a.artist }] })) });
+  if (p === '/ws/2/release-group') return send({ 'release-groups': ALBUMS.filter(a => matchAll(a.title + ' ' + a.artist, q)).map(a => ({ id: a.id, title: a.title, 'primary-type': a.type, 'first-release-date': a.date, 'artist-credit': credit(a.artist) })) });
   if (p === '/ws/2/recording') {
     const recs = [];
     ALBUMS.forEach(al => al.songs.forEach(song => {

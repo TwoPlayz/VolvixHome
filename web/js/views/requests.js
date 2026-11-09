@@ -16,12 +16,14 @@ Spin.views = Spin.views || {};
       '<span class="gm-initials">' + S.esc(initials) + '</span></span>';
   }
   let canGet = L.canRequest, lidarrOn = L.configured; // set from each search: can this person download?
+  S.getMusic = S.getMusic || {};
   /** Shown instead of a Get button when downloading isn't set up for them. */
   function noGet() {
     return S.data.can('settings') && !lidarrOn
       ? '<a class="btn btn-secondary btn-sm" href="#/account/settings">Connect Lidarr</a>'
       : '<span class="gm-state">' + (lidarrOn ? 'Admins only' : 'Ask an admin') + '</span>';
   }
+  /** The state of an album / artist: here already (opens it), asked for, or a Get button. */
   function stateButton(item, kind) {
     if (item.onServer) {
       const href = kind === 'album' ? '#/album/' + item.onServer : S.artistUrl(item.onServer);
@@ -31,13 +33,18 @@ Spin.views = Spin.views || {};
     if (!canGet) return noGet();
     return '<button class="btn btn-primary btn-sm" data-get="' + kind + '" data-id="' + S.esc(item.foreignId) + '">' + S.icon('download', 14) + (kind === 'artist' ? 'Get all' : 'Get') + '</button>';
   }
+  /** Where clicking a result goes: your own page if it's already here, otherwise a page about it with everything it holds. */
+  const albumHref = function (a) { return a.onServer ? '#/album/' + a.onServer : '#/get/album/' + a.foreignId; };
+  const artistHref = function (a) { return a.onServer ? S.artistUrl(a.onServer) : '#/get/artist/' + a.foreignId; };
+  const artistOfAlbumHref = function (a) { return a.artistId ? '#/get/artist/' + a.artistId : ''; };
+
   function albumCard(a) {
-    return '<div class="gm-card">' + art(a.image, false, a.title) +
-      '<div class="gm-text"><span class="t-name">' + S.esc(a.title) + '</span>' +
-      '<span class="t-sub">' + S.esc([a.artist, a.year, a.type && a.type !== 'Album' ? a.type : ''].filter(Boolean).join(' · ')) + '</span></div>' +
+    return '<div class="gm-card"><a class="gm-link" href="' + albumHref(a) + '">' + art(a.image, false, a.title) +
+      '<span class="gm-text"><span class="t-name">' + S.esc(a.title) + '</span>' +
+      '<span class="t-sub">' + S.esc([a.artist, a.year, a.type && a.type !== 'Album' ? a.type : ''].filter(Boolean).join(' · ')) + '</span></span></a>' +
       stateButton(a, 'album') + '</div>';
   }
-  /** A song: Lidarr fetches releases, not songs, so offer its single (if any) and its album. */
+  /** A song: Lidarr fetches releases, not songs, so offer its single (if any) and its album. Click opens the album with all its songs. */
   function songCard(s) {
     let action;
     if (s.onServer) action = '<a class="btn btn-secondary btn-sm" href="#/album/' + s.onServer + '">' + S.icon('check', 14) + 'In your library</a>';
@@ -49,42 +56,56 @@ Spin.views = Spin.views || {};
       if (s.albumId) btns.push('<button class="btn ' + (s.singleId ? 'btn-secondary' : 'btn-primary') + ' btn-sm" data-get="album" data-id="' + S.esc(s.albumId) + '" data-label="the album with ' + S.esc(s.title) + '">' + S.icon('download', 14) + 'Get the album</button>');
       action = '<div class="gm-actions">' + btns.join('') + '</div>';
     }
-    return '<div class="gm-card gm-song">' + art(s.image, false, s.title) +
-      '<div class="gm-text"><span class="t-name">' + S.esc(s.title) + '</span>' +
-      '<span class="t-sub">' + S.esc([s.artist, s.year].filter(Boolean).join(' · ')) + '</span></div>' +
+    const target = s.onServer ? '#/album/' + s.onServer : (s.albumId || s.singleId) ? '#/get/album/' + (s.albumId || s.singleId) : '';
+    return '<div class="gm-card gm-song"><' + (target ? 'a class="gm-link" href="' + target + '"' : 'div class="gm-link"') + '>' + art(s.image, false, s.title) +
+      '<span class="gm-text"><span class="t-name">' + S.esc(s.title) + '</span>' +
+      '<span class="t-sub">' + S.esc([s.artist, s.year].filter(Boolean).join(' · ')) + '</span></span></' + (target ? 'a' : 'div') + '>' +
       action + '</div>';
   }
   function artistRow(r) {
-    return '<div class="gm-card gm-artist">' + art(r.image, true, r.name) +
-      '<div class="gm-text"><span class="t-name">' + S.esc(r.name) + '</span>' +
-      '<span class="t-sub">' + S.esc(['Artist', r.disambiguation].filter(Boolean).join(' · ')) + '</span></div>' +
+    return '<div class="gm-card gm-artist"><a class="gm-link" href="' + artistHref(r) + '">' + art(r.image, true, r.name) +
+      '<span class="gm-text"><span class="t-name">' + S.esc(r.name) + '</span>' +
+      '<span class="t-sub">' + S.esc(['Artist', r.disambiguation].filter(Boolean).join(' · ')) + '</span></span></a>' +
       stateButton(r, 'artist') + '</div>';
   }
 
   let seq = 0;
-  /** Fill `host` with Lidarr results for `q` (Search calls this, debounced). */
-  function searchInto(host, q) {
+  const SHOW = { artists: 4, songs: 6, albums: 8 };
+  /** Fill `host` with results from MusicBrainz for `q`, only the kinds the filter allows (Search calls this, debounced). */
+  function searchInto(host, q, type) {
     if (!host) return;
+    type = type || 'all';
     const mine = ++seq;
     host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p>Searching…</p></div></div></section>';
     S.server.json('GET', '/api/lidarr/search?term=' + encodeURIComponent(q)).then(function (r) {
       if (mine !== seq) return; // a newer search took over
       canGet = !!r.canRequest; lidarrOn = !!r.configured;
-      const songs = r.songs || [];
-      if (!r.artists.length && !r.albums.length && !songs.length) { host.innerHTML = ''; return; }
-      host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2>' +
-          '<p>' + (canGet ? 'Not in your library yet. Lidarr gets it and adds it here when it\'s done.' : lidarrOn ? 'Not in your library yet. Only admins can ask for new music.' : S.data.can('settings') ? 'Not in your library yet. Connect Lidarr in Settings to download it.' : 'Not in your library yet. Ask an admin to connect Lidarr so it can be downloaded.') + '</p></div></div>' +
-        (r.artists.length ? '<div class="gm-list">' + r.artists.slice(0, 3).map(artistRow).join('') + '</div>' : '') +
-        (songs.length ? '<h3 class="gm-sub">Songs</h3><div class="gm-list">' + songs.map(songCard).join('') + '</div>' : '') +
-        (r.albums.length ? '<h3 class="gm-sub">Albums</h3><div class="gm-grid">' + r.albums.map(albumCard).join('') + '</div>' : '') +
-        '<p class="gm-credit">Results from MusicBrainz.</p>' +
-        '</section>';
+      const open = {}; // which sections the person has expanded
+      function draw() {
+        const want = function (k) { return type === 'all' || type === k; };
+        const part = function (key, title, list, card, wrap) {
+          if (!want(key) || !list.length) return '';
+          const limit = type === 'all' && !open[key] ? SHOW[key] : list.length;
+          return '<h3 class="gm-sub">' + title + '</h3><div class="' + wrap + '">' + list.slice(0, limit).map(card).join('') + '</div>' +
+            (list.length > limit ? '<button class="btn btn-ghost btn-sm gm-more" data-gm-more="' + key + '">Show ' + (list.length - limit) + ' more</button>' : '');
+        };
+        const html = part('artists', 'Artists', r.artists || [], artistRow, 'gm-list') + part('songs', 'Songs', r.songs || [], songCard, 'gm-list') + part('albums', 'Albums', r.albums || [], albumCard, 'gm-grid');
+        if (!html) { host.innerHTML = ''; return; }
+        host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2>' +
+          '<p>' + (canGet ? 'Not in your library yet? Open an artist or album to see everything, then get it. Lidarr downloads it and adds it here when it\'s done.' : lidarrOn ? 'Only admins can ask for new music.' : S.data.can('settings') ? 'Connect Lidarr in Settings to download these.' : 'Ask an admin to connect Lidarr so these can be downloaded.') + '</p></div></div>' +
+          html + '<p class="gm-credit">Results from MusicBrainz.</p></section>';
+      }
+      draw();
+      host.onclick = function (e) { const b = e.target.closest('[data-gm-more]'); if (b) { open[b.dataset.gmMore] = true; draw(); } };
     }).catch(function (e) {
       if (mine !== seq) return;
       host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more music</h2><p class="gm-error">' + S.esc(e.message) + '</p></div></div></section>';
     });
   }
 
+  // the artist and album pages (discover.js) reuse these
+  S.getMusic.searchInto = searchInto;
+  S.getMusic.helpers = { art: art, stateButton: stateButton, noGet: noGet, albumHref: albumHref, artistHref: artistHref, artistOfAlbumHref: artistOfAlbumHref, setCan: function (c, l) { canGet = !!c; lidarrOn = !!l; } };
   /** Get buttons anywhere (Search, Requests). */
   document.addEventListener('click', function (e) {
     const b = e.target.closest('[data-get]');
@@ -184,5 +205,4 @@ Spin.views = Spin.views || {};
   }
 
   S.views.requests = { render: render };
-  S.getMusic = { searchInto: searchInto };
 })(window.Spin);
