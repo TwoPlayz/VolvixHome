@@ -1,4 +1,6 @@
-﻿# Publishes the Windows app so installed copies can update themselves.
+# Publishes the Windows app and the iPhone app.
+#  - Windows: installed copies update themselves from the release.
+#  - iPhone: the IPA is attached to the release and listed in apps/ios/source.json, an update feed for AltStore / SideStore.
 # To release: push a tag, e.g.  git tag v0.2.0 && git push origin v0.2.0
 # The app compares its own version with the newest release and downloads volvix-home.exe, checking it against
 # volvix-home.exe.sha256 before installing.
@@ -34,3 +36,56 @@ jobs:
             volvix-home.exe
             volvix-home.exe.sha256
           generate_release_notes: true
+
+  # the iPhone app: an unsigned .ipa (AltStore / SideStore sign it with your Apple ID when they install it)
+  ios:
+    needs: windows            # the Windows job creates the release; this one adds to it
+    runs-on: macos-latest
+    outputs:
+      size: ${{ steps.pack.outputs.size }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version from the tag
+        run: |
+          V='${{ github.ref_name }}'; V="${V#v}"
+          sed -i '' -E "s/MARKETING_VERSION: .*/MARKETING_VERSION: \"$V\"/" apps/ios/project.yml
+          sed -i '' -E "s/CURRENT_PROJECT_VERSION: .*/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" apps/ios/project.yml
+          grep -n VERSION apps/ios/project.yml
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd apps/ios && xcodegen generate
+      - name: Build (unsigned)
+        run: |
+          cd apps/ios
+          xcodebuild -project VolvixHome.xcodeproj -scheme VolvixHome -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Package the .ipa
+        id: pack
+        run: |
+          cd apps/ios/build/Build/Products/Release-iphoneos
+          mkdir Payload && cp -R VolvixHome.app Payload/
+          zip -qry "$GITHUB_WORKSPACE/VolvixHome.ipa" Payload
+          echo "size=$(stat -f%z "$GITHUB_WORKSPACE/VolvixHome.ipa")" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: VolvixHome.ipa
+
+  # list the new version in the update feed (apps/ios/source.json on main)
+  feed:
+    needs: ios
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Add this version to the feed
+        run: node tools/make-source.js "${{ github.ref_name }}" "${{ needs.ios.outputs.size }}" "${{ github.repository }}"
+      - name: Commit the feed
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add apps/ios/source.json
+          git commit -m "iPhone update feed: ${{ github.ref_name }} [skip ci]" || echo "nothing to commit"
+          git push origin HEAD:main
