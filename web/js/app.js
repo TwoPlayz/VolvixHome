@@ -254,7 +254,9 @@ window.Spin.views = window.Spin.views || {};
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Tab' || e.ctrlKey || e.altKey || e.metaKey) return;
     if (document.querySelector('.modal-scrim, .popover')) return; // dialogs and menus manage their own focus
-    const list = Array.from(document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+    // Now Playing is a full-screen sheet: Tab stays inside it and loops round
+    const scope = (S.nowPlaying && S.nowPlaying.isOpen() && S.$('.np')) || document;
+    const list = Array.from(scope.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
       .filter(function (n) { return n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden'; });
     if (!list.length) return;
     const a = document.activeElement;

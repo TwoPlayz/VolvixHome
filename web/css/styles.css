@@ -2722,3 +2722,10 @@ body.reordering { cursor: grabbing; user-select: none; }
 
 /* every round button in the player lights up the same way on hover */
 .ctrl:not(.ctrl-play):hover, .icon-btn:hover { background: var(--hover); }
+
+/* Now Playing (phone / narrow): the song name and artist are links on clipped lines, so keep the focus ring inside them */
+.np-title, .np-artist { padding: 3px 5px; margin: -3px -5px; }
+.np-title a:focus-visible, .np-artist a:focus-visible { outline-offset: -3px; border-radius: 6px; }
+.np-add:hover { background: var(--hover); }
+.np-add:focus-visible, .np .icon-btn:focus-visible, .np .ctrl:focus-visible { outline-offset: -2px; }
+.np-add { display: grid; place-items: center; }
