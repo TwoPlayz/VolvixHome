@@ -42,13 +42,13 @@ window.Spin = window.Spin || {};
       : f.dataset.player ? '[data-player="' + f.dataset.player + '"]'
       : f.hasAttribute('data-add-pl') ? '.np-add'
       : f.hasAttribute('data-np-close') ? '[data-np-close]'
-      : f.hasAttribute('data-np-more') ? '[data-np-more]' : null;
+      : f.hasAttribute('data-np-info') ? '[data-np-info]' : null;
 
     el.innerHTML =
       '<div class="np-head" data-np-grab>' +
         '<button class="icon-btn" data-np-close aria-label="Close now playing">' + S.icon('chevronDown', 24) + '</button>' +
         '<div class="np-from"><span>Playing from</span><strong>' + S.esc(from) + '</strong></div>' +
-        '<button class="icon-btn" data-np-more aria-label="More options">' + S.icon('more', 22) + '</button>' +
+        '<button class="icon-btn" data-np-info aria-label="Song info" title="Song info">' + S.icon('info', 22) + '</button>' +
       '</div>' +
       '<div class="np-art">' + S.cover(album) + '</div>' +
       '<div class="np-meta">' +
@@ -157,17 +157,6 @@ window.Spin = window.Spin || {};
   document.addEventListener('click', function (e) {
     if (!el || !open || !el.contains(e.target)) return;
     if (e.target.closest('[data-np-close]')) { close(); return; }
-    const more = e.target.closest('[data-np-more]');
-    if (more) {
-      const t = S.player.current();
-      if (!t) return;
-      S.popover(more, { items: [
-        { label: 'Add to playlist', icon: 'plus', onClick: function () { S.pl.addToDialog([t.id]); } },
-        { label: 'Go to album', icon: 'disc', onClick: function () { S.router.go('/album/' + t.albumId); } },
-        { label: 'Go to artist', icon: 'user', onClick: function () { location.hash = S.artistUrl(t.artist); } },
-        { label: 'Add to queue', icon: 'queue', onClick: function () { S.player.addToQueue([t.id]); } }
-      ] });
-    }
   });
 
   document.addEventListener('keydown', function (e) {

@@ -247,6 +247,23 @@ window.Spin = window.Spin || {};
     if (touch) hold = setTimeout(begin, 280);
   };
 
+  /** The (i) menu next to what's playing: just things about this song. Lyrics joins it when lyrics exist. */
+  S.songInfoMenu = function (anchor) {
+    const t = S.player.current();
+    if (!t) return;
+    S.popover(anchor, {
+      header: '<div class="q-pop"><div class="menu-name">' + S.esc(t.title) + '</div><div class="menu-sub">' + S.esc(t.artist) + '</div></div>',
+      items: [
+        S.lyrics && S.lyrics.open ? { label: 'Lyrics', icon: 'lyrics', onClick: function () { S.lyrics.open(t.id); } } : null,
+        { label: 'Credits', icon: 'book', onClick: function () { S.creditsDialog(t.id); } }
+      ]
+    });
+  };
+  document.addEventListener('click', function (e) {
+    const b = e.target.closest('[data-player="info"], [data-np-info]');
+    if (b) { e.preventDefault(); e.stopPropagation(); S.songInfoMenu(b); }
+  });
+
   /* ---------- credits ---------- */
   function creditRows(list) {
     return list.map(function (c) { return '<div class="credit-row"><dt>' + S.esc(c.role) + '</dt><dd>' + S.esc(c.names) + '</dd></div>'; }).join('');

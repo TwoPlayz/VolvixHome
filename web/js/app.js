@@ -85,6 +85,7 @@ window.Spin.views = window.Spin.views || {};
       '</div>' +
       '<div class="player-right">' +
         '<button class="ctrl q-btn" data-player="quality" data-p="quality" aria-label="Audio quality" title="Audio quality">' + S.qualityIcon({ id: 'lossless', lossless: true }, 18) + '</button>' +
+        ctrl('info', 'Song info', 'info') +
         '<button class="ctrl party-btn" data-player="party" aria-label="Start a listening party" title="Start a listening party">' + S.icon('party', 18) + '</button>' +
         ctrl('queue', 'Queue', 'queue') +
         '<div class="volume"><button class="ctrl" data-player="mute" aria-label="Mute">' + S.icon('volume', 18) + '</button>' +
