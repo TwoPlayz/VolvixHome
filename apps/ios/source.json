@@ -1,29 +1,38 @@
 {
-    "name":  "Volvix Home",
-    "identifier":  "app.volvix.home.source",
-    "subtitle":  "Your household\u0027s own music server",
-    "description":  "The iPhone app for Volvix Home. It connects to your own server; updates arrive here.",
-    "iconURL":  "https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/VolvixHome/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
-    "tintColor":  "E5484D",
-    "sourceURL":  "https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/source.json",
-    "apps":  [
-                 {
-                     "name":  "Volvix Home",
-                     "bundleIdentifier":  "app.volvix.home",
-                     "developerName":  "TwoPlayz",
-                     "subtitle":  "Your music server, on your iPhone",
-                     "localizedDescription":  "A window onto your own Volvix Home server: your library, playlists, parties and downloads. Enter your server\u0027s address once.",
-                     "iconURL":  "https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/VolvixHome/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
-                     "tintColor":  "E5484D",
-                     "screenshotURLs":  [
-
-                                        ],
-                     "versions":  [
-
-                                  ]
-                 }
-             ],
-    "news":  [
-
-             ]
+  "name": "Volvix Home",
+  "identifier": "app.volvix.home.source",
+  "subtitle": "Your household's own music server",
+  "description": "The iPhone app for Volvix Home. It connects to your own server; updates arrive here.",
+  "iconURL": "https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/VolvixHome/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+  "tintColor": "E5484D",
+  "sourceURL": "https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/source.json",
+  "apps": [
+    {
+      "name": "Volvix Home",
+      "bundleIdentifier": "app.volvix.home",
+      "developerName": "TwoPlayz",
+      "subtitle": "Your music server, on your iPhone",
+      "localizedDescription": "A window onto your own Volvix Home server: your library, playlists, parties and downloads. Enter your server's address once.",
+      "iconURL": "https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/VolvixHome/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+      "tintColor": "E5484D",
+      "screenshotURLs": [],
+      "versions": [
+        {
+          "version": "0.28.0",
+          "buildVersion": "2",
+          "date": "2026-11-09",
+          "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v0.28.0/VolvixHome.ipa",
+          "size": 117270,
+          "localizedDescription": "Volvix Home 0.28.0",
+          "minOSVersion": "15.0"
+        }
+      ],
+      "version": "0.28.0",
+      "versionDate": "2026-11-09",
+      "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v0.28.0/VolvixHome.ipa",
+      "size": 117270,
+      "versionDescription": "Volvix Home 0.28.0"
+    }
+  ],
+  "news": []
 }
