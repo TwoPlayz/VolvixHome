@@ -2733,3 +2733,16 @@ body.reordering { cursor: grabbing; user-select: none; }
 .mg-label { padding: 4px 0 0; }
 .mg-presets { display: flex; gap: 8px; }
 .switch-row.disabled { opacity: .5; }
+
+/* equalizer */
+.eq-panel { padding: 8px 16px 16px; }
+.eq-panel[data-off] { opacity: .5; }
+.eq-top { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin-bottom: 12px; }
+.eq-pick { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); min-width: 160px; }
+.eq-pick b { color: var(--text); font-weight: 600; }
+.eq-bands { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; align-items: end; }
+.eq-band { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.eq-db { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.eq-hz { font-size: 11px; color: var(--text-3); }
+.eq-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 130px; accent-color: var(--accent); }
+@media (max-width: 520px) { .eq-slider { height: 100px; } }

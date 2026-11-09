@@ -117,6 +117,32 @@ pub struct Track {
     pub duration: u32,
     pub credits: Vec<Credit>,
     pub explicit: bool,
+    /// ReplayGain from the file's tags, in dB: how much to turn it up or down so songs sound equally loud
+    #[serde(rename = "replayGain", skip_serializing_if = "Option::is_none")]
+    pub replay_gain: Option<ReplayGain>,
+}
+
+#[derive(Serialize, Clone, Default, PartialEq, Debug)]
+pub struct ReplayGain {
+    pub track: Option<f32>,
+    pub album: Option<f32>,
+    /// loudest sample (1.0 = full scale): used to stop the boost from clipping
+    pub peak: Option<f32>,
+}
+
+/// -6.50 dB / +3.2 / -6.5dB -> -6.5
+fn parse_gain(s: &str) -> Option<f32> {
+    s.trim().trim_end_matches(|c: char| c.is_alphabetic() || c.is_whitespace()).replace(',', ".").parse::<f32>().ok().filter(|v| v.is_finite() && v.abs() < 60.0)
+}
+
+pub fn replay_gain_from_tag(tag: &Tag) -> Option<ReplayGain> {
+    let g = |k: &ItemKey| tag.get_string(k).and_then(parse_gain);
+    let rg = ReplayGain {
+        track: g(&ItemKey::ReplayGainTrackGain),
+        album: g(&ItemKey::ReplayGainAlbumGain),
+        peak: tag.get_string(&ItemKey::ReplayGainTrackPeak).and_then(|p| p.trim().parse::<f32>().ok()).filter(|p| *p > 0.0),
+    };
+    if rg.track.is_none() && rg.album.is_none() { None } else { Some(rg) }
 }
 
 /// What /api/library returns.
@@ -180,6 +206,7 @@ struct Scanned {
     copyright: Option<String>,
     catalog: Option<String>,
     explicit: bool,
+    replay_gain: Option<ReplayGain>,
 }
 
 /// Marked explicit: the iTunes advisory tag (1 = explicit, 2 = clean), or "(Explicit)" in the title.
@@ -197,6 +224,21 @@ fn is_explicit(tag: Option<&Tag>, title: &str) -> bool {
 #[cfg(test)]
 mod explicit_tests {
     use super::*;
+
+    #[test]
+    fn replay_gain_is_read_from_tags() {
+        use lofty::tag::TagType;
+        let mut tag = Tag::new(TagType::VorbisComments);
+        assert!(replay_gain_from_tag(&tag).is_none());
+        tag.insert_text(ItemKey::ReplayGainTrackGain, "-6.50 dB".into());
+        tag.insert_text(ItemKey::ReplayGainAlbumGain, "+2.1dB".into());
+        tag.insert_text(ItemKey::ReplayGainTrackPeak, "0.987654".into());
+        let rg = replay_gain_from_tag(&tag).unwrap();
+        assert_eq!(rg.track, Some(-6.5));
+        assert_eq!(rg.album, Some(2.1));
+        assert_eq!(rg.peak, Some(0.987654));
+        assert_eq!(parse_gain("garbage"), None);
+    }
 
     #[test]
     fn title_marker_means_explicit() {
@@ -260,6 +302,7 @@ fn read_file(path: &Path, root: &Path) -> Option<Scanned> {
     let copyright = tag.and_then(|t| joined(t, &ItemKey::CopyrightMessage));
     let catalog = tag.and_then(|t| joined(t, &ItemKey::CatalogNumber));
     let explicit = is_explicit(tag, &title);
+    let replay_gain = tag.and_then(replay_gain_from_tag);
 
     let (duration, bits, khz, kbps) = match &props {
         Some(p) => (
@@ -297,6 +340,7 @@ fn read_file(path: &Path, root: &Path) -> Option<Scanned> {
         copyright,
         catalog,
         explicit,
+        replay_gain,
     })
 }
 
@@ -391,6 +435,7 @@ pub fn scan(root: &Path) -> Library {
             duration: s.duration,
             credits: s.credits,
             explicit: s.explicit,
+            replay_gain: s.replay_gain,
         });
     }
 

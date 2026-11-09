@@ -21,7 +21,10 @@ window.Spin = window.Spin || {};
         gapless: true,
         normalize: false,
         privateSession: false,
-        playbackRate: 1,                 // Settings > Playback
+        crossfade: 0,                    // seconds of overlap between songs (0 = off)
+        crossfadeAlbums: false,          // also crossfade songs that are next to each other on an album
+        leveling: 'off',                 // 'off' | 'track' | 'album': ReplayGain, so songs are equally loud
+        eq: { on: false, preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
         resumeLast: true,                // reopen where you left off
         shareActivity: true,             // let the household see what you're listening to
         allowExplicit: true

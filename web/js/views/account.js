@@ -303,6 +303,37 @@ Spin.views = Spin.views || {};
       { id: 'native' });
   }
 
+  /* ---------- equalizer ---------- */
+  function eqGroup(st) {
+    const eq = st.settings.eq || { on: false, preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
+    const P = S.fx.PRESETS, B = S.fx.BANDS;
+    const label = function (f) { return f >= 1000 ? (f / 1000) + 'k' : String(f); };
+    const bands = B.map(function (f, i) {
+      return '<label class="eq-band"><span class="eq-db" data-eq-db="' + i + '">' + (eq.gains[i] > 0 ? '+' : '') + eq.gains[i] + '</span>' +
+        '<input type="range" class="eq-slider" min="-12" max="12" step="1" value="' + eq.gains[i] + '" data-eq-band="' + i + '" aria-label="' + label(f) + ' Hz"' + (eq.on ? '' : ' disabled') + '>' +
+        '<span class="eq-hz">' + label(f) + '</span></label>';
+    }).join('');
+    return group('Equalizer',
+      row('Equalizer', S.fx.available() ? 'Shape the sound with ten bands. It works on this device while it plays (not when casting to a TV).' : 'This browser can\'t process sound.', toggle('eqOn', !!eq.on), { icon: 'settings' }) +
+      '<div class="eq-panel"' + (eq.on ? '' : ' data-off') + '>' +
+        '<div class="eq-top"><label class="eq-pick"><span>Preset</span><select class="input" data-eq-preset' + (eq.on ? '' : ' disabled') + '>' +
+          Object.keys(P).map(function (k) { return '<option value="' + k + '"' + (eq.preset === k ? ' selected' : '') + '>' + S.esc(P[k].label) + '</option>'; }).join('') +
+          '<option value="custom"' + (eq.preset === 'custom' ? ' selected' : '') + '>Custom</option></select></label>' +
+          '<label class="eq-pick"><span>Preamp <b data-eq-prev>' + (eq.pre > 0 ? '+' : '') + eq.pre + ' dB</b></span><input type="range" min="-12" max="6" step="1" value="' + eq.pre + '" data-eq-pre' + (eq.on ? '' : ' disabled') + '></label>' +
+          '<button class="btn btn-ghost btn-sm" data-act="eq-reset"' + (eq.on ? '' : ' disabled') + '>Reset</button></div>' +
+        '<div class="eq-bands">' + bands + '</div>' +
+      '</div>', { id: 'equalizer' });
+  }
+  /** Save the EQ the person set, apply it to the playing sound, and keep the panel in step. */
+  function eqSet(patch, persist) {
+    const cur = S.store.state.settings.eq || {};
+    const eq = Object.assign({ on: false, preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, cur, patch);
+    eq.gains = (patch.gains || cur.gains || eq.gains).slice();
+    if (persist) S.store.update(function (s) { s.settings.eq = eq; }); else S.store.state.settings.eq = eq;
+    S.fx.sync();
+    return eq;
+  }
+
   /* ---------- Settings ---------- */
   let sleepChoice = '0';
   function sleepValue() { return S.player.sleepInfo() ? sleepChoice : '0'; }
@@ -323,12 +354,16 @@ Spin.views = Spin.views || {};
         row('Private session', 'Stops sharing, and keeps what you play out of Recently played, until you turn it off.', toggle('privateSession', !!st.settings.privateSession), { icon: 'eyeOff' }),
         { id: 'privacy' }) +
       group('Playback',
-        row('Speed', 'Songs play faster or slower, at the same pitch. Listening parties always play at normal speed.',
-          seg('playbackRate', String(st.settings.playbackRate || 1), [['0.75', '0.75×'], ['1', '1×'], ['1.25', '1.25×'], ['1.5', '1.5×'], ['2', '2×']]), { icon: 'play' }) +
+        row('Crossfade', 'The end of one song fades into the start of the next. Not used in listening parties, and the last song just ends.',
+          seg('crossfade', String(st.settings.crossfade || 0), [['0', 'Off'], ['2', '2 s'], ['4', '4 s'], ['6', '6 s'], ['8', '8 s'], ['12', '12 s']]), { icon: 'shuffle' }) +
+        row('Crossfade songs on the same album', 'Off keeps albums flowing the way they were recorded (live albums, mixes), and only crossfades between different albums.', toggle('crossfadeAlbums', !!st.settings.crossfadeAlbums), { icon: 'disc' }) +
+        row('Volume leveling', 'Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren\'t changed.',
+          seg('leveling', st.settings.leveling || 'off', [['off', 'Off'], ['track', 'Song'], ['album', 'Album']]), { icon: 'volume' }) +
         row('Sleep timer', sleepText(), seg('sleep', sleepValue(), [['0', 'Off'], ['15', '15 min'], ['30', '30 min'], ['60', '1 hour'], ['song', 'End of song']]), { icon: 'moon' }) +
         row('Resume where I left off', 'Reopening Volvix shows the last song and spot, paused.', toggle('resumeLast', st.settings.resumeLast !== false), { icon: 'history' }),
         { id: 'playback' }) +
       nativeGroup() +
+      eqGroup(st) +
       group('Downloads',
         row('Only play downloads', 'Use only the songs saved on this device. Everything else is greyed out and skipped. This also happens by itself when you lose your connection.',
           toggle('offlineOnly', !!st.settings.offlineOnly), { icon: 'wifiOff' }) +
@@ -366,7 +401,30 @@ Spin.views = Spin.views || {};
         '</div>';
 
       if (!window.__vhNativeHook) { window.__vhNativeHook = true; window.addEventListener('vh-native-update', function () { if (/\/account\/settings/.test(location.hash)) S.app.refresh(); }); }
+      // the equalizer sliders move the sound while you drag; letting go saves
+      root.oninput = function (e) {
+        const t = e.target;
+        if (t.dataset.eqBand !== undefined) {
+          const eq = S.store.state.settings.eq, g = (eq.gains || []).slice(); g[Number(t.dataset.eqBand)] = Number(t.value);
+          eqSet({ gains: g, preset: 'custom' }, false);
+          const lab = root.querySelector('[data-eq-db="' + t.dataset.eqBand + '"]'); if (lab) lab.textContent = (t.value > 0 ? '+' : '') + t.value;
+          const sel = root.querySelector('[data-eq-preset]'); if (sel) sel.value = 'custom';
+        } else if (t.hasAttribute('data-eq-pre')) {
+          eqSet({ pre: Number(t.value), preset: 'custom' }, false);
+          const lab = root.querySelector('[data-eq-prev]'); if (lab) lab.textContent = (t.value > 0 ? '+' : '') + t.value + ' dB';
+        }
+      };
       root.onchange = function (e) {
+        if (e.target.dataset && (e.target.dataset.eqBand !== undefined || e.target.hasAttribute('data-eq-pre'))) { eqSet({}, true); return; }
+        if (e.target.hasAttribute && e.target.hasAttribute('data-eq-preset')) {
+          const k = e.target.value, P = S.fx.PRESETS[k];
+          if (P) { eqSet({ preset: k, pre: P.pre, gains: P.gains.slice() }, true); S.app.refresh(); }
+          return;
+        }
+        if (e.target.dataset && e.target.dataset.setting === 'eqOn') {
+          S.store.update(function (s) { s.settings.eq = Object.assign({ preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, s.settings.eq, { on: e.target.checked }); });
+          S.fx.wake(); S.fx.sync(); S.toast(e.target.checked ? 'Equalizer on' : 'Equalizer off', 'check'); S.app.refresh(); return;
+        }
         if (e.target.matches && e.target.matches('[data-pfp-file]')) { if (e.target.files && e.target.files[0]) uploadPicture(e.target.files[0]); return; }
         if (e.target.dataset && e.target.dataset.native) {
           const k = e.target.dataset.native; window.VOLVIX_NATIVE.settings[k] = e.target.checked;
@@ -378,6 +436,7 @@ Spin.views = Spin.views || {};
         S.store.update(function (s) { s.settings[key] = e.target.checked; });
         if (S.household) S.household.syncPresence();
         if (key === 'offlineOnly') { S.dl.refreshOffline(); S.toast(e.target.checked ? 'Only downloaded songs play' : 'All songs play again', 'download'); return; }
+        if (key === 'crossfadeAlbums') { S.toast(e.target.checked ? 'Crossfading within albums too' : 'Albums play straight through', 'check'); return; }
         if (key === 'resumeLast') { S.toast(e.target.checked ? 'Will resume where you left off' : 'Will start fresh each time'); return; }
         S.toast(key === 'privateSession' ? (e.target.checked ? 'Private session on' : 'Private session off') : (e.target.checked ? 'Sharing what you play' : 'Not sharing what you play'));
       };
@@ -385,10 +444,14 @@ Spin.views = Spin.views || {};
       root.onclick = function (e) {
         const segBtn = e.target.closest('[data-seg]');
         if (segBtn && segBtn.dataset.seg === 'theme') { S.setTheme(segBtn.dataset.value); S.app.refresh(); return; }
-        if (segBtn && segBtn.dataset.seg === 'playbackRate') {
-          S.store.update(function (s) { s.settings.playbackRate = Number(segBtn.dataset.value); });
-          S.player.applySettings(); S.toast('Speed ' + segBtn.dataset.value + '×', 'play'); S.app.refresh(); return;
+        if (segBtn && (segBtn.dataset.seg === 'crossfade' || segBtn.dataset.seg === 'leveling')) {
+          const k = segBtn.dataset.seg, v = k === 'crossfade' ? Number(segBtn.dataset.value) : segBtn.dataset.value;
+          S.store.update(function (s) { s.settings[k] = v; });
+          S.fx.wake(); S.fx.sync();
+          S.toast(k === 'crossfade' ? (v ? 'Crossfade ' + v + ' s' : 'Crossfade off') : (v === 'off' ? 'Volume leveling off' : 'Leveling by ' + (v === 'album' ? 'album' : 'song')), 'check');
+          S.app.refresh(); return;
         }
+        if (e.target.closest('[data-act="eq-reset"]')) { eqSet({ preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }, true); S.app.refresh(); return; }
         if (segBtn && segBtn.dataset.seg === 'sleep') {
           const v = segBtn.dataset.value;
           if (v !== '0' && !S.player.current()) { S.toast('Start a song first', 'moon'); return; }

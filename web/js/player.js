@@ -21,6 +21,7 @@ window.Spin = window.Spin || {};
     queueOpen: false
   };
   let timer = null;
+  let xfadeDone = null;     // the song a crossfade was already started for
 
   /* ---------- listening party: while in one, the server decides what plays ---------- */
   let interceptor = null;   // { handle(name, args) → true when the party took that action, ended(index) }
@@ -64,6 +65,7 @@ window.Spin = window.Spin || {};
   /** Start the audio; if the browser blocks it (no tap yet), show it as paused. */
   function startAudio() {
     if (pendingBlob) return; // starts by itself once the downloaded file is ready
+    if (S.fx) S.fx.wake(); // crossfade / EQ / leveling: build the sound chain and let it make sound
     const p = audio.play();
     if (p && p.catch) p.catch(function (err) {
       if (err && err.name === 'AbortError') return; // a newer track took over
@@ -127,9 +129,26 @@ window.Spin = window.Spin || {};
     if (st.sleepAt && Date.now() >= st.sleepAt) { st.sleepAt = 0; S.toast('Sleep timer: paused', 'moon'); toggle(); return; }
     st.pos = audio.currentTime || st.pos;
     if (S.stats && !audio.paused) S.stats.tick(t, TICK / 1000);
+    maybeCrossfade(t);
     renderProgress();
     saveResume(false);
     mediaPosition();
+  }
+
+  /** Near the end of a song, start the next one underneath (Settings > Playback > Crossfade). */
+  function maybeCrossfade(t) {
+    const s = S.store.state.settings || {};
+    const fade = Number(s.crossfade) || 0;
+    if (!fade || !S.fx || remote || !st.playing || xfadeDone === t.id || st.repeat === 'one') return;
+    const dur = durationOf(t), left = dur - (audio.currentTime || 0);
+    if (!dur || dur < fade * 2.5 || left > fade || left < 0.4) return;
+    const nxt = seek(st.index, 1);
+    if (nxt.index < 0) return; // the last song just ends
+    const n = S.data.track(st.queue[nxt.index]);
+    // songs that follow each other on an album usually flow into each other already
+    if (!s.crossfadeAlbums && n && n.albumId === t.albumId && n.no === t.no + 1) return;
+    xfadeDone = t.id;
+    if (!S.fx.crossfade(Math.min(fade, left), function () { next(true); })) xfadeDone = null;
   }
 
   // the song ended / the OS or headphones paused or played it
@@ -237,10 +256,8 @@ window.Spin = window.Spin || {};
   /* ---------- playback settings: speed, sleep timer ---------- */
   function applySettings() {
     const s = S.store.state.settings || {};
-    const rate = remote ? 1 : (Number(s.playbackRate) || 1); // a party plays at normal speed so everyone stays together
-    if (audio.playbackRate !== rate) audio.playbackRate = rate;
-    audio.defaultPlaybackRate = rate; // new songs keep it
-    audio.preservesPitch = true;
+    if (audio.playbackRate !== 1) audio.playbackRate = 1; // (speed control was removed)
+    audio.defaultPlaybackRate = 1;
   }
   audio.addEventListener('loadstart', applySettings);
   /** v: 0 = off, minutes, or 'song' (stop when this song ends). */
@@ -333,6 +350,7 @@ window.Spin = window.Spin || {};
       return;
     }
     st.index = r.index;
+    xfadeDone = null;
     st.userQ = Math.max(0, st.userQ - 1); // one of the person's own picks has just been reached
     load(current(), 0);
     if (st.playing) { startAudio(); startTimer(); }

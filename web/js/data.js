@@ -24,7 +24,7 @@ window.Spin = window.Spin || {};
   /* ---------- catalog ---------- */
   const TRACKS = {};
   (VH.catalog.tracks || []).forEach(function (t) {
-    TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: !!t.explicit, credits: t.credits || [] };
+    TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: !!t.explicit, replayGain: t.replayGain || null, credits: t.credits || [] };
   });
   const ALBUMS = (VH.catalog.albums || []).map(function (a) {
     const q = a.quality || {};
