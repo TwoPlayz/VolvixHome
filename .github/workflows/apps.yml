@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build
         run: cargo build --release --manifest-path apps/windows/Cargo.toml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Volvix-Home-Windows
           path: apps/windows/target/release/volvix-home.exe
@@ -42,7 +42,7 @@ jobs:
           cd apps/ios/build/Build/Products/Release-iphoneos
           mkdir Payload && cp -R VolvixHome.app Payload/
           zip -qry "$GITHUB_WORKSPACE/VolvixHome.ipa" Payload
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Volvix-Home-iOS
           path: VolvixHome.ipa
