@@ -90,7 +90,7 @@ window.Spin = window.Spin || {};
     status: function (id) { return byId[id] ? 'owned' : null; },
     info: function (id) { return byId[id] ? { status: 'owned' } : null; },
     isTrackOwned: function (id) { return !!TRACKS[id] && !S.lib.isBlocked(id); },
-    isPlayable: function (id) { return !!TRACKS[id] && !S.lib.isBlocked(id); },
+    isPlayable: function (id) { return !!TRACKS[id] && !S.lib.isBlocked(id) && (!S.dl || !S.dl.isOffline() || S.dl.has(id)); },
     /** An admin turned explicit songs off for you: they stay listed but are skipped. */
     isBlocked: function (id) { return !!ME.hideExplicit && !!TRACKS[id] && TRACKS[id].explicit; },
     ownedTrackCount: function (album) { return album.trackIds.length; },
@@ -125,6 +125,8 @@ window.Spin = window.Spin || {};
       });
     },
     logout: function () {
+      // forget the saved copy of your data, so the next person on this browser doesn't get it offline
+      try { if (window.caches) caches.delete('vh-api'); } catch (e) { /* ignore */ }
       return fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).finally(function () { location.hash = ''; location.reload(); });
     }
   };

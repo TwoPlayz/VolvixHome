@@ -31,9 +31,26 @@ window.Spin = window.Spin || {};
   audio.preload = 'auto';
   let loadedId = null;
   /** Point the audio element at a track (only reloads when the track changes). */
+  let pendingBlob = null; // a downloaded song is being fetched from this device's storage
   function load(t, startAt) {
     if (!t) return;
-    if (loadedId !== t.id) { audio.src = S.server.streamUrl(t.id); loadedId = t.id; }
+    if (loadedId !== t.id) {
+      loadedId = t.id; pendingBlob = null;
+      if (S.dl && S.dl.has(t.id)) {
+        // a song downloaded to this device plays from there (no connection needed)
+        const id = t.id; pendingBlob = id;
+        audio.removeAttribute('src'); audio.load();
+        S.dl.blobUrl(id).then(function (url) {
+          if (loadedId !== id) return; // moved on already
+          pendingBlob = null;
+          audio.src = url || S.server.streamUrl(id);
+          if (startAt != null) setPos(startAt);
+          if (st.playing || (remote && remote.output === 'own' && remote.state && remote.state.playing)) startAudio();
+        });
+        return;
+      }
+      audio.src = S.server.streamUrl(t.id);
+    }
     if (startAt != null) setPos(startAt);
   }
   function setPos(sec) {
@@ -45,6 +62,7 @@ window.Spin = window.Spin || {};
   }
   /** Start the audio; if the browser blocks it (no tap yet), show it as paused. */
   function startAudio() {
+    if (pendingBlob) return; // starts by itself once the downloaded file is ready
     const p = audio.play();
     if (p && p.catch) p.catch(function (err) {
       if (err && err.name === 'AbortError') return; // a newer track took over

@@ -86,6 +86,7 @@ Spin.views = Spin.views || {};
           '<button class="icon-btn icon-btn-lg" data-pl-shuffle aria-label="Shuffle" title="Shuffle: play this in a random order"' + (ids.length ? '' : ' disabled') + '>' + S.icon('shuffle', 22) + '</button>' +
           (isOwner && !pl.liked ? '<button class="icon-btn icon-btn-lg" data-pl-invite aria-label="' + (pl.shared ? 'Who can edit' : 'Invite people to edit') + '" title="' + (pl.shared ? 'Who can edit' : 'Invite people to edit') + '">' + S.icon('users', 22) + '</button>' : '') +
           (!isOwner ? '<button class="btn btn-sm ' + (following ? 'btn-secondary' : 'btn-primary') + '" data-pl-follow>' + (following ? S.icon('check', 15) + 'Following' : S.icon('plus', 15) + 'Follow') + '</button>' : '') +
+          (S.dl && S.dl.supported && ids.length ? S.dl.button('data-dl-playlist="' + pl.id + '"', ids) : '') +
           '<button class="icon-btn icon-btn-lg" data-pl-more aria-label="More options">' + S.icon('more', 22) + '</button>' +
         '</div>' +
 

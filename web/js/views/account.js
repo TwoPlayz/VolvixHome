@@ -266,6 +266,12 @@ Spin.views = Spin.views || {};
         row('Sleep timer', sleepText(), seg('sleep', sleepValue(), [['0', 'Off'], ['15', '15 min'], ['30', '30 min'], ['60', '1 hour'], ['song', 'End of song']]), { icon: 'moon' }) +
         row('Resume where I left off', 'Reopening Volvix shows the last song and spot, paused.', toggle('resumeLast', st.settings.resumeLast !== false), { icon: 'history' }),
         { id: 'playback' }) +
+      group('Downloads',
+        row('Only play downloads', 'Use only the songs saved on this device. Everything else is greyed out and skipped. This also happens by itself when you lose your connection.',
+          toggle('offlineOnly', !!st.settings.offlineOnly), { icon: 'wifiOff' }) +
+        row('On this device', S.dl.supported ? S.dl.count() + ' song' + (S.dl.count() === 1 ? '' : 's') + ' · ' + (S.dl.bytes() / 1048576).toFixed(0) + ' MB. Download from an album, a playlist or a song\'s ⋯ menu.' : 'This browser can\'t keep downloads.',
+          S.dl.count() ? '<button class="btn btn-secondary btn-sm" data-act="dl-clear">Remove all</button>' : '', { icon: 'download' }),
+        { id: 'downloads' }) +
       group('Library',
         (S.data.me.admin ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
           '<button class="btn btn-secondary btn-sm" data-act="pick-folder">Change</button>', { icon: 'library' }) : '') +
@@ -302,6 +308,7 @@ Spin.views = Spin.views || {};
         if (!key) return;
         S.store.update(function (s) { s.settings[key] = e.target.checked; });
         if (S.household) S.household.syncPresence();
+        if (key === 'offlineOnly') { S.dl.refreshOffline(); S.toast(e.target.checked ? 'Only downloaded songs play' : 'All songs play again', 'download'); return; }
         if (key === 'resumeLast') { S.toast(e.target.checked ? 'Will resume where you left off' : 'Will start fresh each time'); return; }
         S.toast(key === 'privateSession' ? (e.target.checked ? 'Private session on' : 'Private session off') : (e.target.checked ? 'Sharing what you play' : 'Not sharing what you play'));
       };
@@ -323,6 +330,7 @@ Spin.views = Spin.views || {};
         if (act) {
           if (act.dataset.act === 'logout') S.server.logout();
           else if (act.dataset.act === 'pfp-pick') { const fi = root.querySelector('[data-pfp-file]'); if (fi) fi.click(); }
+          else if (act.dataset.act === 'dl-clear') { S.dl.removeAll().then(function () { S.toast('Downloads removed', 'check'); }); }
           else if (act.dataset.act === 'pfp-remove') {
             fetch('/api/me/avatar', { method: 'DELETE', credentials: 'same-origin' }).then(function () { S.toast('Picture removed', 'check'); setTimeout(function () { location.reload(); }, 600); });
           }

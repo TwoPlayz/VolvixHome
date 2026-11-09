@@ -408,6 +408,10 @@ window.Spin = window.Spin || {};
         undoToast('Removed "' + t.title + '"', function () { S.pl.insertAt(plId, index, entry); });
       } });
     }
+    if (S.dl && S.dl.supported) {
+      const got = S.dl.has(trackId);
+      items.push({ label: got ? 'Remove download' : 'Download', icon: got ? 'check' : 'download', onClick: function () { got ? S.dl.remove([trackId]) : S.dl.add([trackId]); } });
+    }
     items.push({ label: 'Go to album', icon: 'disc', onClick: function () { S.router.go('/album/' + t.albumId); } });
     items.push({ label: 'Credits', icon: 'book', onClick: function () { S.creditsDialog(trackId); } });
     items.push({ label: 'Go to artist', icon: 'user', onClick: function () { location.hash = S.artistUrl(t.artist); } });
