@@ -106,6 +106,23 @@ Spin.views = Spin.views || {};
   // the artist and album pages (discover.js) reuse these
   S.getMusic.searchInto = searchInto;
   S.getMusic.helpers = { art: art, stateButton: stateButton, noGet: noGet, albumHref: albumHref, artistHref: artistHref, artistOfAlbumHref: artistOfAlbumHref, setCan: function (c, l) { canGet = !!c; lidarrOn = !!l; } };
+  /** Cancel a request that hasn't been downloaded yet, and show new music without reloading. */
+  document.addEventListener('click', function (e) {
+    const show = e.target.closest('[data-new-music-show]');
+    if (show) { S.data.sync().then(function () { seenTracks = Object.keys(S.data.tracks).length; S.app.refresh(); S.toast('Library updated', 'check'); }); return; }
+    const c = e.target.closest('[data-cancel-req]');
+    if (!c) return;
+    const id = c.dataset.cancelReq, name = c.dataset.name;
+    S.modal({
+      title: 'Cancel this request?',
+      body: '<p class="modal-text">Lidarr will stop looking for <strong>' + S.esc(name) + '</strong> and anything it started downloading is removed. Music that has already been downloaded stays.</p>',
+      actions: [{ label: 'Keep it' }, { label: 'Cancel the request', kind: 'danger', onClick: function (close) {
+        S.server.json('DELETE', '/api/lidarr/request/' + encodeURIComponent(id)).then(function () { close(); S.toast('Request cancelled', 'check'); S.app.refresh(); })
+          .catch(function (x) { close(); S.toast(x.message, 'x'); });
+      } }]
+    });
+  });
+
   /** Get buttons anywhere (Search, Requests). */
   document.addEventListener('click', function (e) {
     const b = e.target.closest('[data-get]');
@@ -184,7 +201,8 @@ Spin.views = Spin.views || {};
           const downloading = q.items.some(function (d) { return d.foreignAlbumId === x.foreignId; });
           const where = x.onServer
             ? '<a class="btn btn-secondary btn-sm" href="' + (x.kind === 'album' ? '#/album/' + x.onServer : S.artistUrl(x.onServer)) + '">' + S.icon('check', 14) + 'In your library</a>'
-            : '<span class="gm-state">' + (downloading ? 'Downloading' : 'Waiting for Lidarr') + '</span>';
+            : '<span class="gm-state">' + (downloading ? 'Downloading' : 'Waiting for Lidarr') + '</span>' +
+              (x.byId === S.data.me.serverId || S.data.can('members') ? '<button class="btn btn-ghost btn-sm" data-cancel-req="' + S.esc(x.foreignId) + '" data-name="' + S.esc(x.kind === 'artist' ? 'everything by ' + x.artist : x.title) + '">Cancel</button>' : '');
           return '<div class="list-row">' + art(x.image, x.kind === 'artist', x.title) +
             '<span class="list-text"><span class="t-name">' + S.esc(x.kind === 'artist' ? 'Everything by ' + x.artist : x.title) + '</span>' +
             '<span class="t-sub">' + S.esc((x.kind === 'album' ? x.artist + ' · ' : '') + 'Requested by ' + (x.byId === S.data.me.serverId ? 'you' : x.by) + ' · ' + ago(x.at)) + '</span></span>' +
@@ -198,7 +216,7 @@ Spin.views = Spin.views || {};
         const bar = document.createElement('div');
         bar.className = 'gm-new';
         bar.setAttribute('data-new-music', '');
-        bar.innerHTML = S.icon('check', 16) + '<span>New music is in your library.</span><button class="btn btn-primary btn-sm" onclick="location.reload()">Show it</button>';
+        bar.innerHTML = S.icon('check', 16) + '<span>New music is in your library.</span><button class="btn btn-primary btn-sm" data-new-music-show>Show it</button>';
         root.insertBefore(bar, root.children[1]);
       }
     }).catch(function () { /* signed out etc.: the next call reloads */ });

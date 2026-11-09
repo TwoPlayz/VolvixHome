@@ -67,6 +67,7 @@ window.Spin.views = window.Spin.views || {};
   function playerBar() {
     return '<footer class="player" aria-label="Player">' +
       '<div class="player-track">' +
+        '<span class="eq eq-player" data-p="eq" aria-hidden="true"><i></i><i></i><i></i></span>' +
         '<button class="player-art" data-p="art" data-np-open aria-label="Open Now Playing">' + S.icon('disc', 22) + '</button>' +
         '<div class="player-meta"><div class="player-title" data-p="title">Not playing</div>' +
         '<div class="player-sub" data-p="sub">Pick something from your library</div></div>' +

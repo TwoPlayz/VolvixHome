@@ -2634,7 +2634,11 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
 
 /* the player bar keeps the song name readable as the window narrows, and drops the volume slider first */
-@media (min-width: 761px) {
+@media (min-width: 1000px) {
+  /* the same room on both sides, so the controls sit exactly in the middle */
+  .player { grid-template-columns: minmax(280px, 1fr) minmax(300px, 640px) minmax(280px, 1fr); gap: 12px; }
+}
+@media (min-width: 761px) and (max-width: 999px) {
   .player { grid-template-columns: minmax(300px, 1.3fr) minmax(220px, 1.3fr) auto; gap: 12px; }
   .player-track { gap: 8px; }
   .player-track .ctrl { width: 28px; height: 28px; }
@@ -2841,3 +2845,17 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 .cv-font { padding: 8px 12px; border-radius: 10px; background: var(--surface-3); border: 2px solid transparent; font-size: 16px; }
 .cv-font.on { border-color: var(--accent); }
 @media (max-width: 560px) { .cv-dlg { grid-template-columns: 1fr; } .cv-preview { width: 160px; margin: 0 auto; } .cv-swatches { grid-template-columns: repeat(4, 1fr); } }
+
+/* the little "playing" bars: in the player bar (left of the cover) and on song rows. They keep moving even when the
+   system asks for less motion: they're tiny, slow, and the only sign of what's playing. */
+.eq-player { display: none; margin-right: 2px; height: 16px; width: 16px; flex: none; }
+.eq-player.on { display: inline-flex; }
+.eq-player i { width: 3px; }
+.eq.paused i, .track.paused .eq i { animation-play-state: paused; }
+@media (max-width: 760px) { .eq-player { display: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .eq i { animation: eq 1.5s ease-in-out infinite alternate !important; }
+  .eq i:nth-child(2) { animation-delay: -.5s !important; }
+  .eq i:nth-child(3) { animation-delay: -1s !important; }
+  .eq.paused i, .track.paused .eq i { animation-play-state: paused !important; }
+}

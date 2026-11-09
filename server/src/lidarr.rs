@@ -157,6 +157,9 @@ impl Client {
     pub async fn put(&self, s: &Settings, path: &str, body: &Value) -> Result<Value, String> {
         self.call(s, reqwest::Method::PUT, path, Some(body)).await
     }
+    pub async fn delete(&self, s: &Settings, path: &str) -> Result<Value, String> {
+        self.call(s, reqwest::Method::DELETE, path, None).await
+    }
 
     /// Version, root folders and profiles: what the settings screen needs.
     pub async fn overview(&self, s: &Settings) -> Result<Value, String> {

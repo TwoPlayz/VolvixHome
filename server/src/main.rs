@@ -1052,12 +1052,37 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
             album["addOptions"] = json!({ "searchForNewAlbum": true });
             // the artist is added too if Lidarr doesn't have them yet, but only this album is wanted
             album["artist"] = lidarr::artist_body(&item["artist"], &s, false);
-            st.http.post(&s, "album", &album).await
+            match st.http.post(&s, "album", &album).await {
+                // adding isn't enough on its own (Lidarr may add it unmonitored and not look for it): make sure it's wanted
+                // and start the search ourselves, so "requested" really means Lidarr is looking for it
+                Ok(added) => {
+                    let mut album_id = added["id"].as_i64().unwrap_or(0);
+                    if album_id <= 0 {
+                        album_id = st.http.get(&s, &format!("album?foreignAlbumId={id}")).await.ok()
+                            .and_then(|v| v.as_array().and_then(|a| a.first().and_then(|x| x["id"].as_i64()))).unwrap_or(0);
+                    }
+                    if album_id > 0 {
+                        match st.http.put(&s, "album/monitor", &json!({ "albumIds": [album_id], "monitored": true })).await {
+                            Ok(_) => st.http.post(&s, "command", &json!({ "name": "AlbumSearch", "albumIds": [album_id] })).await.map_err(|e| format!("Lidarr added it, but couldn't start looking for it: {e}")),
+                            Err(e) => Err(format!("Lidarr added it, but couldn't mark it wanted: {e}")),
+                        }
+                    } else {
+                        Err("Lidarr added it, but then couldn't find it to start the search.".to_string())
+                    }
+                }
+                Err(e) => Err(e),
+            }
         }
     } else if lidarr::in_lidarr(&item) {
         st.http.post(&s, "command", &json!({ "name": "ArtistSearch", "artistId": item["id"] })).await
     } else {
-        st.http.post(&s, "artist", &lidarr::artist_body(&item, &s, true)).await
+        match st.http.post(&s, "artist", &lidarr::artist_body(&item, &s, true)).await {
+            Ok(added) => match added["id"].as_i64().filter(|i| *i > 0) {
+                Some(aid) => st.http.post(&s, "command", &json!({ "name": "ArtistSearch", "artistId": aid })).await.map_err(|e| format!("Lidarr added them, but couldn't start looking for their music: {e}")),
+                None => Ok(added),
+            },
+            Err(e) => Err(e),
+        }
     };
     if let Err(e) = result {
         return error(StatusCode::BAD_GATEWAY, &e);
@@ -1083,6 +1108,57 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
         lidarr::save_requests(&st.cfg.data_dir, &list);
     }
     Json(json!({ "request": req })).into_response()
+}
+
+/// Take back a request that hasn't been downloaded yet: stop its download, tell Lidarr not to want it, forget the request.
+/// Only whoever asked can do it (or someone who manages members), and not once the music has arrived.
+async fn lidarr_cancel(State(st): State<Shared>, headers: HeaderMap, Path(foreign_id): Path<String>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let Some(req) = st.requests.lock().unwrap().iter().find(|r| r.foreign_id == foreign_id).cloned() else { return error(StatusCode::NOT_FOUND, "That request isn't there any more.") };
+    if req.by_id != user.id && !user.has("members") {
+        return error(StatusCode::FORBIDDEN, "Only whoever asked for it can take it back.");
+    }
+    let here = if req.kind == "album" { on_server(&st, Some(&req.title), &req.artist) } else { on_server(&st, None, &req.artist) };
+    if here.is_some() && req.kind == "album" {
+        return error(StatusCode::CONFLICT, "It's already been downloaded.");
+    }
+    let s = st.lidarr.lock().unwrap().clone();
+    if s.configured() {
+        let s = match st.http.defaults(&s).await { Ok(s) => s, Err(e) => return error(StatusCode::BAD_GATEWAY, &e) };
+        let result: Result<(), String> = async {
+            let (path, key) = if req.kind == "album" { (format!("album?foreignAlbumId={foreign_id}"), "albumId") } else { (format!("artist?mbId={foreign_id}"), "artistId") };
+            let found = st.http.get(&s, &path).await?;
+            let Some(item) = found.as_array().and_then(|a| a.first().cloned()) else { return Ok(()) }; // Lidarr doesn't have it: nothing to undo there
+            let lid = item["id"].as_i64().unwrap_or(0);
+            if req.kind == "album" && item["statistics"]["trackFileCount"].as_i64().unwrap_or(0) > 0 {
+                return Err("It's already been downloaded.".into());
+            }
+            // stop anything Lidarr is downloading for it
+            if let Ok(q) = st.http.get(&s, "queue?page=1&pageSize=200").await {
+                for r in q["records"].as_array().cloned().unwrap_or_default() {
+                    if r[key].as_i64() == Some(lid) || r["album"]["id"].as_i64() == Some(lid) && key == "albumId" {
+                        if let Some(rid) = r["id"].as_i64() { let _ = st.http.delete(&s, &format!("queue/{rid}?removeFromClient=true&blocklist=false")).await; }
+                    }
+                }
+            }
+            if req.kind == "album" {
+                st.http.put(&s, "album/monitor", &json!({ "albumIds": [lid], "monitored": false })).await?;
+            } else {
+                st.http.put(&s, "artist/editor", &json!({ "artistIds": [lid], "monitored": false })).await?;
+            }
+            Ok(())
+        }.await;
+        if let Err(e) = result {
+            let code = if e.contains("already been downloaded") { StatusCode::CONFLICT } else { StatusCode::BAD_GATEWAY };
+            return error(code, &e);
+        }
+    }
+    {
+        let mut list = st.requests.lock().unwrap();
+        list.retain(|r| r.foreign_id != foreign_id);
+        lidarr::save_requests(&st.cfg.data_dir, &list);
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// What Lidarr is downloading right now.
@@ -1858,6 +1934,7 @@ async fn main() {
         .route("/api/discover/artist/{id}", get(discover_artist))
         .route("/api/discover/album/{id}", get(discover_album))
         .route("/api/lidarr/request", post(lidarr_request))
+        .route("/api/lidarr/request/{id}", delete(lidarr_cancel))
         .route("/api/lidarr/queue", get(lidarr_queue))
         .route("/api/lidarr/requests", get(lidarr_requests))
         .route("/api/hooks/lidarr", post(lidarr_hook).put(lidarr_hook))

@@ -53,6 +53,7 @@ function startDownload(al) {
 }
 function albumDir(al) { return path.join(MUSIC, artistOf(al).artistName, `${al.title} (${al.releaseDate.slice(0, 4)})`); }
 function importAlbum(q) {
+  if (q.cancelled) return;
   const al = q.album, dir = albumDir(al), artist = artistOf(al).artistName;
   fs.mkdirSync(dir, { recursive: true });
   al.songs.forEach((t, i) => fs.writeFileSync(path.join(dir, String(i + 1).padStart(2, '0') + ' - ' + t + '.wav'),
@@ -98,7 +99,7 @@ http.createServer(async (req, res) => {
       db.albums[al.foreignAlbumId] = db.nextId++;
       db.artists[al.artist] = db.artists[al.artist] || db.nextId++;
       log.push('add album ' + al.title + ' root=' + b.artist.rootFolderPath + ' q=' + b.artist.qualityProfileId + ' search=' + (b.addOptions && b.addOptions.searchForNewAlbum));
-      if (b.addOptions && b.addOptions.searchForNewAlbum) startDownload(al);
+      // like the real one, adding does NOT search by itself: the app has to send an AlbumSearch command
       return send(res, 201, albumJson(al));
     }
     case 'POST /api/v1/artist': {
@@ -107,21 +108,25 @@ http.createServer(async (req, res) => {
       if (!ar) return send(res, 400, [{ errorMessage: 'Artist not found' }]);
       db.artists[ar.foreignArtistId] = db.nextId++;
       log.push('add artist ' + ar.artistName + ' monitor=' + (b.addOptions && b.addOptions.monitor));
-      if (b.addOptions && b.addOptions.searchForMissingAlbums) ALBUMS.filter(a => a.artist === ar.foreignArtistId).forEach(a => { db.albums[a.foreignAlbumId] = db.albums[a.foreignAlbumId] || db.nextId++; startDownload(a); });
       return send(res, 201, artistJson(ar));
     }
+    case 'GET /api/v1/album': { const al = ALBUMS.find(a => a.foreignAlbumId === u.query.foreignAlbumId); return send(res, 200, al && db.albums[al.foreignAlbumId] ? [Object.assign(albumJson(al), { statistics: { trackFileCount: fs.existsSync(albumDir(al)) ? al.songs.length : 0 } })] : []); }
+    case 'GET /api/v1/artist': { const ar = ARTISTS.find(a => a.foreignArtistId === u.query.mbId); return send(res, 200, ar && db.artists[ar.foreignArtistId] ? [artistJson(ar)] : []); }
+    case 'PUT /api/v1/artist/editor': { const b = await readBody(req); log.push('artist editor ' + JSON.stringify(b)); return send(res, 202, {}); }
     case 'PUT /api/v1/album/monitor': { const b = await readBody(req); log.push('monitor ' + JSON.stringify(b.albumIds)); return send(res, 202, {}); }
     case 'POST /api/v1/command': {
       const b = await readBody(req);
       log.push('command ' + b.name);
+      if (b.name === 'ArtistSearch') ALBUMS.filter(a => db.artists[a.artist] === b.artistId).forEach(a => { db.albums[a.foreignAlbumId] = db.albums[a.foreignAlbumId] || db.nextId++; startDownload(a); });
       if (b.name === 'AlbumSearch') (b.albumIds || []).forEach(id => { const f = Object.keys(db.albums).find(k => db.albums[k] === id); const al = ALBUMS.find(a => a.foreignAlbumId === f); if (al) startDownload(al); });
       return send(res, 201, { id: db.nextId++, name: b.name });
     }
+    case 'DELETE /api/v1/queue/' + (p.split('/')[4] || ''): { const q = queue.find(x => String(x.id) === p.split('/')[4]); if (q) { q.cancelled = true; queue.splice(queue.indexOf(q), 1); log.push('queue removed ' + q.album.title); } return send(res, 200, {}); }
     case 'GET /api/v1/queue': {
       const records = queue.map(q => {
         const done = Math.min(0.95, (Date.now() - q.started) / 8000);
         return { id: q.id, title: q.album.title + ' [FLAC]', size: q.size, sizeleft: q.size * (1 - done), timeleft: '00:00:0' + Math.max(1, Math.round(8 - (Date.now() - q.started) / 1000)),
-          status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', album: albumJson(q.album), artist: artistJson(artistOf(q.album)) };
+          status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', albumId: db.albums[q.album.foreignAlbumId], artistId: db.artists[q.album.artist], album: albumJson(q.album), artist: artistJson(artistOf(q.album)) };
       });
       return send(res, 200, { page: 1, pageSize: 100, totalRecords: records.length, records });
     }

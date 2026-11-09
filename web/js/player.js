@@ -477,6 +477,8 @@ window.Spin = window.Spin || {};
     S.$('[data-p="sub"]').innerHTML = t ? S.artistLink(t.artist) : 'Pick something from your library';
     const like = S.$('[data-p="like"]');
     if (like) { like.hidden = !t; like.dataset.like = t ? t.id : ''; }
+    const bars = S.$('[data-p="eq"]');
+    if (bars) { bars.classList.toggle('on', !!t); bars.classList.toggle('paused', !(st.playing && t)); }
     const more = S.$('[data-p="more"]');
     if (more) more.hidden = !t;
     const add = S.$('[data-p="add"]');

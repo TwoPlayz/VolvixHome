@@ -133,6 +133,9 @@ window.Spin = window.Spin || {};
     S.$$('[data-track-id]').forEach(function (row) {
       row.classList.toggle('playing', S.player.isCurrent(row.dataset.trackId));
       row.classList.toggle('paused', S.player.isCurrent(row.dataset.trackId) && !S.player.state.playing);
+      // hovering the song that's playing offers Pause, not Play
+      const rp = row.querySelector('.row-play');
+      if (rp) { const want = S.player.isCurrent(row.dataset.trackId) && S.player.state.playing ? 'pause' : 'play'; if (rp.dataset.icon !== want) { rp.dataset.icon = want; rp.innerHTML = S.icon(want, 14); } }
     });
     // big play button on album pages
     const btn = S.$('[data-album-play]');
