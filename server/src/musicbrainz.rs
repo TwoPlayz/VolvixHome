@@ -30,7 +30,7 @@ impl Client {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 // MusicBrainz asks for an app name, version and a contact URL
-                .user_agent(concat!("VolvixHome/", env!("CARGO_PKG_VERSION"), " ( https://github.com/twoplayz/volvix-home )"))
+                .user_agent(concat!("VolvixHome/", env!("CARGO_PKG_VERSION"), " ( https://github.com/TwoPlayz/VolvixHome )"))
                 .build()
                 .expect("http client"),
             base: std::env::var("VH_MUSICBRAINZ_URL").ok().map(|u| u.trim().trim_end_matches('/').to_string()).filter(|u| !u.is_empty()).unwrap_or_else(|| DEFAULT_BASE.to_string()),

@@ -1,4 +1,4 @@
-//! Updates from GitHub releases (twoplayz/volvix-home). The release has `volvix-home.exe` and, next to it,
+//! Updates from GitHub releases (TwoPlayz/VolvixHome). The release has `volvix-home.exe` and, next to it,
 //! `volvix-home.exe.sha256`. The new exe is downloaded to the app's own folder, checked against that hash, and
 //! swapped in (Windows lets a running exe be renamed, not overwritten): the old one becomes `volvix-home.old`
 //! until the next start. Nothing restarts by itself: the tray offers "Restart to finish the update".
@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const REPO: &str = "twoplayz/volvix-home";
+const REPO: &str = "TwoPlayz/VolvixHome";
 
 #[derive(Clone, Debug)]
 pub enum State {

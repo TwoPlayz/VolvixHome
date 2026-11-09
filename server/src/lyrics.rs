@@ -154,7 +154,7 @@ impl Client {
         Client {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
-                .user_agent(concat!("VolvixHome/", env!("CARGO_PKG_VERSION"), " (https://github.com/twoplayz/volvix-home)"))
+                .user_agent(concat!("VolvixHome/", env!("CARGO_PKG_VERSION"), " (https://github.com/TwoPlayz/VolvixHome)"))
                 .build()
                 .expect("http client"),
             base,

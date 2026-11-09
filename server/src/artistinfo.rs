@@ -40,7 +40,7 @@ impl Client {
     pub fn new() -> Client {
         Client {
             http: reqwest::Client::builder().timeout(Duration::from_secs(12))
-                .user_agent(concat!("VolvixHome/", env!("CARGO_PKG_VERSION"), " (https://github.com/twoplayz/volvix-home)")).build().expect("http client"),
+                .user_agent(concat!("VolvixHome/", env!("CARGO_PKG_VERSION"), " (https://github.com/TwoPlayz/VolvixHome)")).build().expect("http client"),
             wiki: base("VH_WIKIPEDIA_URL", "https://en.wikipedia.org"),
             wikidata: base("VH_WIKIDATA_URL", "https://www.wikidata.org"),
             enabled: !matches!(std::env::var("VH_ARTIST_INFO").ok().as_deref().map(str::trim), Some("0") | Some("false") | Some("off")),
