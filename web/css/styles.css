@@ -2800,3 +2800,44 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 .gm-track { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; padding: 10px 8px; border-bottom: 1px solid var(--border); }
 .gm-no { color: var(--text-2); text-align: right; font-variant-numeric: tabular-nums; }
 .gm-len { color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+/* album covers without cover art: premade backgrounds and fonts (see coverart.js) */
+.cover--custom::before { display: none; }
+.cover[data-bg] { background-color: #222; color: #fff; }
+.cover[data-bg="sunset"]  { background: linear-gradient(135deg, #ff6a3d, #ffb36b 55%, #ffd89b); color: #3a1200; }
+.cover[data-bg="ocean"]   { background: linear-gradient(160deg, #0f4c75, #3282b8 55%, #7fd1e8); color: #fff; }
+.cover[data-bg="midnight"]{ background: linear-gradient(160deg, #0b132b, #1c2541 60%, #3a506b); color: #e8f1ff; }
+.cover[data-bg="forest"]  { background: linear-gradient(150deg, #0f3d2e, #2f7d57 60%, #8fc98a); color: #f3fff0; }
+.cover[data-bg="grape"]   { background: linear-gradient(145deg, #3c1053, #7a3cb8 55%, #c99bff); color: #fff; }
+.cover[data-bg="rose"]    { background: linear-gradient(145deg, #ffd1dc, #ff9fb8 60%, #ff6f91); color: #4a0f22; }
+.cover[data-bg="ember"]   { background: radial-gradient(circle at 30% 20%, #ffcf5a, #ff6a2b 45%, #8a1c0d); color: #fff; }
+.cover[data-bg="mono"]    { background: linear-gradient(160deg, #2b2b2e, #3d3d42 60%, #55555c); color: #f4f4f5; }
+.cover[data-bg="paper"]   { background: #f1e9db; color: #2a241c; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.cover[data-bg="stripes"] { background: repeating-linear-gradient(45deg, #e5484d 0 14px, #c23a3f 14px 28px); color: #fff; }
+.cover[data-bg="rings"]   { background: repeating-radial-gradient(circle at 70% 30%, #1d3557 0 12px, #274b7a 12px 24px); color: #f1faee; }
+.cover[data-bg="grid"]    { background-color: #101820; background-image: linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px); background-size: 22px 22px; color: #e7f6ff; }
+.cover[data-bg="sunburst"]{ background: repeating-conic-gradient(from 0deg at 50% 38%, #ffd23f 0 10deg, #ff9f1c 10deg 20deg); color: #2b1800; }
+.cover[data-bg="checker"] { background: conic-gradient(#222 25%, #eee 0 50%, #222 0 75%, #eee 0) 0 0 / 40px 40px; color: #fff; }
+.cover[data-bg="aurora"]  { background: linear-gradient(200deg, #0d1b2a, #1b998b 45%, #7d5ba6 75%, #e0a1ff); color: #fff; }
+.cover[data-bg="dusk"]    { background: linear-gradient(180deg, #2b1055, #7597de 70%, #ffc3a0); color: #fff; }
+.cover[data-bg] .cover-title, .cover[data-bg] .cover-artist { text-shadow: 0 1px 2px rgba(0,0,0,.18); }
+.cover[data-bg="paper"] .cover-title, .cover[data-bg="paper"] .cover-artist, .cover[data-bg="rose"] .cover-title, .cover[data-bg="rose"] .cover-artist, .cover[data-bg="sunset"] .cover-title, .cover[data-bg="sunset"] .cover-artist, .cover[data-bg="sunburst"] .cover-title, .cover[data-bg="sunburst"] .cover-artist { text-shadow: none; }
+[data-font="display"],  .cover[data-font="display"]  .cover-title { font-family: var(--font-display); }
+[data-font="serif"],    .cover[data-font="serif"]    .cover-title { font-family: Georgia, "Times New Roman", serif; letter-spacing: -0.01em; }
+[data-font="mono"],     .cover[data-font="mono"]     .cover-title { font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace; letter-spacing: -0.04em; }
+[data-font="rounded"],  .cover[data-font="rounded"]  .cover-title { font-family: ui-rounded, "Nunito", "Segoe UI", system-ui, sans-serif; font-weight: 800; }
+[data-font="condensed"],.cover[data-font="condensed"].cover-title, .cover[data-font="condensed"] .cover-title { font-family: Impact, "Arial Narrow", "Haettenschweiler", sans-serif; text-transform: uppercase; letter-spacing: 0; font-weight: 400; }
+[data-font="script"],   .cover[data-font="script"]   .cover-title { font-family: "Brush Script MT", "Segoe Script", "Snell Roundhand", cursive; font-weight: 400; letter-spacing: 0; }
+[data-font="slab"],     .cover[data-font="slab"]     .cover-title { font-family: Rockwell, "Roboto Slab", "Courier New", serif; font-weight: 800; letter-spacing: -0.01em; }
+.cover[data-font] .cover-artist { font-family: inherit; }
+.cv-dlg { display: grid; grid-template-columns: 200px 1fr; gap: 20px; }
+.cv-preview { width: 200px; }
+.cv-pick { min-width: 0; }
+.cv-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-bottom: 14px; }
+.cv-swatch { padding: 2px; border-radius: 8px; border: 2px solid transparent; }
+.cv-swatch.on { border-color: var(--accent); }
+.cv-swatch .cover { border-radius: 5px; padding: 0; }
+.cv-fonts { display: flex; flex-wrap: wrap; gap: 6px; }
+.cv-font { padding: 8px 12px; border-radius: 10px; background: var(--surface-3); border: 2px solid transparent; font-size: 16px; }
+.cv-font.on { border-color: var(--accent); }
+@media (max-width: 560px) { .cv-dlg { grid-template-columns: 1fr; } .cv-preview { width: 160px; margin: 0 auto; } .cv-swatches { grid-template-columns: repeat(4, 1fr); } }

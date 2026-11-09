@@ -1,4 +1,4 @@
-﻿//! The nightly housekeeping: the scheduled security and safety jobs. Runs once shortly after start and then every 24 hours.
+//! The nightly housekeeping: the scheduled security and safety jobs. Runs once shortly after start and then every 24 hours.
 //!  - sign-ins that have expired are removed
 //!  - a dated backup of everything the server knows about people (accounts, playlists, history, settings) goes to
 //!    <data>/backups/YYYYMMDD, keeping the newest VH_BACKUP_KEEP days (default 7; 0 turns backups off).
@@ -43,7 +43,7 @@ pub fn backup(data: &Path, now: u64, keep: usize) -> Result<PathBuf, String> {
     let _ = std::fs::remove_dir_all(&dest); // today's backup is replaced, not stacked
     std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
     // sessions.json is left out on purpose: a backup shouldn't hold sign-ins
-    for f in ["users.json", "lidarr.json", "requests.json"] {
+    for f in ["users.json", "lidarr.json", "requests.json", "shares.json", "covers.json"] {
         let p = data.join(f);
         if p.exists() {
             std::fs::copy(&p, dest.join(f)).map_err(|e| e.to_string())?;

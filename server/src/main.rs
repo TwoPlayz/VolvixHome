@@ -95,6 +95,8 @@ struct AppState {
     transcoder: transcode::Transcoder,
     artists: artistinfo::Client,
     shares: shares::Shares,
+    /// custom look for albums without cover art: album id -> { bg, font } (shared by the household)
+    covers: Mutex<HashMap<String, Value>>,
     watch: watch::Watch,
     /// a change was noticed while a scan was already running: scan again when it ends
     rescan_pending: std::sync::atomic::AtomicBool,
@@ -547,6 +549,7 @@ async fn get_library(State(st): State<Shared>, headers: HeaderMap) -> Response {
         let lib = st.lib.read().unwrap();
         serde_json::to_string(&json!({
             "artists": lib.catalog.artists, "albums": lib.catalog.albums, "tracks": lib.catalog.tracks,
+            "covers": *st.covers.lock().unwrap(),
             "scanning": lib.scanning
         }))
         .unwrap_or_else(|_| "{}".into())
@@ -802,6 +805,33 @@ fn on_server(st: &AppState, title: Option<&str>, artist: &str) -> Option<String>
         }
         None => lib.catalog.artists.iter().find(|x| norm(&x.name) == a).map(|x| x.name.clone()),
     }
+}
+
+#[derive(Deserialize)]
+struct ArtLook {
+    bg: String,
+    font: String,
+}
+
+fn style_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 24 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Choose how an album without cover art looks (a background and a font). Everyone in the household sees it.
+async fn set_album_art(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(b): Json<ArtLook>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    if !style_id(&b.bg) || !style_id(&b.font) { return error(StatusCode::BAD_REQUEST, "Unknown style."); }
+    if !st.lib.read().unwrap().catalog.albums.iter().any(|a| a.id == id) { return error(StatusCode::NOT_FOUND, "No such album."); }
+    let snapshot = { let mut c = st.covers.lock().unwrap(); c.insert(id, json!({ "bg": b.bg, "font": b.font })); serde_json::to_string(&*c).unwrap_or_default() };
+    vault::write(&st.cfg.data_dir.join("covers.json"), &snapshot);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn reset_album_art(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    let snapshot = { let mut c = st.covers.lock().unwrap(); c.remove(&id); serde_json::to_string(&*c).unwrap_or_default() };
+    vault::write(&st.cfg.data_dir.join("covers.json"), &snapshot);
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// An artist from MusicBrainz and what they've released, each marked: already here, or already asked for.
@@ -1714,6 +1744,7 @@ async fn main() {
         transcoder: transcode::Transcoder::new(&cfg.data_dir),
         artists: artistinfo::Client::new(),
         shares: shares::Shares::load(&cfg.data_dir),
+        covers: Mutex::new(vault::read(&cfg.data_dir.join("covers.json")).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()),
         watch: watch_tx.0,
         rescan_pending: std::sync::atomic::AtomicBool::new(false),
         lib: RwLock::new(Library::default()),
@@ -1823,6 +1854,7 @@ async fn main() {
         .route("/api/artist/image/{slug}", get(artist_image))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))
         .route("/api/lidarr/search", get(lidarr_search))
+        .route("/api/album/{id}/art", axum::routing::put(set_album_art).delete(reset_album_art))
         .route("/api/discover/artist/{id}", get(discover_artist))
         .route("/api/discover/album/{id}", get(discover_album))
         .route("/api/lidarr/request", post(lidarr_request))

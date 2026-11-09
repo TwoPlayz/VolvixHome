@@ -200,7 +200,11 @@ window.Spin = window.Spin || {};
     if (!album) return '<div class="cover cover--empty ' + (extraClass || '') + '">' + S.icon('music', 22) + '</div>';
     const a = album.art || {};
     // generated art sits underneath, so there's never an empty square while the real cover loads (or if there is none)
-    return '<div class="cover cover--' + (a.variant || 'plain') + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '">' +
+    // no cover file: the album's name is printed on generated art (in the background and font someone chose, if they did)
+    const look = !album.cover && album.look ? album.look : null;
+    const text = !album.cover ? '<span class="cover-title">' + S.esc(album.title) + '</span><span class="cover-artist">' + S.esc(album.artist) + '</span>' : '';
+    return '<div class="cover cover--' + (look ? 'custom' : (a.variant || 'plain')) + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '"' +
+      (look ? ' data-bg="' + S.esc(look.bg) + '" data-font="' + S.esc(look.font) + '"' : '') + '>' + text +
       (album.cover && S.server ? '<img class="cover-img" src="' + S.server.coverUrl(album.id) + '" alt="" loading="lazy" decoding="async" onerror="this.remove()">' : '') +
       '</div>';
   };
