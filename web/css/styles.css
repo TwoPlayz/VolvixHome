@@ -2621,3 +2621,14 @@ html.player-empty .queue-panel { bottom: var(--gap); }
   .np-controls .ctrl, .np-tools .ctrl { width: 42px; height: 42px; }
   .np-play { width: 58px !important; height: 58px !important; }
 }
+
+/* manage a member */
+.mg { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.mg-who { display: flex; align-items: center; gap: 12px; }
+.mg-who div { display: flex; flex-direction: column; }
+.mg-who span { color: var(--text-2); font-size: 13px; }
+.mg-pass { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding-top: 4px; border-top: 1px solid var(--border); }
+.mg-pass .field { align-self: stretch; margin-top: 12px; }
+.mg-danger { border-top: 1px solid var(--border); padding-top: 12px; }
+.mg-remove { color: #e5484d; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }

@@ -10,7 +10,7 @@ and on phones.
 - **Real playback:** queue (drag to reorder), shuffle, repeat, seeking, and lock screen and media-key
   controls. You come back to where you left off.
 - **Household accounts:** sign in with just your name and a password (no username). The first person to
-  open a new server becomes the admin, and the admin adds everyone else (Account → People).
+  open a new server becomes the admin, and the admin adds everyone else (Account → Members). **Manage** on a member lets the admin turn explicit music off for them (marked-explicit songs stay listed but are skipped), make them an admin, set a new password, or remove them. Everyone can add a profile picture under Account → Profile.
 - **Household page:** see what everyone else is listening to right now (only if they share it; Settings →
   Privacy has a switch and a private session) and the playlists they've made public.
 - **Shared playlists:** make a playlist collaborative and pick who can edit it. They get an invite
@@ -119,7 +119,9 @@ VH_MUSIC_DIR=/path/to/music VH_DATA_DIR=./data VH_WEB_DIR=../web cargo run
 | `POST /api/login`, `POST /api/logout`, `GET /api/me` | sessions (cookie, or `Authorization: Bearer <token>`) |
 | `POST /api/me/password` | `{current, new}` |
 | `GET/PUT /api/me/data` | your app data (playlists, settings) |
-| `GET/POST /api/users`, `DELETE /api/users/{id}` | household (admin) |
+| `GET/POST /api/users`, `PUT/DELETE /api/users/{id}` | household (admin); PUT = `{hideExplicit, admin}` |
+| `POST /api/users/{id}/password` | admin sets someone's new password `{password}` |
+| `PUT/DELETE /api/me/avatar`, `GET /api/avatar/{id}` | profile picture (JPEG/PNG/WebP body, max 1 MB) |
 | ``GET /api/library``, ``POST /api/library/rescan`` | catalog; rescan (admin) |
 | ``GET /api/people``, ``GET /api/household`` | everyone in the household; what they're playing + their public playlists |
 | ``PUT /api/me/now`` | tell the household what you're playing (``{trackId, playing}``; no track = stop sharing) |

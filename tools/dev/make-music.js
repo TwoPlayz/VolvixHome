@@ -3,7 +3,7 @@ const fs = require('fs'), path = require('path');
 const root = process.argv[2];
 const lib = [
   ['Harbor Lights', 'Tidewater', 2025, ['Low Tide', 'Lantern Hours', 'Fog Signal', 'Ferry at Dawn'], 220],
-  ['Mara Quinn', 'Glass Houses', 2024, ['Glass Houses', 'Paper Crown', 'Weekend Ghost'], 330],
+  ['Mara Quinn', 'Glass Houses', 2024, ['Glass Houses', 'Paper Crown', 'Weekend Ghost (Explicit)'], 330],
   ['Juniper & Ash', 'Field Notes', 2019, ['Morning Field', 'Creek Song', 'Lanterns'], 262],
 ];
 function chunk(id, data) { const h = Buffer.alloc(8); h.write(id, 0, 'ascii'); h.writeUInt32LE(data.length, 4); const pad = data.length % 2 ? Buffer.alloc(1) : Buffer.alloc(0); return Buffer.concat([h, data, pad]); }

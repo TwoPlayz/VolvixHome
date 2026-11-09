@@ -44,7 +44,7 @@ Spin.views = Spin.views || {};
           host.innerHTML = S.emptyState('family', 'Just you so far', S.data.me.admin
             ? 'Add the people you share this server with under Account → People, and they show up here.'
             : 'When more people join this server, you\'ll see what they\'re listening to here.',
-            S.data.me.admin ? '<a class="btn btn-secondary" href="#/account/people">Add people</a>' : '');
+            S.data.me.admin ? '<a class="btn btn-secondary" href="#/account/members">Add members</a>' : '');
           return;
         }
         // listening now first, then most recently active

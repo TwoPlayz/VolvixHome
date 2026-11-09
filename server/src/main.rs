@@ -140,7 +140,8 @@ async fn status(State(st): State<Shared>) -> Response {
     let setup = st.accounts.lock().unwrap().needs_setup();
     Json(json!({
         "name": "Volvix Home", "version": VERSION, "setupNeeded": setup,
-        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len()
+        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len(),
+        "rescanMinutes": st.cfg.rescan_minutes
     }))
     .into_response()
 }
@@ -273,9 +274,115 @@ async fn remove_user(State(st): State<Shared>, headers: HeaderMap, Path(id): Pat
     match st.accounts.lock().unwrap().remove(&id) {
         Ok(()) => {
             let _ = std::fs::remove_file(user_data_path(&st, &id));
+            let _ = std::fs::remove_file(avatar_path(&st, &id));
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => error(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct UserEdit {
+    #[serde(default, rename = "hideExplicit")]
+    hide_explicit: Option<bool>,
+    #[serde(default)]
+    admin: Option<bool>,
+}
+
+/// An admin changes someone's settings: explicit songs on or off, admin or member.
+async fn edit_user(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<UserEdit>) -> Response {
+    if let Err(r) = admin(&st, &headers) {
+        return r;
+    }
+    let mut accounts = st.accounts.lock().unwrap();
+    if accounts.by_id(&id).is_none() {
+        return error(StatusCode::NOT_FOUND, "No such person.");
+    }
+    if let Some(on) = body.hide_explicit {
+        if let Err(e) = accounts.set_hide_explicit(&id, on) {
+            return error(StatusCode::BAD_REQUEST, &e);
+        }
+    }
+    if let Some(a) = body.admin {
+        if let Err(e) = accounts.set_admin(&id, a) {
+            return error(StatusCode::BAD_REQUEST, &e);
+        }
+    }
+    let user = accounts.by_id(&id).map(PublicUser::from);
+    Json(json!({ "user": user })).into_response()
+}
+
+#[derive(Deserialize)]
+struct NewPassword {
+    password: String,
+}
+
+/// An admin sets a new password for someone else. They're signed out everywhere and use the new one.
+async fn reset_password(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<NewPassword>) -> Response {
+    let me = match admin(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    if me.id == id {
+        return error(StatusCode::BAD_REQUEST, "Change your own password under Profile.");
+    }
+    match st.accounts.lock().unwrap().set_password(&id, &body.password) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => error(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+fn avatar_path(st: &AppState, id: &str) -> PathBuf {
+    st.cfg.data_dir.join("avatars").join(id)
+}
+
+/// Your profile picture. The app shrinks it to a small square first; anything over 1 MB is refused.
+async fn put_avatar(State(st): State<Shared>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let b = &body[..];
+    let is_image = b.starts_with(&[0xFF, 0xD8]) || b.starts_with(&[0x89, b'P', b'N', b'G']) || (b.starts_with(b"RIFF") && b.len() > 12 && &b[8..12] == b"WEBP");
+    if !is_image {
+        return error(StatusCode::BAD_REQUEST, "That isn't a picture (use a JPEG, PNG or WebP).");
+    }
+    if b.len() > 1_000_000 {
+        return error(StatusCode::PAYLOAD_TOO_LARGE, "That picture is too big.");
+    }
+    let path = avatar_path(&st, &user.id);
+    if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+    if std::fs::write(&path, b).is_err() {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't save the picture.");
+    }
+    let version = auth::now();
+    st.accounts.lock().unwrap().set_avatar(&user.id, version);
+    Json(json!({ "avatar": version })).into_response()
+}
+
+async fn delete_avatar(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let _ = std::fs::remove_file(avatar_path(&st, &user.id));
+    st.accounts.lock().unwrap().set_avatar(&user.id, 0);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn get_avatar(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return error(StatusCode::BAD_REQUEST, "Bad id.");
+    }
+    match std::fs::read(avatar_path(&st, &id)) {
+        Ok(b) => {
+            let kind = if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
+            ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")], b).into_response()
+        }
+        Err(_) => error(StatusCode::NOT_FOUND, "No picture."),
     }
 }
 
@@ -760,7 +867,7 @@ async fn people(State(st): State<Shared>, headers: HeaderMap) -> Response {
         return r;
     }
     let accounts = st.accounts.lock().unwrap();
-    let list: Vec<Value> = accounts.users.iter().map(|u| json!({ "id": u.id, "name": u.name, "admin": u.admin })).collect();
+    let list: Vec<Value> = accounts.users.iter().map(|u| json!({ "id": u.id, "name": u.name, "admin": u.admin, "avatar": u.avatar })).collect();
     Json(json!({ "people": list })).into_response()
 }
 
@@ -1207,7 +1314,10 @@ async fn main() {
         .route("/api/me/password", post(change_password))
         .route("/api/me/data", get(get_data).put(put_data))
         .route("/api/users", get(list_users).post(add_user))
-        .route("/api/users/{id}", delete(remove_user))
+        .route("/api/users/{id}", delete(remove_user).put(edit_user))
+        .route("/api/users/{id}/password", post(reset_password))
+        .route("/api/me/avatar", axum::routing::put(put_avatar).delete(delete_avatar))
+        .route("/api/avatar/{id}", get(get_avatar))
         .route("/api/library", get(get_library))
         .route("/api/library/rescan", post(rescan))
         .route("/api/library/folder", get(library_folder).put(set_library_folder))

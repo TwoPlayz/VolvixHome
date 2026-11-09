@@ -132,7 +132,7 @@ window.Spin.views = window.Spin.views || {};
       header: '<div class="menu-user">' + S.avatar(me, 40) + '<div><div class="menu-name">' + S.esc(me.name) + '</div><div class="menu-sub">' + (me.admin ? 'Admin' : 'Member') + '</div></div></div>',
       items: [
         { label: 'Account', icon: 'user', onClick: function () { S.router.go('/account/profile'); } },
-        me.admin ? { label: 'People', icon: 'family', onClick: function () { S.router.go('/account/people'); } } : null,
+        me.admin ? { label: 'Members', icon: 'family', onClick: function () { S.router.go('/account/members'); } } : null,
         { label: 'Settings', icon: 'settings', onClick: function () { S.router.go('/account/settings'); } },
         { sep: true },
         { label: 'Sign out', icon: 'logout', onClick: function () { S.server.logout(); } }
@@ -248,4 +248,18 @@ window.Spin.views = window.Spin.views || {};
   /* ---------- start ---------- */
   bindShell();
   S.router.start();
+
+  // the server rescans by itself (and when Lidarr imports): tell people when the library changed under them
+  (function () {
+    const known = Object.keys(S.data.tracks).length;
+    let told = known;
+    setInterval(function () {
+      if (document.hidden) return;
+      S.server.json('GET', '/api/status').then(function (s) {
+        if (s.scanning || s.tracks === told || s.tracks === undefined) return;
+        told = s.tracks;
+        S.linkToast('Your library changed: ' + s.albums + ' albums, ' + s.tracks + ' songs', 'Reload', null, function () { location.reload(); });
+      }).catch(function () {});
+    }, 60000);
+  })();
 })(window.Spin);

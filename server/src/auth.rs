@@ -19,6 +19,12 @@ pub struct User {
     pub hash: String,
     pub admin: bool,
     pub created: u64,
+    /// an admin turned explicit songs off for this person
+    #[serde(default)]
+    pub hide_explicit: bool,
+    /// profile picture version (seconds); 0 = none
+    #[serde(default)]
+    pub avatar: u64,
 }
 
 /// What the app gets to see about a user (never the hash).
@@ -28,11 +34,14 @@ pub struct PublicUser {
     pub username: String,
     pub name: String,
     pub admin: bool,
+    #[serde(rename = "hideExplicit")]
+    pub hide_explicit: bool,
+    pub avatar: u64,
 }
 
 impl From<&User> for PublicUser {
     fn from(u: &User) -> Self {
-        PublicUser { id: u.id.clone(), username: u.username.clone(), name: u.name.clone(), admin: u.admin }
+        PublicUser { id: u.id.clone(), username: u.username.clone(), name: u.name.clone(), admin: u.admin, hide_explicit: u.hide_explicit, avatar: u.avatar }
     }
 }
 
@@ -151,6 +160,8 @@ impl Accounts {
             hash: hash_password(password)?,
             admin,
             created: now(),
+            hide_explicit: false,
+            avatar: 0,
         };
         self.users.push(user.clone());
         self.save();
@@ -168,6 +179,30 @@ impl Accounts {
         self.sessions.retain(|_, s| s.user_id != user_id);
         self.save();
         Ok(())
+    }
+
+    pub fn set_hide_explicit(&mut self, user_id: &str, on: bool) -> Result<(), String> {
+        self.users.iter_mut().find(|u| u.id == user_id).ok_or("No such user")?.hide_explicit = on;
+        self.save();
+        Ok(())
+    }
+
+    pub fn set_admin(&mut self, user_id: &str, admin: bool) -> Result<(), String> {
+        let admins = self.users.iter().filter(|u| u.admin).count();
+        let user = self.users.iter_mut().find(|u| u.id == user_id).ok_or("No such user")?;
+        if user.admin && !admin && admins <= 1 {
+            return Err("Keep at least one admin.".into());
+        }
+        user.admin = admin;
+        self.save();
+        Ok(())
+    }
+
+    pub fn set_avatar(&mut self, user_id: &str, version: u64) {
+        if let Some(u) = self.users.iter_mut().find(|u| u.id == user_id) {
+            u.avatar = version;
+            self.save();
+        }
     }
 
     pub fn remove(&mut self, user_id: &str) -> Result<(), String> {

@@ -32,14 +32,17 @@ Spin.views = Spin.views || {};
   }
 
   const TABS = function () {
-    return [['profile', 'Profile', 'user']].concat(S.data.me.admin ? [['people', 'People', 'family']] : []).concat([['settings', 'Settings', 'settings']]);
+    return [['profile', 'Profile', 'user']].concat(S.data.me.admin ? [['members', 'Members', 'family']] : []).concat([['settings', 'Settings', 'settings']]);
   };
 
   /* ---------- Profile ---------- */
   function profileTab() {
     const me = S.data.me;
     return group('You',
-      row(S.avatar(me, 48) + '<span class="set-who"><span>' + S.esc(me.name) + '</span><em>' + (me.admin ? 'Admin' : 'Member') + '</em></span>', '', '')) +
+      row(S.avatar(me, 56) + '<span class="set-who"><span>' + S.esc(me.name) + '</span><em>' + (me.admin ? 'Admin' : 'Member') + '</em></span>', '',
+        '<input type="file" accept="image/*" data-pfp-file hidden>' +
+        '<button class="btn btn-secondary btn-sm" data-act="pfp-pick">' + S.icon('user', 14) + 'Change picture</button>' +
+        (me.avatar ? '<button class="btn btn-ghost btn-sm" data-act="pfp-remove">Remove</button>' : ''))) +
       group('Password',
         '<form class="set-form" data-form="password" novalidate>' +
           field('Current password', 'current', 'password') +
@@ -57,14 +60,15 @@ Spin.views = Spin.views || {};
       S.server.json('GET', '/api/users').then(function (r) { users = r.users; S.app.refresh(); }).catch(function (e) { S.toast(e.message, 'x'); });
       return group('Household', '<p class="set-hint">Loading…</p>');
     }
-    return group('People on this server',
+    return group('Members of this server',
       users.map(function (u) {
         const me = u.id === S.data.me.serverId;
-        return row(S.avatar({ id: u.id, name: u.name }, 36) + '<span class="set-who"><span>' + S.esc(u.name) + (me ? ' (you)' : '') + '</span><em>' + (u.admin ? 'Admin' : 'Member') + '</em></span>', '',
-          me ? '' : '<button class="btn btn-ghost btn-sm" data-remove-user="' + u.id + '" data-name="' + S.esc(u.name) + '">Remove</button>');
+        const notes = [u.admin ? 'Admin' : 'Member'].concat(u.hideExplicit ? ['Explicit off'] : []).join(' · ');
+        return row(S.avatar({ id: u.id, name: u.name }, 36) + '<span class="set-who"><span>' + S.esc(u.name) + (me ? ' (you)' : '') + '</span><em>' + notes + '</em></span>', '',
+          me ? '' : '<button class="btn btn-secondary btn-sm" data-manage-user="' + u.id + '">Manage</button>');
       }).join(''),
       { sub: 'Everyone shares the same music. Playlists, play history and settings are personal.' }) +
-      group('Add someone',
+      group('Add a member',
         '<form class="set-form" data-form="add-user" novalidate>' +
           field('Name', 'name', 'text', 'They sign in with this name.') +
           field('Password', 'password', 'password', 'At least 8 characters. They can change it under Account.') +
@@ -72,6 +76,85 @@ Spin.views = Spin.views || {};
           '<p class="auth-error" hidden></p>' +
           '<button class="btn btn-primary" type="submit">' + S.icon('plus', 16) + 'Add to household</button>' +
         '</form>');
+  }
+
+  /** Profile picture: crop to a centered square, shrink to 256px, send as a JPEG. */
+  function uploadPicture(file) {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = function () {
+      const side = Math.min(img.width, img.height), size = 256;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      c.toBlob(function (blob) {
+        fetch('/api/me/avatar', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
+          .then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.error || 'Couldn\'t save the picture.'); }); })
+          .then(function () { S.toast('Picture updated', 'check'); setTimeout(function () { location.reload(); }, 600); })
+          .catch(function (x) { S.toast(x.message, 'x'); });
+      }, 'image/jpeg', 0.88);
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); S.toast('Couldn\'t read that picture.', 'x'); };
+    img.src = url;
+  }
+
+  /** An admin's controls for one person: explicit songs, admin, a new password, remove. */
+  function manageDialog(id) {
+    const u = (users || []).find(function (x) { return x.id === id; });
+    if (!u) return;
+    const sw = function (name, title, text, on) {
+      return '<label class="switch-row"><span class="switch-text"><strong>' + title + '</strong><span>' + text + '</span></span>' +
+        '<span class="switch"><input type="checkbox" data-mg="' + name + '"' + (on ? ' checked' : '') + '><span class="switch-ui"></span></span></label>';
+    };
+    const m = S.modal({
+      title: 'Manage ' + u.name,
+      body: '<div class="mg">' +
+        '<div class="mg-who">' + S.avatar({ id: u.id, name: u.name }, 48) + '<div><strong>' + S.esc(u.name) + '</strong><span>' + (u.admin ? 'Admin' : 'Member') + '</span></div></div>' +
+        sw('hideExplicit', 'Turn off explicit music', 'Songs marked explicit stay listed but are skipped for them.', u.hideExplicit) +
+        sw('admin', 'Admin', 'Can add and manage members and change the library.', u.admin) +
+        '<form class="mg-pass" data-mg-pass novalidate><label class="field"><span class="label">New password</span>' +
+          '<input class="input" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters"></label>' +
+          '<p class="auth-error" hidden></p>' +
+          '<button class="btn btn-secondary" type="submit">Set new password</button>' +
+          '<span class="hint">They\'re signed out everywhere and use this password next time.</span></form>' +
+        '<div class="mg-danger"><button class="btn btn-ghost mg-remove" data-mg-remove>' + S.icon('x', 15) + 'Remove ' + S.esc(u.name) + '</button></div>' +
+      '</div>',
+      actions: [{ label: 'Done', kind: 'secondary' }]
+    });
+    const err = function (x) { S.toast(x.message || 'That didn\'t work', 'x'); };
+    m.el.addEventListener('change', function (e) {
+      const key = e.target.dataset && e.target.dataset.mg;
+      if (!key) return;
+      const body = {}; body[key] = e.target.checked;
+      S.server.json('PUT', '/api/users/' + id, body).then(function (r) {
+        Object.assign(u, r.user);
+        S.toast(key === 'hideExplicit' ? (e.target.checked ? 'Explicit music is off for ' + u.name : 'Explicit music is on for ' + u.name) : (e.target.checked ? u.name + ' is now an admin' : u.name + ' is now a member'), 'check');
+        S.app.refresh();
+      }).catch(function (x) { e.target.checked = !e.target.checked; err(x); });
+    });
+    m.el.addEventListener('submit', function (e) {
+      const form = e.target.closest('[data-mg-pass]');
+      if (!form) return;
+      e.preventDefault();
+      const box = form.querySelector('.auth-error'); box.hidden = true;
+      S.server.json('POST', '/api/users/' + id + '/password', { password: form.password.value }).then(function () {
+        form.reset(); S.toast('New password set for ' + u.name, 'check');
+      }).catch(function (x) { box.textContent = x.message; box.hidden = false; });
+    });
+    m.el.addEventListener('click', function (e) {
+      if (!e.target.closest('[data-mg-remove]')) return;
+      m.close && m.close();
+      S.modal({
+        title: 'Remove ' + u.name + '?',
+        body: '<p class="modal-text">They won\'t be able to sign in, and their playlists and history are deleted. The music stays.</p>',
+        actions: [{ label: 'Cancel' }, { label: 'Remove', kind: 'danger', onClick: function (close) {
+          S.server.json('DELETE', '/api/users/' + id).then(function () {
+            close(); users = null; S.toast(u.name + ' removed', 'check'); S.app.refresh();
+          }).catch(function (x) { close(); err(x); });
+        } }]
+      });
+    });
   }
 
   /* ---------- Lidarr (admin) ---------- */
@@ -107,7 +190,7 @@ Spin.views = Spin.views || {};
         '<div class="set-actions"><button class="btn btn-primary" type="submit">' + (lidarr.configured ? 'Save' : 'Connect') + '</button>' +
           (lidarr.configured ? '<button class="btn btn-ghost" type="button" data-act="lidarr-off">Disconnect</button>' : '') + '</div>' +
       '</form>' +
-      (lidarr.configured ? row('New music right away', 'In Lidarr → Settings → Connect, add a <strong>Webhook</strong> with this URL and turn on <em>On Release Import</em>. Otherwise new albums appear within ' + 15 + ' minutes.',
+      (lidarr.configured ? row('New music right away', 'In Lidarr → Settings → Connect, add a <strong>Webhook</strong> with this URL and turn on <em>On Release Import</em>. Otherwise new albums appear at the next automatic check.',
         '<button class="btn btn-secondary btn-sm" data-copy="' + S.esc(hook) + '">' + S.icon('copy', 14) + 'Copy URL</button>', { icon: 'download' }) +
         '<p class="hook-url"><code>' + S.esc(hook) + '</code></p>' : ''),
       { id: 'lidarr', sub: 'Get music you don\'t have yet.' });
@@ -174,9 +257,10 @@ Spin.views = Spin.views || {};
       group('Library',
         (S.data.me.admin ? row('Music folder', folder ? S.esc(folder.path) + (folder.exists ? '' : ' · folder not found') + (folder.isDefault ? '' : ' · custom') : '…',
           '<button class="btn btn-secondary btn-sm" data-act="pick-folder">Change</button>', { icon: 'library' }) : '') +
-        row('Music on this server', status ? status.albums + ' albums · ' + status.tracks + ' songs' + (status.scanning ? ' · looking for new music…' : '') : '…',
-          S.data.me.admin ? '<button class="btn btn-secondary btn-sm" data-act="rescan"' + (status && status.scanning ? ' disabled' : '') + '>Look for new music</button>' : '', { icon: 'library' }) +
-        row('New music', 'The server checks the music folder every 15 minutes. Reload to see what\'s new.', '<button class="btn btn-ghost btn-sm" data-act="reload">Reload</button>', { icon: 'download' }),
+        row('Music on this server', (status ? status.albums + ' albums · ' + status.tracks + ' songs' + (status.scanning ? ' · checking the folder…' : '') + '<br>' : '…') +
+          (status && status.rescanMinutes ? 'The server checks the folder by itself every ' + status.rescanMinutes + ' minutes' : 'Automatic checks are off') +
+          (lidarr && lidarr.configured ? ' and right after Lidarr imports something' : '') + '. New and removed files are both picked up, and you\'re told when to reload.',
+          S.data.me.admin ? '<button class="btn btn-secondary btn-sm" data-act="rescan"' + (status && status.scanning ? ' disabled' : '') + '>Check now</button>' : '', { icon: 'library' }),
         { id: 'library' }) +
       lidarrGroup() +
       group('About',
@@ -188,7 +272,8 @@ Spin.views = Spin.views || {};
   S.views.account = {
     render: function (root, params) {
       const tabs = TABS();
-      const tab = tabs.find(function (t) { return t[0] === params.tab; }) || tabs[0];
+      const want = params.tab === 'people' ? 'members' : params.tab; // the tab used to be called People
+      const tab = tabs.find(function (t) { return t[0] === want; }) || tabs[0];
       root.innerHTML =
         '<header class="page-head"><h1 class="page-title">' + (tab[0] === 'settings' ? 'Settings' : 'Account') + '</h1></header>' +
         '<div class="acct-layout">' +
@@ -196,10 +281,11 @@ Spin.views = Spin.views || {};
             return '<a class="acct-tab' + (t[0] === tab[0] ? ' active' : '') + '" href="#/account/' + t[0] + '"' + (t[0] === tab[0] ? ' aria-current="page"' : '') + '>' +
               S.icon(t[2], 18) + '<span>' + t[1] + '</span></a>';
           }).join('') + '</nav>' +
-          '<div class="acct-body">' + (tab[0] === 'people' ? householdTab() : tab[0] === 'settings' ? settingsTab() : profileTab()) + '</div>' +
+          '<div class="acct-body">' + (tab[0] === 'members' ? householdTab() : tab[0] === 'settings' ? settingsTab() : profileTab()) + '</div>' +
         '</div>';
 
       root.onchange = function (e) {
+        if (e.target.matches && e.target.matches('[data-pfp-file]')) { if (e.target.files && e.target.files[0]) uploadPicture(e.target.files[0]); return; }
         const key = e.target.dataset && e.target.dataset.setting;
         if (!key) return;
         S.store.update(function (s) { s.settings[key] = e.target.checked; });
@@ -213,6 +299,10 @@ Spin.views = Spin.views || {};
         const act = e.target.closest('[data-act]');
         if (act) {
           if (act.dataset.act === 'logout') S.server.logout();
+          else if (act.dataset.act === 'pfp-pick') { const fi = root.querySelector('[data-pfp-file]'); if (fi) fi.click(); }
+          else if (act.dataset.act === 'pfp-remove') {
+            fetch('/api/me/avatar', { method: 'DELETE', credentials: 'same-origin' }).then(function () { S.toast('Picture removed', 'check'); setTimeout(function () { location.reload(); }, 600); });
+          }
           else if (act.dataset.act === 'pick-folder') pickFolder();
           else if (act.dataset.act === 'switch-server') {
             // iPhone: tell the app; Windows: open the app's built-in connect page
@@ -245,18 +335,8 @@ Spin.views = Spin.views || {};
             .catch(function () { S.toast('Select the URL below and copy it', 'copy'); });
           return;
         }
-        const rm = e.target.closest('[data-remove-user]');
-        if (rm) {
-          S.modal({
-            title: 'Remove ' + rm.dataset.name + '?',
-            body: '<p class="modal-text">They won\'t be able to sign in, and their playlists and history are deleted. The music stays.</p>',
-            actions: [{ label: 'Cancel' }, { label: 'Remove', kind: 'danger', onClick: function (close) {
-              S.server.json('DELETE', '/api/users/' + rm.dataset.removeUser).then(function () {
-                close(); users = null; S.toast(rm.dataset.name + ' removed', 'check'); S.app.refresh();
-              }).catch(function (x) { close(); S.toast(x.message, 'x'); });
-            } }]
-          });
-        }
+        const mg = e.target.closest('[data-manage-user]');
+        if (mg) manageDialog(mg.dataset.manageUser);
       };
 
       root.onsubmit = function (e) {

@@ -24,7 +24,7 @@ window.Spin = window.Spin || {};
   /* ---------- catalog ---------- */
   const TRACKS = {};
   (VH.catalog.tracks || []).forEach(function (t) {
-    TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: false, credits: t.credits || [] };
+    TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: !!t.explicit, credits: t.credits || [] };
   });
   const ALBUMS = (VH.catalog.albums || []).map(function (a) {
     const q = a.quality || {};
@@ -42,10 +42,10 @@ window.Spin = window.Spin || {};
   const byId = {};
   ALBUMS.forEach(function (a) { byId[a.id] = a; });
 
-  const ME = { id: 'u_me', serverId: VH.user.id, name: VH.user.name, username: VH.user.username, admin: !!VH.user.admin, pfp: null };
+  const ME = { id: 'u_me', serverId: VH.user.id, name: VH.user.name, username: VH.user.username, admin: !!VH.user.admin, pfp: null, avatar: VH.user.avatar || 0, hideExplicit: !!VH.user.hideExplicit };
   // everyone in the household (server ids); you are also 'u_me' inside playlists and the UI
   const PEOPLE = {};
-  (VH.people || []).forEach(function (p) { PEOPLE[p.id] = { id: p.id, name: p.name, admin: !!p.admin }; });
+  (VH.people || []).forEach(function (p) { PEOPLE[p.id] = { id: p.id, name: p.name, admin: !!p.admin, avatar: p.avatar || 0 }; });
 
   S.data = {
     albums: ALBUMS,
@@ -89,8 +89,10 @@ window.Spin = window.Spin || {};
   S.lib = {
     status: function (id) { return byId[id] ? 'owned' : null; },
     info: function (id) { return byId[id] ? { status: 'owned' } : null; },
-    isTrackOwned: function (id) { return !!TRACKS[id]; },
-    isPlayable: function (id) { return !!TRACKS[id]; },
+    isTrackOwned: function (id) { return !!TRACKS[id] && !S.lib.isBlocked(id); },
+    isPlayable: function (id) { return !!TRACKS[id] && !S.lib.isBlocked(id); },
+    /** An admin turned explicit songs off for you: they stay listed but are skipped. */
+    isBlocked: function (id) { return !!ME.hideExplicit && !!TRACKS[id] && TRACKS[id].explicit; },
     ownedTrackCount: function (album) { return album.trackIds.length; },
     ownedAlbums: function () { return ALBUMS.slice(); },
     lockedAlbums: function () { return []; },

@@ -225,7 +225,8 @@ window.Spin = window.Spin || {};
     startIndex = startIndex === -1 ? (st.shuffle ? Math.floor(Math.random() * ids.length) : 0) : (startIndex || 0);
     if (!ids.some(owned)) {
       if (isOffline() && ids.some(S.lib.isTrackOwned)) S.toast('No internet connection, and none of these are downloaded.', 'wifiOff');
-      else S.toast('You don\'t own any of these songs yet', 'lock');
+      else if (ids.some(function (id) { return S.lib.isBlocked && S.lib.isBlocked(id); })) S.toast('Explicit songs are turned off for your account.', 'lock');
+      else S.toast('Those songs aren\'t in your library', 'lock');
       return;
     }
     let queue = ids.slice();
@@ -471,7 +472,7 @@ window.Spin = window.Spin || {};
         (upcoming ? '<span class="drag-sign q-sign" aria-hidden="true" title="Drag to reorder: grab the row anywhere">' + S.icon('grip', 16) + '</span>' : '') +
         '<span class="q-cover">' + S.cover(al) + '</span>' +
         '<span class="q-text"><span class="q-name">' + S.esc(tr.title) + '</span>' +
-        '<span class="q-sub">' + (ok ? '' : S.icon('lock', 11) + 'Will be skipped · ') + S.artistLink(tr.artist, { inert: true }) + '</span></span>' +
+        '<span class="q-sub">' + (ok ? '' : S.icon('lock', 11) + (S.lib.isBlocked(id) ? 'Explicit · skipped · ' : 'Will be skipped · ')) + S.artistLink(tr.artist, { inert: true }) + '</span></span>' +
         '<span class="q-dur">' + S.fmtTime(tr.duration) + '</span>' +
         (upcoming ? '<span class="q-remove" role="button" tabindex="0" data-q-remove="' + i + '" aria-label="Remove from queue" title="Remove from queue">' + S.icon('x', 15) + '</span>' : '') +
         '</button>';

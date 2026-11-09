@@ -116,6 +116,7 @@ pub struct Track {
     pub disc: u32,
     pub duration: u32,
     pub credits: Vec<Credit>,
+    pub explicit: bool,
 }
 
 /// What /api/library returns.
@@ -178,6 +179,31 @@ struct Scanned {
     label: Option<String>,
     copyright: Option<String>,
     catalog: Option<String>,
+    explicit: bool,
+}
+
+/// Marked explicit: the iTunes advisory tag (1 = explicit, 2 = clean), or "(Explicit)" in the title.
+fn is_explicit(tag: Option<&Tag>, title: &str) -> bool {
+    let advisory = tag.and_then(|t| t.get_string(&ItemKey::ParentalAdvisory)).map(|v| v.trim().to_lowercase());
+    match advisory.as_deref() {
+        Some("1") | Some("explicit") | Some("yes") | Some("true") => return true,
+        Some(_) => return false, // clean / none: the tag wins over the title
+        None => {}
+    }
+    let t = title.to_lowercase();
+    t.contains("(explicit)") || t.contains("[explicit]")
+}
+
+#[cfg(test)]
+mod explicit_tests {
+    use super::*;
+
+    #[test]
+    fn title_marker_means_explicit() {
+        assert!(is_explicit(None, "Song (Explicit)"));
+        assert!(is_explicit(None, "Song [explicit]"));
+        assert!(!is_explicit(None, "Plain song"));
+    }
 }
 
 fn clean(s: Option<String>) -> Option<String> {
@@ -233,6 +259,7 @@ fn read_file(path: &Path, root: &Path) -> Option<Scanned> {
     let label = tag.and_then(|t| joined(t, &ItemKey::Label));
     let copyright = tag.and_then(|t| joined(t, &ItemKey::CopyrightMessage));
     let catalog = tag.and_then(|t| joined(t, &ItemKey::CatalogNumber));
+    let explicit = is_explicit(tag, &title);
 
     let (duration, bits, khz, kbps) = match &props {
         Some(p) => (
@@ -269,6 +296,7 @@ fn read_file(path: &Path, root: &Path) -> Option<Scanned> {
         label,
         copyright,
         catalog,
+        explicit,
     })
 }
 
@@ -362,6 +390,7 @@ pub fn scan(root: &Path) -> Library {
             disc: s.disc,
             duration: s.duration,
             credits: s.credits,
+            explicit: s.explicit,
         });
     }
 

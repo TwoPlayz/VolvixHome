@@ -228,11 +228,20 @@ window.Spin = window.Spin || {};
   };
 
   const AVATAR_COLORS = ['#5E548E', '#335C67', '#9E2A2B', '#BC6C25', '#3D5A80', '#6B4F3A', '#4A6C2F', '#7A4069'];
+  /** Someone's uploaded picture, if they have one (me, or a household member by server id). */
+  function pfpFor(user) {
+    const D = S.data;
+    if (!D || !D.me) return null;
+    const id = user.id === 'u_me' ? D.me.serverId : user.id;
+    const v = id === D.me.serverId ? D.me.avatar : (D.people[id] || {}).avatar;
+    return v ? '/api/avatar/' + encodeURIComponent(id) + '?v=' + v : null;
+  }
   S.avatar = function (user, size) {
     size = size || 32;
     if (!user) return '';
     const style = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.4) + 'px';
-    if (user.pfp) return '<span class="avatar" style="' + style + '"><img src="' + S.esc(user.pfp) + '" alt=""></span>';
+    const pic = user.pfp || pfpFor(user);
+    if (pic) return '<span class="avatar" style="' + style + '"><img src="' + S.esc(pic) + '" alt=""></span>';
     let hash = 0;
     for (const ch of user.id || user.name || '') hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
     const initials = (user.name || '?').split(/\s+/).map(function (p) { return p[0]; }).slice(0, 2).join('').toUpperCase();
