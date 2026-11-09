@@ -1,4 +1,4 @@
-﻿// Adds a release to the iPhone app's update feed (apps/ios/source.json), the "source" AltStore and SideStore follow.
+// Adds a release to the iPhone app's update feed (apps/ios/source.json), the "source" AltStore and SideStore follow.
 //   node tools/make-source.js <tag> <ipaBytes> <owner/repo> [releaseNotes]
 // Run by .github/workflows/release.yml after the IPA is attached to the release.
 const fs = require('fs'), path = require('path');
@@ -8,7 +8,7 @@ const file = path.join(__dirname, '..', 'apps', 'ios', 'source.json');
 const [owner] = repo.split('/');
 const raw = (p) => `https://raw.githubusercontent.com/${repo}/main/${p}`;
 const version = tag.replace(/^v/, '');
-const feed = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+const feed = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) : {};
 const app = (feed.apps && feed.apps[0]) || {};
 const entry = {
   version, buildVersion: process.env.GITHUB_RUN_NUMBER || '1', date: new Date().toISOString().slice(0, 10),
