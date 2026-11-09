@@ -2769,3 +2769,21 @@ body.reordering { cursor: grabbing; user-select: none; }
 .share-link .input { flex: 1; min-width: 200px; }
 .share-link .set-hint { flex-basis: 100%; margin: 0; }
 .share-dlg .seg-ctl { margin-top: 12px; }
+
+/* equalizer graph */
+.eq-graph { width: 100%; touch-action: none; user-select: none; }
+.eq-graph svg { width: 100%; height: auto; display: block; overflow: visible; }
+.eq-panel[data-off] .eq-graph { pointer-events: none; }
+.eq-grid { stroke: var(--border); stroke-width: 1; }
+.eq-grid.v { stroke-dasharray: 2 5; opacity: .6; }
+.eq-grid.zero { stroke: var(--border-strong); }
+.eq-axis { fill: var(--text-3); font-size: 11px; }
+.eq-fill { fill: var(--accent); opacity: .16; }
+.eq-line { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.eq-pt { fill: var(--text); stroke: var(--accent); stroke-width: 3; cursor: grab; }
+.eq-pt:hover { r: 11; }
+.eq-pt:focus-visible { outline: none; stroke: var(--text); stroke-width: 4; r: 11; }
+.eq-tip rect { fill: var(--surface-3); stroke: var(--border-strong); }
+.eq-tip text { fill: var(--text); font-size: 12px; font-weight: 600; }
+.fb-type { display: flex; gap: 8px; margin: 0 0 10px; }
+.fb-type .input { flex: 1; min-width: 0; }

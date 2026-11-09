@@ -246,11 +246,14 @@ Spin.views = Spin.views || {};
     const n = function (p) { return String(p || '').split('\\').join('/').replace(/\/+$/, '').toLowerCase(); };
     return n(a) === n(b);
   }
-  /** Wait for the server to finish scanning, then reload so the new music shows. */
-  function reloadWhenScanned() {
+  /** Wait for the server to finish scanning, then bring the new library in (no reload: the page just updates). */
+  function syncWhenScanned() {
     const poll = setInterval(function () {
       S.server.json('GET', '/api/status').then(function (s) {
-        if (!s.scanning) { clearInterval(poll); S.toast(s.albums + ' albums found', 'check'); setTimeout(function () { location.reload(); }, 900); }
+        if (s.scanning) return;
+        clearInterval(poll);
+        status = s;
+        S.data.sync().then(function (c) { S.toast('Library updated: ' + c.albums + ' albums, ' + c.tracks + ' songs', 'check'); S.app.refresh(); }).catch(function () { S.toast('Couldn\'t load the new library', 'x'); });
       }).catch(function () {});
     }, 1200);
   }
@@ -259,12 +262,14 @@ Spin.views = Spin.views || {};
     let current = '';
     const m = S.modal({
       title: 'Choose your music folder',
-      body: '<p class="modal-text">Pick the folder that holds your music (the one Lidarr saves to). Volvix looks inside it, including subfolders.</p><div class="fb" data-fb><p class="set-hint">Loading…</p></div>',
+      body: '<p class="modal-text">Pick the folder that holds your music (the one Lidarr saves to), or type its path. Volvix looks inside it, including subfolders.</p>' +
+        '<form class="fb-type" data-fb-type><input class="input" name="p" placeholder="/path/to/music" autocomplete="off" spellcheck="false" aria-label="Folder path"><button class="btn btn-secondary btn-sm" type="submit">Go</button></form>' +
+        '<div class="fb" data-fb><p class="set-hint">Loading…</p></div>',
       actions: [
         { label: 'Cancel' },
         { label: 'Use this folder', kind: 'primary', onClick: function (close) {
           S.server.json('PUT', '/api/library/folder', { path: current }).then(function (r) {
-            close(); folder = null; S.toast('Using ' + r.path, 'check'); S.app.refresh(); reloadWhenScanned();
+            close(); folder = null; S.toast('Using ' + r.path, 'check'); S.app.refresh(); syncWhenScanned();
           }).catch(function (x) { S.toast(x.message, 'x'); });
         } }
       ]
@@ -273,7 +278,10 @@ Spin.views = Spin.views || {};
     function show(path) {
       S.server.json('GET', '/api/library/browse' + (path ? '?path=' + encodeURIComponent(path) : '')).then(function (r) {
         current = r.path;
+        const inp = m.el.querySelector('[data-fb-type] input'); if (inp) inp.value = r.path;
         host().innerHTML =
+          (r.missing ? '<p class="auth-error">That folder doesn\'t exist on the server, so this is the closest one that does.</p>' : '') +
+          (r.docker ? '<p class="set-hint">Volvix is running in Docker, so it only sees folders you mounted into the container. To see more, add a volume in your stack (for example <code>/mnt/pool/data/media:/media:ro</code>) and pick it here (<code>/media</code>).</p>' : '') +
           '<div class="fb-path">' + S.icon('library', 15) + '<span>' + S.esc(r.path) + '</span></div>' +
           '<div class="fb-note">' + (r.songsHere ? S.icon('check', 14) + r.songsHere + ' song' + (r.songsHere === 1 ? '' : 's') + ' directly in this folder' : 'No songs directly in this folder (subfolders count too)') + '</div>' +
           '<div class="fb-list">' + (r.parent ? '<button class="fb-row" data-dir="' + S.esc(r.parent) + '">' + S.icon('arrowUp', 15) + '<span>Up one level</span></button>' : '') +
@@ -282,6 +290,7 @@ Spin.views = Spin.views || {};
       }).catch(function (x) { host().innerHTML = '<p class="auth-error">' + S.esc(x.message) + '</p>'; });
     }
     m.el.addEventListener('click', function (e) { const b = e.target.closest('[data-dir]'); if (b) show(b.dataset.dir); });
+    m.el.addEventListener('submit', function (e) { const f = e.target.closest('[data-fb-type]'); if (!f) return; e.preventDefault(); show(f.p.value.trim()); });
     show('');
   }
 
@@ -312,25 +321,112 @@ Spin.views = Spin.views || {};
   }
 
   /* ---------- equalizer ---------- */
-  function eqGroup(st) {
+  // The equalizer is a graph: drag a dot up or down to boost or cut that part of the sound (32 Hz bass on the left, 16 kHz treble on the right).
+  const G = { w: 640, h: 260, x0: 46, x1: 628, top: 16, bot: 230 };
+  const gx = function (i) { return G.x0 + (G.x1 - G.x0) * (i + 0.5) / 10; };
+  const gy = function (db) { return (G.top + G.bot) / 2 - db * ((G.bot - G.top) / 2 / 12); };
+  function curve(gains) {
+    const p = gains.map(function (g, i) { return [gx(i), gy(g)]; });
+    let d = 'M' + G.x0 + ' ' + p[0][1].toFixed(1) + ' L' + p[0][0].toFixed(1) + ' ' + p[0][1].toFixed(1);
+    for (let i = 0; i < p.length - 1; i++) {
+      const p0 = p[i - 1] || p[i], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2] || p2;
+      d += ' C' + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1) + ' ' + (p1[1] + (p2[1] - p0[1]) / 6).toFixed(1) + ',' +
+        (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1) + ' ' + (p2[1] - (p3[1] - p1[1]) / 6).toFixed(1) + ',' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+    }
+    return d + ' L' + G.x1 + ' ' + p[p.length - 1][1].toFixed(1);
+  }
+  const fillOf = function (gains) { return curve(gains) + ' L' + G.x1 + ' ' + gy(0) + ' L' + G.x0 + ' ' + gy(0) + ' Z'; };
+  const hz = function (f) { return f >= 1000 ? (f / 1000) + 'k' : String(f); };
+  const sgn = function (v) { return (v > 0 ? '+' : '') + v; };
+
+  /** The whole equalizer: switch, presets, the graph, preamp. It lives inside Playback with crossfade and leveling. */
+  function eqPanel(st) {
     const eq = st.settings.eq || { on: false, preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     const P = S.fx.PRESETS, B = S.fx.BANDS;
-    const label = function (f) { return f >= 1000 ? (f / 1000) + 'k' : String(f); };
-    const bands = B.map(function (f, i) {
-      return '<label class="eq-band"><span class="eq-db" data-eq-db="' + i + '">' + (eq.gains[i] > 0 ? '+' : '') + eq.gains[i] + '</span>' +
-        '<input type="range" class="eq-slider" min="-12" max="12" step="1" value="' + eq.gains[i] + '" data-eq-band="' + i + '" aria-label="' + label(f) + ' Hz"' + (eq.on ? '' : ' disabled') + '>' +
-        '<span class="eq-hz">' + label(f) + '</span></label>';
+    const grid = [-12, -6, 0, 6, 12].map(function (d) {
+      return '<line class="eq-grid' + (d === 0 ? ' zero' : '') + '" x1="' + G.x0 + '" x2="' + G.x1 + '" y1="' + gy(d) + '" y2="' + gy(d) + '"/><text class="eq-axis" x="' + (G.x0 - 8) + '" y="' + (gy(d) + 4) + '" text-anchor="end">' + sgn(d) + '</text>';
     }).join('');
-    return group('Equalizer',
-      row('Equalizer', S.fx.available() ? 'Shape the sound with ten bands. It works on this device while it plays (not when casting to a TV).' : 'This browser can\'t process sound.', toggle('eqOn', !!eq.on), { icon: 'settings' }) +
+    const cols = B.map(function (f, i) {
+      return '<line class="eq-grid v" x1="' + gx(i) + '" x2="' + gx(i) + '" y1="' + G.top + '" y2="' + G.bot + '"/><text class="eq-axis" x="' + gx(i) + '" y="' + (G.bot + 22) + '" text-anchor="middle">' + hz(f) + '</text>';
+    }).join('');
+    const pts = eq.gains.map(function (g, i) {
+      return '<circle class="eq-pt" data-pt="' + i + '" cx="' + gx(i) + '" cy="' + gy(g).toFixed(1) + '" r="9" tabindex="' + (eq.on ? 0 : -1) + '" role="slider" aria-label="' + hz(B[i]) + ' Hz" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="' + g + '" aria-valuetext="' + sgn(g) + ' dB"/>';
+    }).join('');
+    return row('Equalizer', S.fx.available() ? 'Shape the sound: drag the dots up to boost and down to cut. It works on this device while it plays (not when casting to a TV).' : 'This browser can\'t process sound.', toggle('eqOn', !!eq.on), { icon: 'settings' }) +
       '<div class="eq-panel"' + (eq.on ? '' : ' data-off') + '>' +
         '<div class="eq-top"><label class="eq-pick"><span>Preset</span><select class="input" data-eq-preset' + (eq.on ? '' : ' disabled') + '>' +
           Object.keys(P).map(function (k) { return '<option value="' + k + '"' + (eq.preset === k ? ' selected' : '') + '>' + S.esc(P[k].label) + '</option>'; }).join('') +
           '<option value="custom"' + (eq.preset === 'custom' ? ' selected' : '') + '>Custom</option></select></label>' +
-          '<label class="eq-pick"><span>Preamp <b data-eq-prev>' + (eq.pre > 0 ? '+' : '') + eq.pre + ' dB</b></span><input type="range" min="-12" max="6" step="1" value="' + eq.pre + '" data-eq-pre' + (eq.on ? '' : ' disabled') + '></label>' +
+          '<label class="eq-pick"><span>Preamp <b data-eq-prev>' + sgn(eq.pre) + ' dB</b></span><input type="range" min="-12" max="6" step="1" value="' + eq.pre + '" data-eq-pre' + (eq.on ? '' : ' disabled') + '></label>' +
           '<button class="btn btn-ghost btn-sm" data-act="eq-reset"' + (eq.on ? '' : ' disabled') + '>Reset</button></div>' +
-        '<div class="eq-bands">' + bands + '</div>' +
-      '</div>', { id: 'equalizer' });
+        '<div class="eq-graph"><svg viewBox="0 0 ' + G.w + ' ' + G.h + '" role="group" aria-label="Equalizer graph" data-eq-svg>' + grid + cols +
+          '<path class="eq-fill" d="' + fillOf(eq.gains) + '"/><path class="eq-line" d="' + curve(eq.gains) + '"/>' + pts +
+          '<g class="eq-tip" data-eq-tip hidden><rect rx="6" width="92" height="24" x="-46" y="-40"/><text text-anchor="middle" y="-24"></text></g></svg></div>' +
+      '</div>';
+  }
+  /** Redraw the curve and dots while dragging (no re-render of the page). */
+  function eqPaint(svg, gains, active) {
+    svg.querySelector('.eq-line').setAttribute('d', curve(gains));
+    svg.querySelector('.eq-fill').setAttribute('d', fillOf(gains));
+    svg.querySelectorAll('.eq-pt').forEach(function (c, i) {
+      c.setAttribute('cy', gy(gains[i]).toFixed(1)); c.setAttribute('aria-valuenow', gains[i]); c.setAttribute('aria-valuetext', sgn(gains[i]) + ' dB');
+    });
+    const tip = svg.querySelector('[data-eq-tip]');
+    if (active == null) { tip.hidden = true; return; }
+    tip.hidden = false;
+    const x = Math.max(G.x0 + 46, Math.min(G.x1 - 46, gx(active)));
+    tip.setAttribute('transform', 'translate(' + x + ',' + gy(gains[active]).toFixed(1) + ')');
+    tip.querySelector('text').textContent = sgn(gains[active]) + ' dB · ' + hz(S.fx.BANDS[active]) + ' Hz';
+  }
+  /** Dragging and keys on the graph. Safe to call after every render. */
+  function bindEq(root) {
+    const svg = root.querySelector('[data-eq-svg]');
+    if (!svg) return;
+    const on = function () { return !!(S.store.state.settings.eq && S.store.state.settings.eq.on); };
+    const gains = function () { return (S.store.state.settings.eq.gains || []).slice(); };
+    const at = function (e) {
+      const r = svg.getBoundingClientRect();
+      const sx = (e.clientX - r.left) * (G.w / r.width), sy = (e.clientY - r.top) * (G.h / r.height);
+      const i = Math.max(0, Math.min(9, Math.round((sx - G.x0) / (G.x1 - G.x0) * 10 - 0.5)));
+      const db = Math.max(-12, Math.min(12, Math.round(((G.top + G.bot) / 2 - sy) / ((G.bot - G.top) / 2 / 12) * 2) / 2));
+      return { i: i, db: db };
+    };
+    const set = function (g, active, persist) {
+      eqSet({ gains: g, preset: 'custom' }, persist);
+      const sel = root.querySelector('[data-eq-preset]'); if (sel) sel.value = 'custom';
+      eqPaint(svg, g, active);
+    };
+    let drag = null;
+    svg.addEventListener('pointerdown', function (e) {
+      if (!on()) return;
+      e.preventDefault();
+      const p = at(e); drag = p.i;
+      try { svg.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      const g = gains(); g[p.i] = p.db; set(g, p.i, false);
+    });
+    svg.addEventListener('pointermove', function (e) {
+      if (drag == null) return;
+      const g = gains(); g[drag] = at(e).db; set(g, drag, false);
+    });
+    const end = function () { if (drag == null) return; drag = null; eqSet({}, true); eqPaint(svg, gains(), null); };
+    svg.addEventListener('pointerup', end); svg.addEventListener('pointercancel', end);
+    svg.addEventListener('dblclick', function (e) {
+      if (!on()) return;
+      const i = at(e).i, g = gains(); g[i] = 0; set(g, i, true); eqPaint(svg, g, null);
+    });
+    svg.addEventListener('keydown', function (e) {
+      const pt = e.target.closest && e.target.closest('[data-pt]');
+      if (!pt || !on()) return;
+      const i = Number(pt.dataset.pt), g = gains();
+      const step = e.shiftKey ? 3 : 1;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowRight') g[i] = Math.min(12, g[i] + step);
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') g[i] = Math.max(-12, g[i] - step);
+      else if (e.key === 'Home' || e.key === 'Delete') g[i] = 0;
+      else return;
+      e.preventDefault();
+      set(g, i, true); pt.focus();
+    });
+    svg.addEventListener('focusout', function () { if (drag == null) eqPaint(svg, gains(), null); });
   }
   /** Save the EQ the person set, apply it to the playing sound, and keep the panel in step. */
   function eqSet(patch, persist) {
@@ -373,11 +469,11 @@ Spin.views = Spin.views || {};
         row('Volume leveling', 'Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren\'t changed.',
           seg('leveling', st.settings.leveling || 'off', [['off', 'Off'], ['track', 'Song'], ['album', 'Album']]), { icon: 'volume' }) +
         row('Sleep timer', sleepText(), seg('sleep', sleepValue(), [['0', 'Off'], ['15', '15 min'], ['30', '30 min'], ['60', '1 hour'], ['song', 'End of song']]), { icon: 'moon' }) +
-        row('Resume where I left off', 'Reopening Volvix shows the last song and spot, paused.', toggle('resumeLast', st.settings.resumeLast !== false), { icon: 'history' }),
+        row('Resume where I left off', 'Reopening Volvix shows the last song and spot, paused.', toggle('resumeLast', st.settings.resumeLast !== false), { icon: 'history' }) +
+        eqPanel(st),
         { id: 'playback' }) +
       nativeGroup() +
       shareGroup() +
-      eqGroup(st) +
       group('Downloads',
         row('Only play downloads', 'Use only the songs saved on this device. Everything else is greyed out and skipped. This also happens by itself when you lose your connection.',
           toggle('offlineOnly', !!st.settings.offlineOnly), { icon: 'wifiOff' }) +
@@ -415,7 +511,8 @@ Spin.views = Spin.views || {};
         '</div>';
 
       if (!window.__vhNativeHook) { window.__vhNativeHook = true; window.addEventListener('vh-native-update', function () { if (/\/account\/settings/.test(location.hash)) S.app.refresh(); }); }
-      // the equalizer sliders move the sound while you drag; letting go saves
+      bindEq(root);
+      // the preamp slider moves the sound while you drag; letting go saves
       root.oninput = function (e) {
         const t = e.target;
         if (t.dataset.eqBand !== undefined) {
@@ -502,16 +599,10 @@ Spin.views = Spin.views || {};
           else if (act.dataset.act === 'reload') location.reload();
           else if (act.dataset.act === 'rescan') {
             S.server.json('POST', '/api/library/rescan').then(function () {
-              S.toast('Looking for new music…', 'library');
+              S.toast('Checking the music folder…', 'library');
               if (status) status.scanning = true;
               S.app.refresh();
-              // check back until the scan is done
-              const poll = setInterval(function () {
-                S.server.json('GET', '/api/status').then(function (s) {
-                  status = s;
-                  if (!s.scanning) { clearInterval(poll); S.linkToast('Library updated: ' + s.albums + ' albums', 'Reload', '/home'); setTimeout(function () { location.reload(); }, 1500); }
-                });
-              }, 1500);
+              syncWhenScanned(); // updates the page in place when the check is done
             }).catch(function (x) { S.toast(x.message, 'x'); });
           }
           return;

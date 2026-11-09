@@ -289,6 +289,7 @@ window.Spin = window.Spin || {};
   /* ---------- credits ---------- */
   // everyone credited on a song in the library (by file tags), lower-cased -> display name
   let creditIdx = null;
+  S.creditIndexReset = function () { creditIdx = null; };
   function creditIndex() {
     if (creditIdx) return creditIdx;
     creditIdx = {};

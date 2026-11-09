@@ -1590,6 +1590,7 @@ async fn browse_folders(State(st): State<Shared>, headers: HeaderMap, Query(q): 
     }
     let mut dir = q.get("path").map(|p| PathBuf::from(p.trim())).filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| st.music_dir.read().unwrap().clone());
+    let missing = !dir.is_dir(); // typed a folder that isn't there: we show the closest one that is
     // a path that no longer exists falls back to the nearest folder above it
     while !dir.is_dir() {
         match dir.parent() {
@@ -1607,7 +1608,10 @@ async fn browse_folders(State(st): State<Shared>, headers: HeaderMap, Query(q): 
         "path": dir.display().to_string(),
         "parent": dir.parent().filter(|p| *p != dir.as_path()).map(|p| p.display().to_string()),
         "dirs": dirs.iter().map(|(n, p)| json!({ "name": n, "path": p })).collect::<Vec<_>>(),
-        "songsHere": count_audio_here(&dir)
+        "songsHere": count_audio_here(&dir),
+        "missing": missing,
+        // in Docker only the folders you mounted into the container exist
+        "docker": std::path::Path::new("/.dockerenv").exists()
     })).into_response()
 }
 

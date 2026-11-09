@@ -277,7 +277,12 @@ window.Spin.views = window.Spin.views || {};
       S.server.json('GET', '/api/status').then(function (s) {
         if (s.scanning || s.tracks === told || s.tracks === undefined) return;
         told = s.tracks;
-        S.linkToast('Your library changed: ' + s.albums + ' albums, ' + s.tracks + ' songs', 'Reload', null, function () { location.reload(); });
+        // the server noticed new or removed music: bring it in quietly (no reload, no button)
+        S.data.sync().then(function (c) {
+          S.toast('Library updated: ' + c.albums + ' albums, ' + c.tracks + ' songs', 'library');
+          const a = document.activeElement, typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+          if (!typing && !document.body.classList.contains('reordering') && !document.querySelector('.modal-scrim')) S.app.refresh();
+        }).catch(function () {});
       }).catch(function () {});
     }, 20000);
   })();

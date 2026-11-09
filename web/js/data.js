@@ -23,25 +23,33 @@ window.Spin = window.Spin || {};
 
   /* ---------- catalog ---------- */
   const TRACKS = {};
-  (VH.catalog.tracks || []).forEach(function (t) {
-    TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: !!t.explicit, replayGain: t.replayGain || null, credits: t.credits || [] };
-  });
-  const ALBUMS = (VH.catalog.albums || []).map(function (a) {
-    const q = a.quality || {};
-    return {
-      id: a.id, title: a.title, artist: a.artist, year: a.year || null, genre: a.genre || null,
-      label: a.label || null, copyright: a.copyright || null, catalogNumber: a.catalogNumber || null,
-      trackIds: (a.trackIds || []).filter(function (id) { return TRACKS[id]; }),
-      cover: !!a.cover, added: a.added || 0, art: artFor(a.id),
-      format: 'digital',
-      // e.g. "24/96" for the quality badge; lossy files report their bitrate instead
-      maxQuality: q.lossless && q.bits ? q.bits + '/' + (q.khz || 44.1) : null,
-      quality: q
-    };
-  });
+  const ALBUMS = [];
   const byId = {};
-  ALBUMS.forEach(function (a) { byId[a.id] = a; });
-
+  /** Fill the catalog from the server's list. Used at start and again (in place, no reload) when the library changes. */
+  function buildCatalog(cat) {
+    Object.keys(TRACKS).forEach(function (k) { delete TRACKS[k]; });
+    (cat.tracks || []).forEach(function (t) {
+      TRACKS[t.id] = { id: t.id, title: t.title, artist: t.artist, albumId: t.albumId, no: t.no || 0, disc: t.disc || 1, duration: t.duration || 0, explicit: !!t.explicit, replayGain: t.replayGain || null, credits: t.credits || [] };
+    });
+    ALBUMS.length = 0;
+    (cat.albums || []).forEach(function (a) {
+      const q = a.quality || {};
+      ALBUMS.push({
+        id: a.id, title: a.title, artist: a.artist, year: a.year || null, genre: a.genre || null,
+        label: a.label || null, copyright: a.copyright || null, catalogNumber: a.catalogNumber || null,
+        trackIds: (a.trackIds || []).filter(function (id) { return TRACKS[id]; }),
+        cover: !!a.cover, added: a.added || 0, art: artFor(a.id),
+        format: 'digital',
+        // e.g. "24/96" for the quality badge; lossy files report their bitrate instead
+        maxQuality: q.lossless && q.bits ? q.bits + '/' + (q.khz || 44.1) : null,
+        quality: q
+      });
+    });
+    Object.keys(byId).forEach(function (k) { delete byId[k]; });
+    ALBUMS.forEach(function (a) { byId[a.id] = a; });
+    if (S.data) S.data.artists = (cat.artists || []).map(function (r) { return r.name; });
+  }
+  buildCatalog(VH.catalog);
   const ME = { id: 'u_me', serverId: VH.user.id, name: VH.user.name, username: VH.user.username, admin: !!VH.user.admin, perms: VH.user.perms || [], pfp: null, avatar: VH.user.avatar || 0, hideExplicit: !!VH.user.hideExplicit };
   // everyone in the household (server ids); you are also 'u_me' inside playlists and the UI
   const PEOPLE = {};
@@ -70,6 +78,14 @@ window.Spin = window.Spin || {};
     appearsOn: function (artist) {
       const n = artist.toLowerCase();
       return ALBUMS.filter(function (a) { return a.artist.toLowerCase() !== n && a.trackIds.some(function (id) { return TRACKS[id].artist.toLowerCase() === n; }); });
+    },
+    /** Fetch the library again and swap it in without reloading the page. Resolves with { albums, tracks }. */
+    sync: function () {
+      return fetch('/api/library', { credentials: 'same-origin' }).then(function (r) { if (!r.ok) throw new Error('library'); return r.json(); }).then(function (cat) {
+        buildCatalog(cat);
+        if (S.creditIndexReset) S.creditIndexReset();
+        return { albums: ALBUMS.length, tracks: Object.keys(TRACKS).length };
+      });
     },
     FORMATS: { digital: '' },
     seedPlaylists: [],
