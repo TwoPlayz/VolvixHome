@@ -40,7 +40,23 @@ pub fn single_instance(wait: bool) -> Option<Receiver<()>> {
     Some(rx)
 }
 
-/// Red record icon, drawn so no image decoder is needed (same as the web-view app).
+/// Start resizing the borderless window from an edge: hands the drag to Windows, as its own frame
+/// would (`hit` is HTLEFT=10 … HTBOTTOMRIGHT=17).
+pub fn start_resize(hwnd: isize, hit: usize) {
+    extern "system" {
+        fn ReleaseCapture() -> i32;
+        fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
+    }
+    const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+    // SAFETY: plain Win32 calls on our own window handle
+    unsafe {
+        ReleaseCapture();
+        PostMessageW(hwnd, WM_NCLBUTTONDOWN, hit, 0);
+    }
+}
+
+/// The Volvix logo for the window and tray (web/index.html: disc r=15, ring r=9.5 at 22% black,
+/// centre r=3.5 #111), drawn so no image decoder is needed.
 pub fn icon_rgba(n: u32) -> Vec<u8> {
     let mut rgba = Vec::with_capacity((n * n * 4) as usize);
     let c = (n as f32 - 1.0) / 2.0;
@@ -49,10 +65,10 @@ pub fn icon_rgba(n: u32) -> Vec<u8> {
             let d = (((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt()) / c;
             let px = if d > 1.0 {
                 [0, 0, 0, 0]
-            } else if d < 0.22 {
+            } else if d < 3.5 / 15.0 {
                 [17, 17, 17, 255]
-            } else if (d - 0.6).abs() < 0.035 {
-                [200, 60, 65, 255]
+            } else if (d - 9.5 / 15.0).abs() < 0.5 / 15.0 + 0.5 / c {
+                [179, 56, 60, 255]
             } else {
                 [229, 72, 77, 255]
             };

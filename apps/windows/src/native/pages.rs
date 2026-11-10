@@ -8,7 +8,7 @@ use volvix_core::{FoundItem, Track};
 
 use crate::ui::{self, icon, icon as ic};
 use crate::views::{card, clip, cover_of, download_button, header_buttons, playlist_card, playlist_cover, round_icon, section, track_list, El, Rows};
-use crate::{lyrics_scroller, App, Dialog, Message, Page, LYRIC_LINE};
+use crate::{lyrics_scroller, App, Dialog, Message, Page};
 
 /* ---------- playlists and mixes ---------- */
 
@@ -148,11 +148,17 @@ pub fn lyrics<'a>(app: &'a App, track: &str) -> El<'a> {
             Some(n) if i < n => ui::TEXT_3,
             _ => ui::TEXT_2,
         };
-        let words = if l.text.is_empty() { "♪".to_string() } else { l.text.clone() };
         let size = if now == Some(i) { 26.0 } else { 22.0 };
+        // an instrumental gap: a music note from Windows' icon font (the text font has no ♪)
+        let line: El = if l.text.trim().is_empty() {
+            ic('\u{E8D6}', size as u16).color(color).into()
+        } else {
+            text(l.text.clone()).size(size).font(ui::FONT_BOLD).color(color).into()
+        };
+        // long lines wrap (the scroll position estimate allows for one line each, close enough)
         col = col.push(
-            button(text(clip(&words, 70)).size(size).font(ui::FONT_BOLD).color(color))
-                .height(LYRIC_LINE)
+            button(line)
+                .width(Length::Fill)
                 .padding([6, 0])
                 .style(ui::flat)
                 .on_press(Message::SeekTo(l.ms.max(0) as f32 / 1000.0)),
@@ -163,106 +169,247 @@ pub fn lyrics<'a>(app: &'a App, track: &str) -> El<'a> {
     scrollable(col).id(lyrics_scroller()).style(ui::scroller).height(Length::Fill).into()
 }
 
-/* ---------- get more music ---------- */
+/* ---------- get more music (in Search) and requests ---------- */
 
-pub fn get_music(app: &App) -> El<'_> {
+/// Search's "Get more music": music that isn't on the server, from MusicBrainz, each kind shown as
+/// soon as it arrives (as on the website). `None` when there's nothing to show.
+pub fn get_more(app: &App) -> Option<El<'_>> {
     let f = &app.find;
-    let can = app.me.as_ref().map(|m| m.lidarr.can_request).unwrap_or(false);
-    let input = text_input("An artist, album or song you don't have", &f.term)
-        .on_input(Message::FindChanged)
-        .on_submit(Message::FindSubmit)
-        .padding(12)
-        .size(16)
-        .icon(text_input::Icon { font: ui::ICONS, code_point: icon::GLOBE, size: Some(16.into()), spacing: 10.0, side: text_input::Side::Left })
-        .style(ui::input);
-    let mut c = column![
-        ui::title("Get more music", 32),
-        ui::dim(if can { "Find music that isn't on the server yet, and Lidarr fetches it." } else { "Find music that isn't on the server yet. Ask an admin for permission to get it." }, 15),
-        row![input, button(text(if f.busy { "Looking…" } else { "Look" }).size(15)).padding([11, 22]).style(ui::primary).on_press_maybe((!f.busy).then_some(Message::FindSubmit))].spacing(10),
-    ]
-    .spacing(16);
-    match &f.results {
-        None => {}
-        Some(Err(e)) => c = c.push(container(text(e.clone()).size(14)).padding([10, 12]).style(ui::error_box)),
-        Some(Ok(r)) => {
-            if r.albums.is_empty() && r.artists.is_empty() && r.songs.is_empty() {
-                c = c.push(ui::dim(format!("Nothing found for \"{}\".", f.searched), 15));
+    let lidarr = app.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false);
+    let q = app.search.trim();
+    if !lidarr || app.offline || q.chars().count() < 2 || f.searched != q {
+        return None;
+    }
+    let kinds = app.search_type.kinds();
+    if kinds.is_empty() {
+        return None;
+    }
+    let all = app.search_type == crate::SearchType::All;
+    let pending = kinds.iter().any(|k| !f.parts.contains_key(*k));
+    let mut body = Column::new().spacing(10);
+    let mut shown = false;
+    let mut failure = None;
+    for kind in kinds {
+        let title = match *kind {
+            "artists" => "Artists",
+            "songs" => "Songs",
+            _ => "Albums",
+        };
+        match f.parts.get(*kind) {
+            None => {
+                body = body.push(ui::dim(title, 14)).push(ui::dim("Searching…", 13));
             }
-            if !r.songs.is_empty() {
-                let rows: Vec<El> = r.songs.iter().map(|s| found_row(app, s, false, can)).collect();
-                c = c.push(section("Songs", Column::with_children(rows).spacing(2).into()));
-            }
-            if !r.albums.is_empty() {
-                let rows: Vec<El> = r.albums.iter().map(|s| found_row(app, s, false, can)).collect();
-                c = c.push(section("Albums", Column::with_children(rows).spacing(2).into()));
-            }
-            if !r.artists.is_empty() {
-                let rows: Vec<El> = r.artists.iter().map(|s| found_row(app, s, true, can)).collect();
-                c = c.push(section("Artists", Column::with_children(rows).spacing(2).into()));
+            Some(Err(e)) => failure = Some(e.clone()),
+            Some(Ok(list)) if list.is_empty() => {}
+            Some(Ok(list)) => {
+                shown = true;
+                let limit = match *kind {
+                    "artists" => 4,
+                    "songs" => 6,
+                    _ => 8,
+                };
+                let limit = if all && !f.open.contains(*kind) { limit } else { list.len() };
+                let rows: Vec<El> = list.iter().take(limit).map(|s| found_row(app, s, *kind)).collect();
+                body = body.push(text(title).size(16).font(ui::FONT_BOLD)).push(Column::with_children(rows).spacing(2));
+                if list.len() > limit {
+                    body = body.push(button(text(format!("Show {} more", list.len() - limit)).size(13)).padding([5, 12]).style(ui::flat).on_press(Message::ShowMoreFound(kind.to_string())));
+                }
             }
         }
     }
-    if !f.requests.is_empty() {
-        let me = app.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default();
-        let rows: Vec<El> = f
-            .requests
-            .iter()
-            .map(|r| {
-                let here = !(r.on_server.is_null() || r.on_server == serde_json::Value::Bool(false));
-                let state = if here {
-                    "On the server".to_string()
-                } else if let Some(p) = &r.problem {
-                    p.clone()
-                } else {
-                    "Waiting for Lidarr".to_string()
-                };
-                let mut line = row![
-                    column![text(clip(&format!("{} · {}", r.title, r.artist), 60)).size(15), ui::dim(format!("{} · asked by {} · {}", if r.kind == "artist" { "Artist" } else { "Album" }, r.by, state), 12)].spacing(2).width(Length::Fill)
-                ]
-                .align_y(Alignment::Center);
-                if !here && r.by == me {
-                    line = line.push(button(text("Cancel").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::CancelRequest(r.foreign_id.clone())));
-                }
-                container(line).padding([8, 12]).into()
-            })
-            .collect();
-        c = c.push(section("Requests", Column::with_children(rows).spacing(2).into()));
+    if !pending && !shown {
+        // nothing to offer (or MusicBrainz didn't answer)
+        return failure.map(|e| section("Get more music", container(text(e).size(14)).padding([10, 12]).style(ui::error_box).into()));
+    }
+    let sub = if pending && !shown {
+        "Searching…"
+    } else if f.can_get {
+        "Not in your library yet? Get it, and Lidarr downloads it and adds it here when it's done."
+    } else {
+        "Only admins can ask for new music."
+    };
+    let head = row![
+        column![ui::title("Get more music", 22), ui::dim(sub, 13)].spacing(4).width(Length::Fill),
+        button(text("Your requests").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::GetMusic)),
+    ]
+    .align_y(Alignment::Center);
+    let mut c = column![head, body].spacing(12);
+    if !pending {
+        c = c.push(ui::dim("Results from MusicBrainz.", 12));
+    }
+    Some(c.into())
+}
+
+/// Requests: what people asked Lidarr for, and where it is.
+pub fn requests(app: &App) -> El<'_> {
+    let f = &app.find;
+    let mut c = column![ui::title("Requests", 32), ui::dim("Music asked for through Get more music (in Search). It shows up in your library when Lidarr has downloaded it.", 15)].spacing(16);
+    if f.requests.is_empty() {
+        return c.push(ui::dim("No requests yet. Search for something you don't have, then Get it.", 15)).into();
+    }
+    let me = app.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default();
+    for r in &f.requests {
+        let here = !(r.on_server.is_null() || r.on_server == serde_json::Value::Bool(false));
+        let state = if here {
+            "In your library".to_string()
+        } else if let Some(p) = &r.problem {
+            p.clone()
+        } else {
+            "Waiting for Lidarr".to_string()
+        };
+        let art: El = match r.image.as_ref().and_then(|p| app.images.get(p)) {
+            Some(h) => image(h.clone()).width(48).height(48).content_fit(iced::ContentFit::Cover).into(),
+            None => ui::cover(None, &r.title, 48.0),
+        };
+        let mut line = row![
+            art,
+            column![text(clip(&format!("{} · {}", r.title, r.artist), 60)).size(15), ui::dim(format!("{} · asked by {} · {}", if r.kind == "artist" { "Artist" } else { "Album" }, r.by, state), 12)].spacing(2).width(Length::Fill)
+        ]
+        .spacing(14)
+        .align_y(Alignment::Center);
+        if !here && r.by == me {
+            line = line.push(button(text("Cancel").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::CancelRequest(r.foreign_id.clone())));
+        }
+        c = c.push(container(line).padding([6, 12]));
     }
     c.into()
 }
 
-fn found_row<'a>(app: &'a App, s: &'a FoundItem, is_artist: bool, can: bool) -> El<'a> {
+/// One found artist / song / album, with what you can do about it.
+fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str) -> El<'a> {
+    let is_artist = kind == "artists";
     let art: El = match s.image.as_ref().and_then(|p| app.images.get(p)) {
         Some(h) => image(h.clone()).width(48).height(48).content_fit(iced::ContentFit::Cover).into(),
         None => ui::cover(None, &s.label(), 48.0),
     };
     let mut sub = vec![];
+    if is_artist {
+        sub.push("Artist".to_string());
+    }
     if let Some(a) = &s.artist {
         sub.push(a.clone());
     }
-    if let Some(k) = &s.kind {
+    if let Some(k) = s.kind.as_ref().filter(|k| !is_artist && k.as_str() != "Album") {
         sub.push(k.clone());
     }
     if let Some(y) = &s.year {
         sub.push(y.clone());
     }
-    let target = s.request_target(is_artist);
+    let asked = |id: &Option<String>| id.as_ref().map(|i| app.find.asked.contains(i)).unwrap_or(false);
+    let get = |label: &'a str, k: &'static str, id: String, primary: bool| -> El<'a> {
+        let busy = app.find.asking.contains(&id);
+        button(row![ic(icon::DOWNLOAD, 12), text(if busy { "Asking…" } else { label }).size(13)].spacing(6).align_y(Alignment::Center))
+            .padding([6, 14])
+            .style(if primary { ui::primary } else { ui::secondary })
+            .on_press_maybe((!busy).then_some(Message::RequestMusic(k.to_string(), id)))
+            .into()
+    };
+    let can = app.find.can_get;
     let action: El = if s.is_on_server() {
         let go = match (&s.on_server, is_artist) {
             (serde_json::Value::String(v), false) if app.lib.album(v).is_some() => Some(Message::Go(Page::Album(v.clone()))),
             (serde_json::Value::String(v), true) => Some(Message::Go(Page::Artist(v.clone()))),
             _ => None,
         };
-        button(text("In your library").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe(go).into()
-    } else if s.requested || target.as_ref().map(|(_, id)| app.find.asked.contains(id)).unwrap_or(false) {
-        ui::dim("Requested", 13).into()
-    } else if let (true, Some((kind, id))) = (can, target) {
-        let busy = app.find.asking.contains(&id);
-        button(text(if busy { "Asking…" } else { "Get" }).size(13)).padding([6, 18]).style(ui::primary).on_press_maybe((!busy).then_some(Message::RequestMusic(kind.to_string(), id))).into()
+        button(row![ic(icon::DOWNLOADED, 12), text("In your library").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press_maybe(go).into()
+    } else if s.requested || asked(&s.foreign_id) || asked(&s.album_id) || asked(&s.single_id) {
+        row![ic(icon::DOWNLOAD, 12), ui::dim("Requested", 13)].spacing(6).align_y(Alignment::Center).into()
+    } else if !can {
+        ui::dim("Ask an admin", 13).into()
+    } else if is_artist {
+        match &s.foreign_id {
+            Some(id) => get("Get all", "artist", id.clone(), true),
+            None => ui::dim("", 13).into(),
+        }
+    } else if kind == "songs" {
+        // Lidarr gets releases, not songs: offer the single (if any) and the album
+        let mut r = row![].spacing(6);
+        if let Some(id) = &s.single_id {
+            r = r.push(get("Get the single", "album", id.clone(), true));
+        }
+        if let Some(id) = &s.album_id {
+            r = r.push(get("Get the album", "album", id.clone(), s.single_id.is_none()));
+        }
+        r.into()
     } else {
-        ui::dim("Not on the server", 13).into()
+        match &s.foreign_id {
+            Some(id) => get("Get", "album", id.clone(), true),
+            None => ui::dim("", 13).into(),
+        }
     };
     container(row![art, column![text(clip(&s.label(), 60)).size(15), ui::dim(clip(&sub.join(" · "), 70), 12)].spacing(2).width(Length::Fill), action].spacing(14).align_y(Alignment::Center)).padding([6, 12]).into()
+}
+
+/* ---------- credits (Now Playing) ---------- */
+
+pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
+    let album = app.lib.album_of(t);
+    let row_of = |k: String, v: String| -> El<'a> { row![container(ui::dim(k, 14)).width(150), text(v).size(15)].spacing(16).into() };
+    let own: Vec<&volvix_core::Credit> = t.credits.iter().filter(|c| c.role != "ISRC").collect();
+    let mut people = Column::new().spacing(10).push(row_of("Artist".into(), t.artist.clone()));
+    for c in &own {
+        people = people.push(row_of(c.role.clone(), c.names.clone()));
+    }
+    // MusicBrainz fills in what the file doesn't say
+    let note: String = match app.credits.get(&t.id) {
+        None => "Looking up more on MusicBrainz…".into(),
+        Some(Err(e)) => {
+            if own.is_empty() {
+                e.clone()
+            } else {
+                String::new()
+            }
+        }
+        Some(Ok(list)) => {
+            let extra: Vec<&volvix_core::Credit> = list.iter().filter(|c| !own.iter().any(|o| o.role == c.role)).collect();
+            for c in &extra {
+                people = people.push(row_of(c.role.clone(), c.names.clone()));
+            }
+            if list.is_empty() {
+                if own.is_empty() { "No credits found for this song in the file or on MusicBrainz.".into() } else { String::new() }
+            } else if extra.is_empty() {
+                "MusicBrainz matches what's in the file.".into()
+            } else {
+                "MusicBrainz added credits the file doesn't have.".into()
+            }
+        }
+    };
+    let mut detail_rows: Vec<El> = vec![];
+    let mut add = |k: &str, v: Option<String>| {
+        if let Some(v) = v.filter(|v| !v.is_empty()) {
+            detail_rows.push(row_of(k.to_string(), v));
+        }
+    };
+    add("Album", album.map(|a| a.title.clone()));
+    add("Year", album.and_then(|a| a.year).map(|y| y.to_string()));
+    add("Label", album.and_then(|a| a.label.clone()));
+    add("Genre", album.and_then(|a| a.genre.clone()));
+    add(
+        "Format",
+        album.map(|a| {
+            let q = &a.quality;
+            match (q.bits, q.khz, q.kbps) {
+                (Some(b), Some(k), _) => format!("{} · {b}-bit / {k} kHz", q.codec.to_uppercase()),
+                (_, _, Some(k)) => format!("{} · {k} kbps", q.codec.to_uppercase()),
+                _ => q.codec.to_uppercase(),
+            }
+        }),
+    );
+    add("Length", (t.duration > 0).then(|| volvix_core::format_duration(t.duration)));
+    add("Copyright", album.and_then(|a| a.copyright.clone()));
+    add("ISRC", t.credits.iter().find(|c| c.role == "ISRC").map(|c| c.names.clone()));
+    let details = Column::with_children(detail_rows).spacing(10);
+    let mine = volvix_core::userdata::stats(&app.data).plays.get(&t.id).copied();
+    let listening: El = match mine {
+        Some((n, _)) => row_of("Plays".into(), n.to_string()),
+        None => row_of("Plays".into(), "Not played yet".into()),
+    };
+    let mut c = column![ui::title("Credits", 20), people].spacing(14);
+    if !note.is_empty() {
+        c = c.push(ui::dim(note, 12));
+    }
+    c = c.push(ui::title("Details", 20)).push(details).push(ui::title("Your listening", 20)).push(listening);
+    scrollable(c).style(ui::scroller).height(Length::Fill).into()
 }
 
 /* ---------- household and notifications ---------- */
@@ -380,8 +527,7 @@ fn switch<'a>(on: bool, f: fn(bool) -> Message) -> El<'a> {
 
 pub fn settings(app: &App) -> El<'_> {
     let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
-    let leveling = app.setting_str("leveling", "off");
-    let chip = |label: &'static str, v: &'static str| button(text(label).size(13)).padding([6, 14]).style(ui::chip(leveling == v)).on_press(Message::SetLeveling(v.to_string()));
+    let leveling = app.setting_str("leveling", "off") != "off";
     let server = app.client.as_ref().map(|c| c.base().to_string()).unwrap_or_default();
     let server_line = match &app.server_status {
         Some(s) => format!("{server} · Volvix Home {} · {} albums, {} songs", s.version, s.albums, s.tracks),
@@ -410,7 +556,7 @@ pub fn settings(app: &App) -> El<'_> {
         section(
             "Playback",
             column![
-                setting_row("Volume leveling", "Play songs (or whole albums) at an even loudness, from their ReplayGain tags.", row![chip("Off", "off"), chip("Songs", "track"), chip("Albums", "album")].spacing(6).into()),
+                setting_row("Volume leveling", "Songs play at an even loudness, from their ReplayGain tags. Albums played in order keep their own loud and quiet songs.", switch(leveling, Message::SetLeveling)),
                 setting_row("Share what I'm listening to", "The household sees what you're playing.", switch(app.setting_bool("shareActivity", true), Message::SetShare)),
                 setting_row("Private session", "Nothing you play counts toward your stats, mixes or Recently played.", switch(app.setting_bool("privateSession", false), Message::SetPrivate)),
             ]

@@ -8,9 +8,9 @@ use iced::{Alignment, Element, Length, Padding};
 use volvix_core::playlists::Kind;
 use volvix_core::{format_duration, search, Album, Repeat, Track};
 
-use crate::pages;
 use crate::ui::{self, icon, icon as ic};
-use crate::{App, LibTab, Message, NpTab, Page, Screen, COVER};
+use crate::{marks, pages};
+use crate::{App, LibTab, Message, NpTab, Page, Screen, SearchType, COVER};
 
 pub type El<'a> = Element<'a, Message>;
 
@@ -18,10 +18,61 @@ pub fn view(app: &App) -> El<'_> {
     let body: El = match app.screen {
         Screen::Connect => connect(app),
         Screen::SignIn => sign_in(app),
-        Screen::Loading => centered(column![ui::title("Volvix Home", 28), ui::dim("Loading your music…", 15)].spacing(8).align_x(Alignment::Center).into()),
+        Screen::Loading => centered(column![marks::logo(48.0), ui::title("Volvix Home", 28), ui::dim("Loading your music…", 15)].spacing(10).align_x(Alignment::Center).into()),
         Screen::Main => main_screen(app),
     };
-    container(body).width(Length::Fill).height(Length::Fill).style(ui::frame).into()
+    let framed: El = column![title_bar(app), container(body).width(Length::Fill).height(Length::Fill)].into();
+    let mut layers = stack![container(framed).width(Length::Fill).height(Length::Fill).style(ui::frame)];
+    if !app.maximized {
+        layers = layers.push(resize_edges());
+    }
+    layers.into()
+}
+
+/// The app's own title bar: drag to move, double-click to maximize, and the three window buttons.
+fn title_bar(app: &App) -> El<'_> {
+    let btn = |c: char, m: Message, close: bool| {
+        button(container(ic(c, 10)).center_x(46).center_y(32)).width(46).height(32).padding(0).style(move |_, s| {
+            let hover = matches!(s, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: hover.then(|| if close { iced::Color::from_rgb8(0xC4, 0x2B, 0x1C) } else { ui::HOVER }.into()),
+                text_color: if hover && close { iced::Color::WHITE } else { ui::TEXT_2 },
+                ..Default::default()
+            }
+        })
+        .on_press(m)
+    };
+    let drag = mouse_area(container(Space::new(Length::Fill, 32)).width(Length::Fill)).on_press(Message::TitlePress);
+    row![
+        drag,
+        btn('\u{E921}', Message::Minimize, false),
+        btn(if app.maximized { '\u{E923}' } else { '\u{E922}' }, Message::ToggleMaximize, false),
+        btn('\u{E8BB}', Message::CloseWindow, true),
+    ]
+    .height(32)
+    .into()
+}
+
+/// Thin strips along the edges that resize the window (it has no Windows frame of its own).
+fn resize_edges<'a>() -> El<'a> {
+    use iced::mouse::Interaction as I;
+    const E: f32 = 5.0;
+    // Win32 hit-test codes
+    const L: usize = 10;
+    const R: usize = 11;
+    const T: usize = 12;
+    const TL: usize = 13;
+    const TR: usize = 14;
+    const B: usize = 15;
+    const BL: usize = 16;
+    const BR: usize = 17;
+    let grip = |w: Length, h: Length, hit: usize, cursor: I| -> El<'a> { mouse_area(Space::new(w, h)).interaction(cursor).on_press(Message::ResizeEdge(hit)).into() };
+    let fill = Length::Fill;
+    let e = Length::Fixed(E);
+    let top = row![grip(e, e, TL, I::ResizingDiagonallyDown), grip(fill, e, T, I::ResizingVertically), grip(e, e, TR, I::ResizingDiagonallyUp)];
+    let middle = row![grip(e, fill, L, I::ResizingHorizontally), Space::new(fill, fill), grip(e, fill, R, I::ResizingHorizontally)].height(fill);
+    let bottom = row![grip(e, e, BL, I::ResizingDiagonallyUp), grip(fill, e, B, I::ResizingVertically), grip(e, e, BR, I::ResizingDiagonallyDown)];
+    column![top, middle, bottom].into()
 }
 
 /// Which album covers the current screen shows (fetched in the background, then kept on disk).
@@ -189,7 +240,8 @@ pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered
         }
         let playing = current == Some(t.id.as_str());
         let lead: El = if playing {
-            ic(if app.status.playing { icon::VOLUME } else { icon::PAUSE }, 14).color(ui::ACCENT).into()
+            // the playing bars, as on the website (still while paused)
+            marks::eq(app.status.playing, 12.0)
         } else if numbered {
             ui::dim(if t.no > 0 { t.no.to_string() } else { "–".into() }, 14).into()
         } else {
@@ -234,15 +286,16 @@ pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered
 
 pub fn header_buttons<'a>(play: Message, shuffle: Message, extra: Vec<El<'a>>) -> El<'a> {
     let mut r = row![
-        button(row![ic(icon::PLAY, 14), text("Play").size(15)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::primary).on_press(play),
-        button(row![ic(icon::SHUFFLE, 14), text("Shuffle").size(15)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::secondary).on_press(shuffle),
+        button(row![ic(icon::PLAY, 14), text("Play").size(15).wrapping(text::Wrapping::None)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::primary).on_press(play),
+        button(row![ic(icon::SHUFFLE, 14), text("Shuffle").size(15).wrapping(text::Wrapping::None)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::secondary).on_press(shuffle),
     ]
     .spacing(10)
     .align_y(Alignment::Center);
     for e in extra {
         r = r.push(e);
     }
-    r.into()
+    // narrow windows: the round buttons go onto the next line instead of squashing the labels
+    r.wrap().into()
 }
 
 /// A round icon button for page headers (download, edit, delete…). `on` = switched on (red).
@@ -364,7 +417,7 @@ fn sidebar(app: &App) -> El<'_> {
         button(row![ic(c, 18), text(label).size(15)].spacing(14).align_y(Alignment::Center)).width(Length::Fill).padding([9, 14]).style(ui::nav(active)).on_press(Message::Go(page))
     };
     let logo = row![
-        container(Space::new(14, 14)).style(|_| container::Style { background: Some(ui::ACCENT.into()), border: iced::border::rounded(7.0), ..Default::default() }),
+        marks::logo(22.0),
         ui::title("Volvix Home", 18),
         horizontal_space(),
         bell(app),
@@ -379,13 +432,7 @@ fn sidebar(app: &App) -> El<'_> {
         item(icon::LIBRARY, "Library", Page::Library),
     ]
     .spacing(2);
-    if app.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false) {
-        nav = nav.push(item(icon::GLOBE, "Get more music", Page::GetMusic));
-    }
     nav = nav.push(item(icon::PEOPLE, "Household", Page::Household));
-    if !app.history.is_empty() || app.now_playing {
-        nav = nav.push(button(row![ic(icon::BACK, 14), text("Back").size(14)].spacing(14).align_y(Alignment::Center)).width(Length::Fill).padding([8, 14]).style(ui::nav(false)).on_press(Message::Back));
-    }
 
     // your playlists
     let head = row![ui::dim("Playlists", 13), horizontal_space(), button(ic(icon::ADD, 13)).padding(6).style(ui::icon_btn(false)).on_press(Message::NewPlaylist(vec![]))].align_y(Alignment::Center);
@@ -428,7 +475,7 @@ fn page(app: &App) -> El<'_> {
         Page::Artist(name) => artist_page(app, name),
         Page::Playlist(id) => pages::playlist_page(app, id),
         Page::Mix(id) => pages::mix_page(app, id),
-        Page::GetMusic => pages::get_music(app),
+        Page::GetMusic => pages::requests(app),
         Page::Household => pages::household(app),
         Page::Notifications => pages::notifications(app),
         Page::Settings => pages::settings(app),
@@ -523,7 +570,7 @@ fn home(app: &App) -> El<'_> {
 }
 
 fn library(app: &App) -> El<'_> {
-    let tab = |label: &'static str, t: LibTab| button(text(label).size(14)).padding([7, 16]).style(ui::chip(app.lib_tab == t)).on_press(Message::LibTab(t));
+    let tab = |label: &'static str, t: LibTab| button(text(label).size(14).wrapping(text::Wrapping::None)).padding([7, 16]).style(ui::chip(app.lib_tab == t)).on_press(Message::LibTab(t));
     let head = column![ui::title("Library", 32), row![tab("Playlists", LibTab::Playlists), tab("Albums", LibTab::Albums), tab("Artists", LibTab::Artists), tab("Downloaded", LibTab::Downloaded)].spacing(8)].spacing(14);
     let body: El = match app.lib_tab {
         LibTab::Albums => album_grid(app, app.lib.albums_by_title(), true),
@@ -641,7 +688,16 @@ fn search_page(app: &App) -> El<'_> {
         .size(16)
         .icon(text_input::Icon { font: ui::ICONS, code_point: icon::SEARCH, size: Some(16.into()), spacing: 10.0, side: text_input::Side::Left })
         .style(ui::input);
-    let mut c = column![ui::title("Search", 32), input].spacing(20);
+    let chip = |label: &'static str, t: SearchType| button(text(label).size(14).wrapping(text::Wrapping::None)).padding([7, 16]).style(ui::chip(app.search_type == t)).on_press(Message::SearchType(t));
+    let chips = row![
+        chip("All", SearchType::All),
+        chip("Artists", SearchType::Artists),
+        chip("Albums", SearchType::Albums),
+        chip("Songs", SearchType::Songs),
+        chip("Playlists", SearchType::Playlists)
+    ]
+    .spacing(8);
+    let mut c = column![ui::title("Search", 32), input, chips].spacing(18);
     let q = app.search.trim();
     if q.is_empty() {
         let all = app.lib.recently_added(usize::MAX);
@@ -650,38 +706,53 @@ fn search_page(app: &App) -> El<'_> {
         }
         return c.push(section("Everything on your server", album_grid(app, all, true))).into();
     }
+    let ty = app.search_type;
+    let all = ty == SearchType::All;
+    let show = |t: SearchType| all || ty == t;
     let lists = app.playlists();
     let r = search::search(&app.lib, &[], q);
     let qn = search::norm(q);
     let found_lists: Vec<&volvix_core::playlists::PlaylistView> = lists.iter().filter(|p| qn.split_whitespace().all(|w| search::norm(&format!("{} {}", p.name, p.description)).contains(w))).collect();
-    if r.is_empty() && found_lists.is_empty() {
+    let mut any = false;
+    if show(SearchType::Artists) && !r.artists.is_empty() {
+        any = true;
+        let n = if all { 6 } else { usize::MAX };
+        let cards: Vec<El> = r.artists.iter().take(n).map(|a| artist_card(app, a.clone())).collect();
+        c = c.push(titled("Artists", Row::with_children(cards).spacing(4).wrap().into(), (all && r.artists.len() > 6).then_some(SearchType::Artists)));
+    }
+    if show(SearchType::Songs) && !r.songs.is_empty() {
+        any = true;
+        let n = if all { 5 } else { 200 };
+        let list: Vec<&Track> = r.songs.iter().take(n).copied().collect();
+        c = c.push(titled("Songs", track_list(app, &list, "Search", false, true, Rows::Plain), (all && r.songs.len() > 5).then_some(SearchType::Songs)));
+    }
+    if show(SearchType::Albums) && !r.albums.is_empty() {
+        any = true;
+        let n = if all { 12 } else { usize::MAX };
+        c = c.push(titled("Albums", album_grid(app, r.albums.iter().take(n).copied(), true), (all && r.albums.len() > 12).then_some(SearchType::Albums)));
+    }
+    if show(SearchType::Playlists) && !found_lists.is_empty() {
+        any = true;
+        let cards: Vec<El> = found_lists.iter().map(|p| playlist_card(app, p)).collect();
+        c = c.push(titled("Playlists", Row::with_children(cards).spacing(4).wrap().into(), None));
+    }
+    if !any {
         c = c.push(ui::dim(format!("Nothing in your library for \"{q}\"."), 15));
     }
-    if !r.artists.is_empty() {
-        let cards: Vec<El> = r.artists.iter().take(6).map(|n| artist_card(app, n.clone())).collect();
-        c = c.push(section("Artists", Row::with_children(cards).spacing(4).wrap().into()));
-    }
-    if !r.songs.is_empty() {
-        let list: Vec<&Track> = r.songs.iter().take(5).copied().collect();
-        c = c.push(section("Songs", track_list(app, &list, "Search", false, true, Rows::Plain)));
-    }
-    if !r.albums.is_empty() {
-        c = c.push(section("Albums", album_grid(app, r.albums.iter().take(12).copied(), true)));
-    }
-    if !found_lists.is_empty() {
-        let cards: Vec<El> = found_lists.iter().map(|p| playlist_card(app, p)).collect();
-        c = c.push(section("Playlists", Row::with_children(cards).spacing(4).wrap().into()));
-    }
-    // music you don't have yet
-    if app.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false) && q.chars().count() >= 2 {
-        c = c.push(
-            button(row![ic(icon::GLOBE, 16), text(format!("Look for \"{}\" to get more music", clip(q, 40))).size(15)].spacing(10).align_y(Alignment::Center))
-                .padding([10, 16])
-                .style(ui::secondary)
-                .on_press(Message::LookFurther(q.to_string())),
-        );
+    // music you don't have yet, right below (Lidarr)
+    if let Some(more) = pages::get_more(app) {
+        c = c.push(more);
     }
     c.into()
+}
+
+/// A search section, with "Show all" (which switches the filter) when All cuts it short.
+fn titled<'a>(title: &'static str, body: El<'a>, more: Option<SearchType>) -> El<'a> {
+    let mut head = row![ui::title(title, 22), horizontal_space()].align_y(Alignment::Center);
+    if let Some(t) = more {
+        head = head.push(button(text("Show all").size(13)).padding([5, 12]).style(ui::flat).on_press(Message::SearchType(t)));
+    }
+    column![head, body].spacing(12).into()
 }
 
 /* ---------- Now Playing and the player bar ---------- */
@@ -692,8 +763,10 @@ fn now_playing(app: &App) -> El<'_> {
     };
     let album = app.lib.album_of(t);
     let liked = app.is_liked(&t.id);
+    // the cover shrinks with the window (up to 360 px), so the tabs on the right always fit
+    let art = iced::widget::responsive(move |size| cover_of(app, album, size.width.min(360.0)));
     let left = column![
-        cover_of(app, album, 360.0),
+        container(art).width(Length::Fill).height(Length::Shrink).max_height(360),
         ui::gap(8),
         row![
             column![
@@ -709,10 +782,11 @@ fn now_playing(app: &App) -> El<'_> {
         .align_y(Alignment::Start),
     ]
     .spacing(6)
-    .width(360);
+    .width(Length::FillPortion(2))
+    .max_width(360);
 
-    let tab = |label: &'static str, tb: NpTab| button(text(label).size(14)).padding([7, 16]).style(ui::chip(app.np_tab == tb)).on_press(Message::NpTab(tb));
-    let tabs = row![tab("Up next", NpTab::Queue), tab("Lyrics", NpTab::Lyrics)].spacing(8);
+    let tab = |label: &'static str, tb: NpTab| button(text(label).size(14).wrapping(text::Wrapping::None)).padding([7, 16]).style(ui::chip(app.np_tab == tb)).on_press(Message::NpTab(tb));
+    let tabs = row![tab("Up next", NpTab::Queue), tab("Lyrics", NpTab::Lyrics), tab("Credits", NpTab::Credits)].spacing(8);
     let right: El = match app.np_tab {
         NpTab::Queue => {
             let pos = app.queue.position().unwrap_or(0);
@@ -738,11 +812,23 @@ fn now_playing(app: &App) -> El<'_> {
             scrollable(list).style(ui::scroller).height(Length::Fill).into()
         }
         NpTab::Lyrics => pages::lyrics(app, &t.id),
+        NpTab::Credits => pages::credits(app, t),
     };
-    row![left, column![tabs, right].spacing(14).width(Length::Fill).height(Length::Fill)].spacing(40).into()
+    row![left, column![tabs, right].spacing(14).width(Length::FillPortion(3)).height(Length::Fill)].spacing(32).into()
 }
 
 fn player_bar(app: &App) -> El<'_> {
+    let mut bar = column![];
+    if let Some(e) = &app.status.error {
+        bar = bar.push(container(text(e.as_str()).size(12)).padding([4, 10]).style(ui::error_box));
+    }
+    // the sides give up room in a narrow window, so the controls never overlap
+    let main = iced::widget::responsive(move |size| player_row(app, size.width));
+    container(bar.push(container(main).height(68)).spacing(4)).height(84).padding([8, 12]).center_y(84).style(ui::frame).into()
+}
+
+fn player_row(app: &App, width: f32) -> El<'_> {
+    let narrow = width < 1000.0;
     let st = &app.status;
     let track = st.track.as_deref().and_then(|id| app.lib.track(id));
     let album = track.and_then(|t| app.lib.album_of(t));
@@ -750,12 +836,24 @@ fn player_bar(app: &App) -> El<'_> {
     let left: El = match track {
         Some(t) => {
             let liked = app.is_liked(&t.id);
+            let in_one = app.playlists().iter().any(|p| p.can_edit() && p.kind != volvix_core::playlists::Kind::Liked && p.tracks.contains(&t.id));
             row![
-                button(row![cover_of(app, album, 56.0), column![text(clip(&t.title, 30)).size(14).color(ui::TEXT), ui::dim(clip(&t.artist, 34), 12)].spacing(2)].spacing(12).align_y(Alignment::Center))
-                    .padding(4)
-                    .style(ui::flat)
-                    .on_press(Message::ToggleNowPlaying),
+                marks::eq(st.playing, 12.0),
+                button(
+                    row![
+                        cover_of(app, album, 56.0),
+                        column![text(clip(&t.title, 28)).size(14).color(ui::TEXT).wrapping(text::Wrapping::None), ui::dim(clip(&t.artist, 32), 12).wrapping(text::Wrapping::None)].spacing(2).width(Length::Fill).clip(true)
+                    ]
+                    .spacing(12)
+                    .align_y(Alignment::Center)
+                )
+                .width(Length::Fill)
+                .padding(4)
+                .style(ui::flat)
+                .on_press(Message::ToggleNowPlaying),
                 button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 15)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())),
+                // add to a playlist (a tick once it's in one of yours)
+                button(ic(if in_one { icon::DOWNLOADED } else { icon::ADD }, 15)).padding(8).style(ui::icon_btn(in_one)).on_press(Message::AddToPlaylist(vec![t.id.clone()])),
             ]
             .spacing(4)
             .align_y(Alignment::Center)
@@ -790,7 +888,7 @@ fn player_bar(app: &App) -> El<'_> {
     ]
     .spacing(8)
     .align_y(Alignment::Center);
-    let center = column![controls, progress].spacing(4).align_x(Alignment::Center).width(Length::FillPortion(2)).max_width(640);
+    let center = column![controls, progress].spacing(4).align_x(Alignment::Center).width(Length::Fill).max_width(640);
 
     let vol_icon = if app.volume <= 0.001 { icon::MUTE } else { icon::VOLUME };
     let lyrics_on = app.now_playing && app.np_tab == NpTab::Lyrics;
@@ -800,16 +898,12 @@ fn player_bar(app: &App) -> El<'_> {
         button(ic(icon::LYRICS, 16)).padding(8).style(ui::icon_btn(lyrics_on)).on_press_maybe(has.then_some(if lyrics_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Lyrics) })),
         button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }),
         button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute),
-        container(slider(0.0..=1.0, app.volume, Message::Volume).step(0.01_f32).style(ui::slider)).width(110),
+        container(slider(0.0..=1.0, app.volume, Message::Volume).step(0.01_f32).style(ui::slider)).width(if narrow { 56 } else { 110 }),
     ]
-    .spacing(4)
+    .spacing(2)
     .align_y(Alignment::Center)
-    .width(Length::FillPortion(1));
+    .width(if narrow { 196 } else { 260 });
 
-    let mut bar = column![];
-    if let Some(e) = &st.error {
-        bar = bar.push(container(text(e.as_str()).size(12)).padding([4, 10]).style(ui::error_box));
-    }
-    let main = row![container(left).width(Length::FillPortion(1)), center, right].spacing(16).align_y(Alignment::Center);
-    container(bar.push(main).spacing(4)).height(84).padding([8, 12]).center_y(84).style(ui::frame).into()
+    // fixed sides, the controls take the middle
+    row![container(left).width(if narrow { 250 } else { 300 }).clip(true), container(center).width(Length::Fill).center_x(Length::Fill), right].spacing(12).align_y(Alignment::Center).into()
 }

@@ -239,6 +239,34 @@ impl Client {
         res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
     }
 
+    /// Just one kind of result ("artists" | "songs" | "albums"), so each can be shown as soon as it
+    /// arrives (as the website's Search does). Also says whether you may get music.
+    pub fn find_part(&self, term: &str, kind: &str) -> Result<(Vec<FoundItem>, bool, bool)> {
+        let q: String = term.trim().bytes().map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        }).collect();
+        let res = self.request("GET", &format!("/api/lidarr/search?kind={kind}&term={q}")).timeout(Duration::from_secs(45)).call()?;
+        let r: FindResults = res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))?;
+        let list = match kind {
+            "artists" => r.artists,
+            "albums" => r.albums,
+            _ => r.songs,
+        };
+        Ok((list, r.can_request, r.configured))
+    }
+
+    /// Credits for a song from MusicBrainz (the server looks them up once and keeps them a month).
+    pub fn credits(&self, track_id: &str) -> Result<Vec<Credit>> {
+        #[derive(serde::Deserialize)]
+        struct A {
+            #[serde(default)]
+            credits: Vec<Credit>,
+        }
+        let res = self.request("GET", &format!("/api/credits/{}", enc(track_id))).timeout(Duration::from_secs(30)).call()?;
+        res.into_json::<A>().map(|a| a.credits).map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
     /// Ask Lidarr to get an album or everything by an artist.
     pub fn request_music(&self, kind: &str, foreign_id: &str) -> Result<()> {
         self.request("POST", "/api/lidarr/request").timeout(Duration::from_secs(60)).send_json(json!({ "kind": kind, "foreignId": foreign_id }))?;

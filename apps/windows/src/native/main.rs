@@ -15,6 +15,7 @@ mod settings;
 mod update;
 
 mod audio;
+mod marks;
 mod pages;
 mod system;
 mod ui;
@@ -37,7 +38,7 @@ use volvix_core::playlists::{self, PlaylistView};
 use volvix_core::session::SavedSession;
 use volvix_core::userdata::{self, Edit, PlayCounter};
 use volvix_core::{
-    Client, Error, FindResults, Household, Library, LyricsAnswer, Me, Notes, Playlist, Queue, Request, ServerStatus, SharedInvite, SharedList, SharedOpResult, SharedPlaylist, User, UserData,
+    Client, Credit, Error, FoundItem, Household, Library, LyricsAnswer, Me, Notes, Playlist, Queue, Request, ServerStatus, SharedInvite, SharedList, SharedOpResult, SharedPlaylist, User, UserData,
 };
 
 use settings::Settings;
@@ -94,6 +95,30 @@ pub enum LibTab {
 pub enum NpTab {
     Queue,
     Lyrics,
+    Credits,
+}
+
+/// Search's filter chips, as on the website.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SearchType {
+    All,
+    Artists,
+    Albums,
+    Songs,
+    Playlists,
+}
+
+impl SearchType {
+    /// Which "Get more music" kinds this filter shows.
+    pub fn kinds(self) -> &'static [&'static str] {
+        match self {
+            SearchType::All => &["artists", "songs", "albums"],
+            SearchType::Artists => &["artists"],
+            SearchType::Albums => &["albums"],
+            SearchType::Songs => &["songs"],
+            SearchType::Playlists => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,10 +146,15 @@ pub enum Dialog {
 /// "Get more music": looking through MusicBrainz for music you don't have.
 #[derive(Debug, Clone, Default)]
 pub struct FindState {
-    pub term: String,
+    /// the words these results are for
     pub searched: String,
-    pub busy: bool,
-    pub results: Option<Result<FindResults, String>>,
+    /// results per kind ("artists", "songs", "albums") as they arrive
+    pub parts: HashMap<String, Result<Vec<FoundItem>, String>>,
+    /// kinds showing everything ("Show N more")
+    pub open: HashSet<String>,
+    pub can_get: bool,
+    pub configured: bool,
+    seq: u64,
     /// foreign ids asked for in this session (shown as "Requested")
     pub asked: HashSet<String>,
     pub asking: HashSet<String>,
@@ -202,11 +232,11 @@ pub enum Message {
     MarkAllRead,
 
     /* get more music */
-    FindChanged(String),
-    /// from Search: look for these words on the Get more music page
-    LookFurther(String),
-    FindSubmit,
-    Found(String, Result<FindResults, Error>),
+    SearchType(SearchType),
+    /// typing stopped for a moment: look further (Lidarr) for these words
+    SearchSettled(String),
+    FoundPart(u64, String, Result<(Vec<FoundItem>, bool, bool), Error>),
+    ShowMoreFound(String),
     RequestMusic(String, String),
     Requested(String, Result<(), Error>),
     RequestsLoaded(Result<Vec<Request>, Error>),
@@ -218,7 +248,18 @@ pub enum Message {
     RemoveAllDownloads,
 
     /* settings */
-    SetLeveling(String),
+    SetLeveling(bool),
+    CreditsLoaded(String, Result<Vec<Credit>, Error>),
+
+    /* the window's own title bar */
+    TitlePress,
+    Minimize,
+    ToggleMaximize,
+    CloseWindow,
+    /// start resizing from an edge (a Win32 hit-test code: HTLEFT…HTBOTTOMRIGHT)
+    ResizeEdge(usize),
+    Maximized(bool),
+    CheckMaximized,
     SetShare(bool),
     SetPrivate(bool),
     SetStartWithWindows(bool),
@@ -276,7 +317,12 @@ pub struct App {
     pub notes: Notes,
     pub mixes: Vec<Mix>,
     pub lyrics: HashMap<String, Result<LyricsAnswer, String>>,
+    pub credits: HashMap<String, Result<Vec<Credit>, String>>,
     lyric_line: Option<usize>,
+    pub search_type: SearchType,
+    last_title_press: Option<Instant>,
+    pub maximized: bool,
+    hwnd: Option<isize>,
     pub find: FindState,
 
     pub downloads: Downloads,
@@ -365,7 +411,12 @@ impl App {
             notes: Notes::default(),
             mixes: vec![],
             lyrics: HashMap::new(),
+            credits: HashMap::new(),
             lyric_line: None,
+            search_type: SearchType::All,
+            last_title_press: None,
+            maximized: false,
+            hwnd: None,
             find: FindState::default(),
             dl_queue: VecDeque::new(),
             dl_active: None,
@@ -555,8 +606,8 @@ impl App {
             tasks.push(Task::perform(blocking(move || cache.get(&c, &fetch_id, size, version).ok()), move |b| Message::CoverLoaded(id.clone(), size, b)));
         }
         // pictures of music found through Lidarr
-        if let Some(Ok(r)) = &self.find.results {
-            let paths: Vec<String> = r.albums.iter().chain(r.artists.iter()).chain(r.songs.iter()).filter_map(|x| x.image.clone()).collect();
+        if self.page == Page::Search {
+            let paths: Vec<String> = self.find.parts.values().filter_map(|r| r.as_ref().ok()).flatten().filter_map(|x| x.image.clone()).collect();
             for p in paths {
                 if self.images.contains_key(&p) || !self.image_pending.insert(p.clone()) {
                     continue;
@@ -578,8 +629,7 @@ impl App {
             self.say("That song isn't downloaded, and the server can't be reached.");
             return Task::none();
         }
-        let leveling = self.setting_str("leveling", "off");
-        self.player.set_gain(audio::replay_gain(self.lib.track(&id).and_then(|t| t.replay_gain.as_ref()), &leveling));
+        self.player.set_gain(self.gain_for(&id));
         self.player.load(&c, &id, local, play);
         self.status.track = Some(id.clone());
         self.status.position = Duration::ZERO;
@@ -599,11 +649,15 @@ impl App {
 
     fn load_lyrics(&mut self) -> Task<Message> {
         let (Some(c), Some(id)) = (self.client.clone(), self.status.track.clone()) else { return Task::none() };
-        if !self.now_playing || self.np_tab != NpTab::Lyrics || self.lyrics.contains_key(&id) || self.offline {
+        if !self.now_playing || self.offline {
             return Task::none();
         }
         let tid = id.clone();
-        Task::perform(blocking(move || c.lyrics(&tid)), move |r| Message::LyricsLoaded(id.clone(), r))
+        match self.np_tab {
+            NpTab::Lyrics if !self.lyrics.contains_key(&id) => Task::perform(blocking(move || c.lyrics(&tid)), move |r| Message::LyricsLoaded(id.clone(), r)),
+            NpTab::Credits if !self.credits.contains_key(&id) => Task::perform(blocking(move || c.credits(&tid)), move |r| Message::CreditsLoaded(id.clone(), r)),
+            _ => Task::none(),
+        }
     }
 
     /* ---------- playlists: your own ones are app data, collaborative ones go to the server ---------- */
@@ -672,6 +726,38 @@ impl App {
             return Task::perform(blocking(move || d.download(&c, &tid, |_, _| {}).map(|_| ()).map_err(|e| e.to_string())), move |r| Message::DownloadDone(id.clone(), r));
         }
         Task::none()
+    }
+
+    /// Search's "Get more music": ask the server for each kind the filter shows, separately, so
+    /// each appears as soon as it's ready. Older answers are ignored.
+    fn look_further(&mut self, q: String) -> Task<Message> {
+        let q = q.trim().to_string();
+        if q != self.search.trim() || q == self.find.searched {
+            return Task::none(); // still typing, or already looked
+        }
+        self.find.seq += 1;
+        self.find.parts.clear();
+        self.find.open.clear();
+        self.find.searched = q.clone();
+        let lidarr = self.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false);
+        let Some(c) = self.client.clone().filter(|_| lidarr && !self.offline && q.chars().count() >= 2) else { return Task::none() };
+        let seq = self.find.seq;
+        Task::batch(self.search_type.kinds().iter().map(|kind| {
+            let (c, q, k) = (c.clone(), q.clone(), kind.to_string());
+            let k2 = k.clone();
+            Task::perform(blocking(move || c.find_part(&q, &k)), move |r| Message::FoundPart(seq, k2.clone(), r))
+        }))
+    }
+
+    /// The volume-leveling gain for a song: album gain while an album plays in order (keeps its
+    /// loud and quiet songs as made), song gain otherwise. 1.0 with leveling off.
+    fn gain_for(&self, track: &str) -> f32 {
+        if self.setting_str("leveling", "off") == "off" {
+            return 1.0;
+        }
+        let Some(t) = self.lib.track(track) else { return 1.0 };
+        let album_in_order = !self.queue.shuffle() && self.queue.len() > 1 && self.queue.items().iter().all(|id| self.lib.track(id).map(|x| x.album_id == t.album_id).unwrap_or(false));
+        audio::replay_gain(t.replay_gain.as_ref(), if album_in_order { "album" } else { "track" })
     }
 
     pub fn dl_queue_len(&self) -> usize {
@@ -805,8 +891,16 @@ impl App {
                 return self.fetch_covers();
             }
             Message::SearchChanged(s) => {
-                self.search = s;
-                return self.fetch_covers();
+                self.search = s.clone();
+                // look further (Lidarr) once typing stops for a moment, as the website does
+                let settle = Task::perform(
+                    async move {
+                        tokio::time::sleep(Duration::from_millis(350)).await;
+                        s
+                    },
+                    Message::SearchSettled,
+                );
+                return Task::batch([self.fetch_covers(), settle]);
             }
             Message::LibTab(t) => {
                 self.lib_tab = t;
@@ -936,6 +1030,9 @@ impl App {
             }
             Message::LyricsLoaded(id, r) => {
                 self.lyrics.insert(id, r.map_err(|e| e.to_string()));
+            }
+            Message::CreditsLoaded(id, r) => {
+                self.credits.insert(id, r.map_err(|e| e.to_string()));
             }
 
             /* ---------- playlists ---------- */
@@ -1128,29 +1225,30 @@ impl App {
             }
 
             /* ---------- get more music ---------- */
-            Message::FindChanged(s) => self.find.term = s,
-            Message::LookFurther(s) => {
-                self.find.term = s;
-                let t = self.go(Page::GetMusic);
-                return Task::batch([t, self.update(Message::FindSubmit)]);
+            Message::SearchType(t) => {
+                self.search_type = t;
+                let q = self.search.trim().to_string();
+                self.find.searched.clear(); // the kinds shown changed: look again
+                return Task::batch([self.fetch_covers(), self.update(Message::SearchSettled(q))]);
             }
-            Message::FindSubmit => {
-                let term = self.find.term.trim().to_string();
-                let Some(c) = self.client.clone() else { return Task::none() };
-                if term.chars().count() < 2 || self.find.busy {
-                    return Task::none();
-                }
-                self.find.busy = true;
-                self.find.searched = term.clone();
-                let t2 = term.clone();
-                return Task::perform(blocking(move || c.find_music(&t2)), move |r| Message::Found(term.clone(), r));
-            }
-            Message::Found(term, r) => {
-                if term == self.find.searched {
-                    self.find.busy = false;
-                    self.find.results = Some(r.map_err(|e| e.to_string()));
+            Message::SearchSettled(q) => return self.look_further(q),
+            Message::FoundPart(seq, kind, r) => {
+                if seq == self.find.seq {
+                    match r {
+                        Ok((list, can, configured)) => {
+                            self.find.can_get = can;
+                            self.find.configured = configured;
+                            self.find.parts.insert(kind, Ok(list));
+                        }
+                        Err(e) => {
+                            self.find.parts.insert(kind, Err(e.to_string()));
+                        }
+                    }
                     return self.fetch_covers();
                 }
+            }
+            Message::ShowMoreFound(kind) => {
+                self.find.open.insert(kind);
             }
             Message::RequestMusic(kind, id) => {
                 let Some(c) = self.client.clone() else { return Task::none() };
@@ -1220,9 +1318,10 @@ impl App {
             }
 
             /* ---------- settings ---------- */
-            Message::SetLeveling(v) => {
-                let t = self.edit(vec![Edit::Setting("leveling".into(), json!(v.clone()))]);
-                let g = audio::replay_gain(self.status.track.as_deref().and_then(|id| self.lib.track(id)).and_then(|t| t.replay_gain.as_ref()), &v);
+            Message::SetLeveling(on) => {
+                // the website keeps off | track | album; "track" when on (the app picks album gain itself while an album plays in order)
+                let t = self.edit(vec![Edit::Setting("leveling".into(), json!(if on { "track" } else { "off" }))]);
+                let g = self.status.track.clone().map(|id| self.gain_for(&id)).unwrap_or(1.0);
                 self.player.set_gain(g);
                 return t;
             }
@@ -1268,7 +1367,45 @@ impl App {
             }
             Message::Hwnd(h) => {
                 if let Some(h) = h {
+                    self.hwnd = Some(h);
                     self.media = system::Media::new(h);
+                }
+            }
+            Message::TitlePress => {
+                let Some(id) = self.window else { return Task::none() };
+                // a double click maximizes / restores, as on any Windows title bar
+                if self.last_title_press.map(|t| t.elapsed() < Duration::from_millis(400)).unwrap_or(false) {
+                    self.last_title_press = None;
+                    return Task::batch([window::toggle_maximize(id), window::get_maximized(id).map(Message::Maximized)]);
+                }
+                self.last_title_press = Some(Instant::now());
+                return window::drag(id);
+            }
+            Message::Minimize => {
+                if let Some(id) = self.window {
+                    return window::minimize(id, true);
+                }
+            }
+            Message::ToggleMaximize => {
+                if let Some(id) = self.window {
+                    self.maximized = !self.maximized;
+                    return Task::batch([window::toggle_maximize(id), window::get_maximized(id).map(Message::Maximized)]);
+                }
+            }
+            Message::Maximized(m) => self.maximized = m,
+            Message::CheckMaximized => {
+                if let Some(id) = self.window {
+                    return window::get_maximized(id).map(Message::Maximized);
+                }
+            }
+            Message::CloseWindow => {
+                if let Some(id) = self.window {
+                    return self.update(Message::CloseRequested(id));
+                }
+            }
+            Message::ResizeEdge(hit) => {
+                if let Some(h) = self.hwnd {
+                    system::start_resize(h, hit);
                 }
             }
             Message::CloseRequested(id) => {
@@ -1401,14 +1538,16 @@ impl App {
             "household" => tasks.push(self.go(Page::Household)),
             "notifications" => tasks.push(self.go(Page::Notifications)),
             "dialog" => self.dialog = Some(Dialog::NewPlaylist { name: "Sunday morning".into(), description: String::new(), add: vec![], collaborative: false }),
-            s if s.starts_with("getmusic:") => {
-                self.find.term = s["getmusic:".len()..].to_string();
-                tasks.push(self.go(Page::GetMusic));
-                tasks.push(self.update(Message::FindSubmit));
+            "credits" => {
+                tasks.push(self.update(Message::PlayAlbum(first.0, 0)));
+                self.np_tab = NpTab::Credits;
+                self.now_playing = true;
+                tasks.push(self.load_lyrics());
             }
             s if s.starts_with("search:") => {
                 self.search = s["search:".len()..].to_string();
                 tasks.push(self.go(Page::Search));
+                tasks.push(self.look_further(self.search.clone()));
             }
             _ => {}
         }
@@ -1577,10 +1716,14 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick), window::close_requests().map(Message::CloseRequested)];
         // Escape closes a dialog or Now Playing; Space plays/pauses when no text box is in use
-        subs.push(iced::keyboard::on_key_press(|key, _mods| {
+        // the window was maximized or restored some other way (Win+Up, snapping): keep the button right
+        subs.push(window::resize_events().map(|_| Message::CheckMaximized));
+        subs.push(iced::keyboard::on_key_press(|key, mods| {
             use iced::keyboard::{key::Named, Key};
             match key {
                 Key::Named(Named::Escape) => Some(Message::DialogCancel),
+                Key::Named(Named::ArrowLeft) if mods.alt() => Some(Message::Back),
+                Key::Named(Named::BrowserBack) => Some(Message::Back),
                 Key::Named(Named::MediaPlayPause) => Some(Message::TogglePlay),
                 _ => None,
             }
@@ -1647,6 +1790,9 @@ fn main() -> iced::Result {
             icon,
             visible: !start_hidden,
             exit_on_close_request: false,
+            // the app draws its own title bar (just minimize, maximize and close)
+            decorations: false,
+            platform_specific: window::settings::PlatformSpecific { undecorated_shadow: true, ..Default::default() },
             ..Default::default()
         })
         .run_with(move || App::new(cell.borrow_mut().take().expect("started once")))

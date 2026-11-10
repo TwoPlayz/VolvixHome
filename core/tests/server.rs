@@ -139,6 +139,8 @@ fn find_music_with_mocks() {
     let r = c.find_music("north").unwrap();
     assert!(r.configured, "start the dev server with -Mocks");
     assert!(!(r.albums.is_empty() && r.artists.is_empty() && r.songs.is_empty()));
+    let (songs, _, configured) = c.find_part("north", "songs").unwrap();
+    assert!(configured && !songs.is_empty());
     c.requests().unwrap();
 }
 

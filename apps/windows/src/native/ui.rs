@@ -41,7 +41,6 @@ pub mod icon {
     pub const HOME: char = '\u{E80F}';
     pub const SEARCH: char = '\u{E721}';
     pub const LIBRARY: char = '\u{E8F1}';
-    pub const BACK: char = '\u{E72B}';
     pub const QUEUE: char = '\u{E90B}';
     pub const ADD: char = '\u{E710}';
     pub const HEART: char = '\u{EB51}';
