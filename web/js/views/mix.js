@@ -4,13 +4,11 @@ Spin.views = Spin.views || {};
 (function (S) {
   'use strict';
 
-  /** A card for a mix: a 2x2 of its cover art, the name and what it is. */
+  /** A card for a mix: a collage of the albums its songs come from, the name and what it is. */
   S.mixCard = function (m) {
     const albums = [];
     m.ids.forEach(function (id) { const t = S.data.track(id); if (t && albums.indexOf(t.albumId) === -1 && albums.length < 4) albums.push(t.albumId); });
-    const art = albums.length >= 4
-      ? '<div class="mosaic">' + albums.map(function (id) { return S.cover(S.data.album(id)); }).join('') + '</div>'
-      : S.cover(S.data.album(albums[0]));
+    const art = S.collage(albums);
     return '<a class="card mix-card" href="#/mix/' + m.id + '"><span class="card-art">' + art + '</span>' +
       '<span class="card-title">' + S.esc(m.title) + '</span><span class="card-sub">' + S.esc(m.sub) + '</span></a>';
   };

@@ -59,8 +59,7 @@ window.Spin = window.Spin || {};
     el.innerHTML =
       '<div class="q-head"><div class="ly-title"><h2>Lyrics</h2><span>' + S.esc(t.title) + ' · ' + S.esc(t.artist) + '</span></div>' +
         '<button class="icon-btn" data-lyrics-close aria-label="Close lyrics">' + S.icon('x', 18) + '</button></div>' +
-      '<div class="q-body ly-body" data-lyrics-body>' + body(t, res) + '</div>' +
-      (res && res.lyrics && res.lyrics.source === 'lrclib' ? '<div class="ly-credit">Lyrics from LRCLIB</div>' : '');
+      '<div class="q-body ly-body" data-lyrics-body>' + body(t, res) + '</div>';
     follow(true);
   }
 

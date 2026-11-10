@@ -200,17 +200,29 @@ window.Spin = window.Spin || {};
   S.cover = function (album, extraClass) {
     if (!album) return '<div class="cover cover--empty ' + (extraClass || '') + '">' + S.icon('music', 22) + '</div>';
     const a = album.art || {};
-    // generated art sits underneath, so there's never an empty square while the real cover loads (or if there is none)
     // no cover file: the album's name is printed on generated art (in the background and font someone chose, if they did)
     const look = !album.cover && album.look ? album.look : null;
     const text = !album.cover ? '<span class="cover-title">' + S.esc(album.title) + '</span><span class="cover-artist">' + S.esc(album.artist) + '</span>' : '';
-    return '<div class="cover cover--' + (look ? 'custom' : (a.variant || 'plain')) + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '"' +
+    // has a cover file: a plain tile while it loads, so the generated art doesn't flash first; it fades in once decoded.
+    // Only if the picture fails does the generated art show.
+    const real = album.cover && S.server;
+    return '<div class="cover cover--' + (look ? 'custom' : (a.variant || 'plain')) + (real ? ' cover--loading' : '') + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '"' +
       (look ? ' data-bg="' + S.esc(look.bg) + '" data-font="' + S.esc(look.font) + '"' : '') + '>' + text +
-      (album.cover && S.server ? '<img class="cover-img" src="' + S.server.coverUrl(album.id) + '" alt="" loading="lazy" decoding="async" onerror="this.remove()">' : '') +
+      (real ? '<img class="cover-img" src="' + S.server.coverUrl(album.id) + '" alt="" loading="lazy" decoding="async" onload="this.parentNode.classList.remove(\'cover--loading\')" onerror="this.parentNode.classList.remove(\'cover--loading\');this.remove()">' : '') +
       '</div>';
   };
 
-  /** 2×2 mosaic of the first four distinct album covers in a playlist (Spotify-style). */
+  /** A collage of up to four album covers: 4 = a 2×2 grid, 3 = one big and two small, 2 = side by side, 1 = just that cover. */
+  S.collage = function (albumIds, extraClass) {
+    const albums = albumIds.map(function (id) { return S.data.album(id); }).filter(Boolean).slice(0, 4);
+    if (albums.length >= 2) {
+      return '<div class="mosaic mosaic-' + albums.length + ' ' + (extraClass || '') + '">' + albums.map(function (a) { return S.cover(a); }).join('') + '</div>';
+    }
+    if (albums.length) return S.cover(albums[0], extraClass);
+    return '<div class="cover cover--empty ' + (extraClass || '') + '">' + S.icon('music', 22) + '</div>';
+  };
+
+  /** A playlist's cover: a collage of the albums its songs come from (Spotify-style). */
   S.playlistCover = function (playlist, extraClass) {
     // Liked Songs has its own cover: a heart on a red-to-purple wash
     if (playlist && playlist.liked) {
@@ -221,13 +233,7 @@ window.Spin = window.Spin || {};
       const t = S.data.track(entry.id || entry);
       if (t && albums.indexOf(t.albumId) === -1) albums.push(t.albumId);
     });
-    if (albums.length >= 4) {
-      return '<div class="mosaic ' + (extraClass || '') + '">' + albums.slice(0, 4).map(function (id) {
-        return S.cover(S.data.album(id));
-      }).join('') + '</div>';
-    }
-    if (albums.length) return S.cover(S.data.album(albums[0]), extraClass);
-    return '<div class="cover cover--empty ' + (extraClass || '') + '">' + S.icon('music', 22) + '</div>';
+    return S.collage(albums, extraClass);
   };
 
   const AVATAR_COLORS = ['#5E548E', '#335C67', '#9E2A2B', '#BC6C25', '#3D5A80', '#6B4F3A', '#4A6C2F', '#7A4069'];

@@ -148,11 +148,12 @@ window.Spin = window.Spin || {};
     window.addEventListener('pointercancel', end);
   }
 
-  // tap the mini player (anywhere but its play button) to open
+  // tap the mini player (anywhere but its play button, or the song / artist name, which go to their pages) to open
   document.addEventListener('click', function (e) {
     if (!phone.matches) return;
     const bar = e.target.closest('.player');
     if (!bar || e.target.closest('[data-player="toggle"]')) return;
+    if (e.target.closest('.player-meta a[href]')) return; // a normal link: let it go to the album / artist
     e.preventDefault();
     e.stopPropagation();
     show();

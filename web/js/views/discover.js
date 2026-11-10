@@ -30,6 +30,15 @@ Spin.views = Spin.views || {};
         a.albums.forEach(function (x) { (groups[kindOf(x)] = groups[kindOf(x)] || []).push(x); });
         const left = a.albums.filter(function (x) { return !x.onServer && !x.requested; }).length;
         const initials = String(a.name).split(/\s+/).map(function (w) { return w[0]; }).slice(0, 2).join('');
+        // their photo (if Wikipedia has one) replaces the initials once it has loaded
+        if (a.image) {
+          const pic = new Image();
+          pic.onload = function () {
+            const hero = S.$('.artist-hero', root);
+            if (hero) { hero.className = 'artist-hero artist-hero-img'; hero.innerHTML = ''; hero.appendChild(pic); }
+          };
+          pic.alt = ''; pic.referrerPolicy = 'no-referrer'; pic.src = a.image;
+        }
         root.innerHTML =
           '<header class="profile-head"><span class="artist-hero">' + S.esc(initials) + '</span>' +
             '<div class="profile-info"><div class="eyebrow">Not in your library yet</div><h1 class="album-title">' + S.esc(a.name) + '</h1>' +

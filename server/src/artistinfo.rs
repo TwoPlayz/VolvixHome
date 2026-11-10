@@ -65,6 +65,17 @@ impl Client {
     pub async fn find(&self, mb: &Mb, name: &str) -> Result<Option<Info>, String> {
         if !self.enabled { return Ok(None); }
         let Some(links) = mb.artist_links(name).await? else { return Ok(None) };
+        self.from_links(links).await
+    }
+
+    /// Just the photo of the artist with this MusicBrainz id. Ok(None) = they have none.
+    pub async fn photo_by_mbid(&self, mb: &Mb, mbid: &str) -> Result<Option<Vec<u8>>, String> {
+        if !self.enabled { return Ok(None); }
+        let links = mb.artist_links_by_id(mbid).await?;
+        Ok(self.from_links(links).await?.and_then(|i| i.image))
+    }
+
+    async fn from_links(&self, links: crate::musicbrainz::ArtistLinks) -> Result<Option<Info>, String> {
         let mut title = links.wikipedia;
         if title.is_none() {
             if let Some(q) = links.wikidata {

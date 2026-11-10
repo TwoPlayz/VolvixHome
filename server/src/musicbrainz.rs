@@ -117,7 +117,7 @@ impl Client {
         let g = self.get(&format!("release-group?artist={mbid}&type=album%7Cep%7Csingle&inc=artist-credits&fmt=json&limit=100")).await?;
         let mut albums = parse_albums(&g);
         albums.sort_by(|x, y| y["year"].as_str().unwrap_or("0").cmp(x["year"].as_str().unwrap_or("0")));
-        Ok(json!({ "foreignId": mbid, "name": a["name"], "type": a["type"], "disambiguation": a["disambiguation"], "country": a["country"], "albums": albums }))
+        Ok(json!({ "foreignId": mbid, "name": a["name"], "type": a["type"], "disambiguation": a["disambiguation"], "country": a["country"], "image": artist_image(mbid), "albums": albums }))
     }
 
     /// One release-group: its details and the songs on it (from its earliest official release).
@@ -197,6 +197,12 @@ impl Client {
         let Some(id) = id else { return Ok(None) };
         let rec = self.get(&format!("artist/{id}?inc=url-rels&fmt=json")).await?;
         Ok(Some(parse_artist_links(&rec)))
+    }
+
+    /// The Wikipedia/Wikidata links of the artist with this MusicBrainz id (no name guessing).
+    pub async fn artist_links_by_id(&self, id: &str) -> Result<ArtistLinks, String> {
+        let rec = self.get(&format!("artist/{id}?inc=url-rels&fmt=json")).await?;
+        Ok(parse_artist_links(&rec))
     }
 }
 
@@ -306,6 +312,11 @@ fn cover(rg_id: &str) -> String {
     format!("/api/discover/image/{rg_id}")
 }
 
+/// Where the app asks for an artist's photo (Wikipedia, found through MusicBrainz), fetched once and kept by our server.
+fn artist_image(mbid: &str) -> String {
+    format!("/api/discover/artist-image/{mbid}")
+}
+
 /// Albums (release-groups of type album/ep).
 fn parse_albums(v: &Value) -> Vec<Value> {
     v["release-groups"].as_array().cloned().unwrap_or_default().iter()
@@ -326,7 +337,7 @@ fn parse_artists(v: &Value) -> Vec<Value> {
     v["artists"].as_array().cloned().unwrap_or_default().iter()
         .filter(|a| a["id"].as_str().is_some())
         .map(|a| json!({
-            "foreignId": a["id"], "name": a["name"],
+            "foreignId": a["id"], "name": a["name"], "image": artist_image(a["id"].as_str().unwrap_or("")),
             "type": a["type"], "disambiguation": a["disambiguation"],
             "country": a["country"]
         }))

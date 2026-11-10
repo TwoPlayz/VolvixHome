@@ -204,6 +204,11 @@ a:focus-visible:not(.btn):not(.card):not(.list-row):not(.nav-item):not(.playlist
 .cover--rings::before { width: 58%; aspect-ratio: 1; border-radius: 50%; border: 7cqw solid var(--c2); top: 8%; left: 21%; }
 .cover--plain::before { left: 10%; right: 10%; top: 10%; height: 1px; background: var(--fg); opacity: .35; }
 .cover--empty { background: var(--surface-3); color: var(--text-3); align-items: center; justify-content: center; }
+/* a real cover is on its way: a quiet tile, not the generated art (which would flash and then be replaced) */
+.cover--loading { background: var(--surface-3); }
+.cover--loading::before { display: none; }
+.cover--loading .cover-img { opacity: 0; }
+.cover .cover-img { transition: opacity .15s ease-out; }
 @container (max-width: 72px) {
   .cover-title, .cover-artist { display: none; }
 }
@@ -213,6 +218,11 @@ a:focus-visible:not(.btn):not(.card):not(.list-row):not(.nav-item):not(.playlist
   width: 100%; border-radius: 8px; overflow: hidden;
 }
 .mosaic .cover { border-radius: 0; }
+/* fewer than four albums: 2 = side by side, 3 = one big on the left and two stacked on the right */
+.mosaic-2, .mosaic-3 { grid-template-rows: 1fr 1fr; }
+.mosaic-2 .cover, .mosaic-3 .cover { aspect-ratio: auto; height: 100%; min-height: 0; }
+.mosaic-2 .cover { grid-row: span 2; }
+.mosaic-3 .cover:first-child { grid-row: span 2; }
 
 .thumb { width: 44px; flex: none; border-radius: 6px; }
 /* % padding resolves against the parent's width, which blew small covers up inside wide dialogs.
@@ -2591,8 +2601,10 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 /* (lyrics share the queue panel's stacking, so on a phone they open above Now Playing) */
 .ly-title { display: flex; flex-direction: column; min-width: 0; }
 .ly-title span { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ly-body { padding: 8px 12px 24px; scroll-behavior: auto; }
-.ly-lines { display: flex; flex-direction: column; gap: 2px; padding: 40% 0; }
+/* no visible scrollbars (it scrolls itself), and no sideways scrolling from the sung line growing slightly */
+.ly-body { padding: 8px 12px 24px; scroll-behavior: auto; overflow-x: hidden; scrollbar-width: none; }
+.ly-body::-webkit-scrollbar { display: none; }
+.ly-lines { display: flex; flex-direction: column; gap: 2px; padding: 8px 0 24px; }
 .ly-line { text-align: left; font-size: 22px; font-weight: 700; line-height: 1.3; padding: 8px 10px; border-radius: 10px;
   color: var(--text-3); transition: color .25s, transform .25s, background-color .12s; transform-origin: left center; }
 .ly-line.past { color: var(--text-2); }
@@ -2606,7 +2618,6 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .ly-note { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 48px 20px; color: var(--text-2); }
 .ly-note strong { color: var(--text); font-size: 16px; }
 .ly-note p { margin: 0; line-height: 1.5; font-size: 14px; }
-.ly-credit { padding: 8px 20px 12px; font-size: 11px; color: var(--text-3); text-align: center; }
 @media (max-width: 760px) { .ly-line { font-size: 24px; } }
 
 /* phone Now Playing fits the screen: the cover takes whatever room is left, so nothing scrolls */

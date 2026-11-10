@@ -730,6 +730,38 @@ async fn discover_image(State(st): State<Shared>, headers: HeaderMap, Path(id): 
     }
 }
 
+/// The photo of an artist that isn't in the library yet (Search, Get more music), by MusicBrainz id. Fetched from Wikipedia
+/// once and kept; "has none" is remembered for a week so the page doesn't keep asking.
+async fn discover_artist_image(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    if id.is_empty() || id.len() > 40 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return error(StatusCode::BAD_REQUEST, "Bad id."); }
+    let dir = st.cfg.data_dir.join("cache").join("mbartists");
+    let (img, none) = (dir.join(format!("{id}.img")), dir.join(format!("{id}.none")));
+    let kind_of = |b: &[u8]| if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
+    let send = |b: Vec<u8>| ([(header::CONTENT_TYPE, kind_of(&b)), (header::CACHE_CONTROL, "private, max-age=2592000")], b).into_response();
+    if let Ok(b) = std::fs::read(&img) { return send(b); }
+    let fresh_none = std::fs::metadata(&none).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|a| a < Duration::from_secs(7 * 86400)).unwrap_or(false);
+    if fresh_none { return error(StatusCode::NOT_FOUND, "No picture."); }
+    static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let _permit = GATE.get_or_init(|| tokio::sync::Semaphore::new(3)).acquire().await;
+    if let Ok(b) = std::fs::read(&img) { return send(b); } // fetched by another request while this one waited
+    match st.artists.photo_by_mbid(&st.mb, &id).await {
+        Ok(Some(bytes)) => {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(&img, &bytes);
+            send(bytes)
+        }
+        Ok(None) => {
+            if st.artists.enabled {
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::write(&none, b"");
+            }
+            error(StatusCode::NOT_FOUND, "No picture.")
+        }
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e), // couldn't ask: not remembered, so it's tried again next time
+    }
+}
+
 /// An artist's bio and photo (from Wikipedia, via MusicBrainz), kept on the server for a month.
 async fn artist_info(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     if let Err(r) = signed_in(&st, &headers) {
@@ -2078,6 +2110,7 @@ async fn main() {
         .route("/api/share/{token}/stream/{id}", get(share_stream))
         .route("/api/share/{token}/cover/{album}", get(share_cover))
         .route("/api/discover/image/{id}", get(discover_image))
+        .route("/api/discover/artist-image/{id}", get(discover_artist_image))
         .route("/api/artist/info", get(artist_info))
         .route("/api/artist/image/{slug}", get(artist_image))
         .route("/api/lidarr", get(lidarr_status).put(lidarr_config))
