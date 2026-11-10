@@ -88,6 +88,62 @@ fn streaming_with_seek() {
 
 #[test]
 #[ignore]
+fn playlist_edits_survive_other_devices() {
+    use volvix_core::userdata::{save_edits, Edit};
+    let (c, lib) = signed_in();
+    let t = lib.tracks()[0].id.clone();
+    let id = volvix_core::userdata::new_playlist_id();
+    let pl = Playlist { id: id.clone(), name: "Native test".into(), owner: "u_me".into(), ..Default::default() };
+    save_edits(&c, &[Edit::CreatePlaylist(pl), Edit::AddTracks { id: id.clone(), tracks: vec![t.clone()], at: 1 }]).unwrap();
+    // another device (the website) saves something else meanwhile; our next save keeps it
+    let mut other = c.user_data().unwrap().unwrap();
+    other.rest.insert("fromWebsite".into(), serde_json::json!(1));
+    c.save_user_data(&other).unwrap();
+    let d = save_edits(&c, &[Edit::Like { track: t.clone(), on: true, at: 2 }]).unwrap();
+    assert_eq!(d.rest["fromWebsite"], 1);
+    assert!(d.playlists.iter().any(|p| p.id == id && p.track_ids() == vec![t.clone()]));
+    assert!(volvix_core::userdata::is_liked(&d, &t));
+    save_edits(&c, &[Edit::DeletePlaylist(id), Edit::Like { track: t, on: false, at: 3 }]).unwrap();
+}
+
+#[test]
+#[ignore]
+fn shared_playlists_household_notes() {
+    let (c, lib) = signed_in();
+    let t = lib.tracks()[0].id.clone();
+    let r = c.create_shared("Native shared", "", false, &[t.clone()]).unwrap();
+    assert_eq!(r.playlist.tracks.len(), 1);
+    let id = r.playlist.id.clone();
+    let r = c.shared_op(&id, serde_json::json!({ "op": "update", "name": "Renamed" })).unwrap();
+    assert_eq!(r.playlist.name, "Renamed");
+    assert!(c.shared().unwrap().playlists.iter().any(|p| p.id == id));
+    let r = c.shared_op(&id, serde_json::json!({ "op": "delete" })).unwrap();
+    assert!(r.gone);
+    c.household().unwrap();
+    c.notifications().unwrap();
+    c.mark_read(None).unwrap();
+    c.set_now_playing(Some(&t), true).unwrap();
+    c.set_now_playing(None, false).unwrap();
+    // lyrics: the dev music has a .lrc for "Low Tide"
+    if let Some(low) = lib.tracks().iter().find(|t| t.title == "Low Tide") {
+        let ly = c.lyrics(&low.id).unwrap();
+        assert!(ly.lyrics.map(|l| !l.synced.is_empty() || !l.plain.is_empty()).unwrap_or(false));
+    }
+}
+
+#[test]
+#[ignore]
+fn find_music_with_mocks() {
+    // needs dev.ps1 -Mocks (fake MusicBrainz and Lidarr)
+    let (c, _) = signed_in();
+    let r = c.find_music("north").unwrap();
+    assert!(r.configured, "start the dev server with -Mocks");
+    assert!(!(r.albums.is_empty() && r.artists.is_empty() && r.songs.is_empty()));
+    c.requests().unwrap();
+}
+
+#[test]
+#[ignore]
 fn covers_are_cached() {
     let (c, lib) = signed_in();
     let Some(a) = lib.albums().iter().find(|a| a.cover && a.cover_v > 0) else { return };

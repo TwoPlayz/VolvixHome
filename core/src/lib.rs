@@ -13,13 +13,17 @@
 
 pub mod client;
 pub mod covers;
+pub mod downloads;
 pub mod error;
 pub mod library;
+pub mod mixes;
 pub mod model;
+pub mod playlists;
 pub mod queue;
 pub mod search;
 pub mod session;
 pub mod stream;
+pub mod userdata;
 
 pub use client::Client;
 pub use error::{Error, Result};

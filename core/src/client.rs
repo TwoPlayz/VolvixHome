@@ -157,9 +157,120 @@ impl Client {
         Ok(())
     }
 
-    /// Synced lyrics etc. as the server sends them (parsed in a later phase).
-    pub fn lyrics(&self, track_id: &str) -> Result<serde_json::Value> {
+    /// Lyrics for a song: a .lrc next to it, its tags, or LRCLIB (the server decides).
+    pub fn lyrics(&self, track_id: &str) -> Result<LyricsAnswer> {
         self.get_json(&format!("/api/lyrics/{}", enc(track_id)))
+    }
+
+    /* ---------- account ---------- */
+
+    /// Change your own password. The server signs you in again with a fresh token (returned client).
+    pub fn change_password(&self, current: &str, new: &str) -> Result<(Client, SignedIn)> {
+        let res = self.request("POST", "/api/me/password").send_json(json!({ "current": current, "new": new }))?;
+        self.finish_sign_in(res)
+    }
+
+    /// Change your display name.
+    pub fn rename_me(&self, name: &str) -> Result<User> {
+        #[derive(serde::Deserialize)]
+        struct A {
+            user: User,
+        }
+        let res = self.request("PUT", "/api/me/profile").send_json(json!({ "name": name }))?;
+        res.into_json::<A>().map(|a| a.user).map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
+    /* ---------- household ---------- */
+
+    /// Collaborative playlists you're on, and invites waiting for you.
+    pub fn shared(&self) -> Result<SharedList> {
+        self.get_json("/api/shared")
+    }
+
+    /// Make a playlist collaborative (it moves to the server; you stay the owner).
+    pub fn create_shared(&self, name: &str, description: &str, public: bool, track_ids: &[String]) -> Result<SharedOpResult> {
+        let res = self.request("POST", "/api/shared").send_json(json!({ "name": name, "description": description, "public": public, "tracks": track_ids }))?;
+        res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
+    /// One change to a collaborative playlist: `{"op":"add","ids":[…]}`, `remove` (index, trackId), `move`
+    /// (from, to), `update` (name, description, public), `invite` (userIds), `uninvite`, `accept`,
+    /// `decline`, `leave`, `unshare`, `delete`.
+    pub fn shared_op(&self, playlist_id: &str, op: serde_json::Value) -> Result<SharedOpResult> {
+        let res = self.request("POST", &format!("/api/shared/{}/op", enc(playlist_id))).send_json(op)?;
+        res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
+    /// Everyone else: what they're playing and their public playlists.
+    pub fn household(&self) -> Result<Household> {
+        self.get_json("/api/household")
+    }
+
+    /// Tell the household what you're playing (`None` = nothing / private).
+    pub fn set_now_playing(&self, track_id: Option<&str>, playing: bool) -> Result<()> {
+        self.request("PUT", "/api/me/now").send_json(json!({ "trackId": track_id, "playing": playing }))?;
+        Ok(())
+    }
+
+    pub fn notifications(&self) -> Result<Notes> {
+        self.get_json("/api/notifications")
+    }
+
+    /// Mark some (or, with `None`, all) notifications read.
+    pub fn mark_read(&self, ids: Option<&[String]>) -> Result<()> {
+        let body = match ids {
+            Some(ids) => json!({ "ids": ids }),
+            None => json!({}),
+        };
+        self.request("POST", "/api/notifications/read").send_json(body)?;
+        Ok(())
+    }
+
+    /* ---------- getting more music (Lidarr) ---------- */
+
+    /// Look for music you don't have yet (MusicBrainz, through the server).
+    pub fn find_music(&self, term: &str) -> Result<FindResults> {
+        let q: String = term.trim().bytes().map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        }).collect();
+        // MusicBrainz can be slow: give it longer than ordinary calls
+        let res = self.request("GET", &format!("/api/lidarr/search?term={q}")).timeout(Duration::from_secs(45)).call()?;
+        res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
+    /// Ask Lidarr to get an album or everything by an artist.
+    pub fn request_music(&self, kind: &str, foreign_id: &str) -> Result<()> {
+        self.request("POST", "/api/lidarr/request").timeout(Duration::from_secs(60)).send_json(json!({ "kind": kind, "foreignId": foreign_id }))?;
+        Ok(())
+    }
+
+    /// Take a request back (only whoever asked, or someone who manages members).
+    pub fn cancel_request(&self, foreign_id: &str) -> Result<()> {
+        self.request("DELETE", &format!("/api/lidarr/request/{}", enc(foreign_id))).call()?;
+        Ok(())
+    }
+
+    pub fn requests(&self) -> Result<Vec<Request>> {
+        #[derive(serde::Deserialize)]
+        struct A {
+            #[serde(default)]
+            requests: Vec<Request>,
+        }
+        self.get_json::<A>("/api/lidarr/requests").map(|a| a.requests)
+    }
+
+    /// Downloads in progress in Lidarr (`items`: title, artist, progress 0..1, state).
+    pub fn lidarr_queue(&self) -> Result<serde_json::Value> {
+        self.get_json("/api/lidarr/queue")
+    }
+
+    /// A server-relative picture (e.g. a found album's "/api/discover/image/…").
+    pub fn image_bytes(&self, path: &str) -> Result<Vec<u8>> {
+        let res = self.request("GET", path).call()?;
+        let mut buf = Vec::new();
+        res.into_reader().take(20_000_000).read_to_end(&mut buf)?;
+        Ok(buf)
     }
 
     /// Where a song streams from. Players that can send headers use [`Client::auth_header`] with it.
