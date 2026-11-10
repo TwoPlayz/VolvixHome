@@ -243,6 +243,15 @@ pub fn artist_body(artist: &Value, s: &Settings, monitor_all: bool) -> Value {
     a
 }
 
+/// The artist body for requesting one album: nothing else monitored, but this album listed in `albumsToMonitor`.
+/// Without that, Lidarr's background refresh after the add applies `monitor: none` to every album, including the
+/// one just requested, so it silently drops out of Wanted.
+pub fn artist_body_for_album(artist: &Value, s: &Settings, album_mb: &str) -> Value {
+    let mut a = artist_body(artist, s, false);
+    a["addOptions"]["albumsToMonitor"] = json!([album_mb]);
+    a
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +273,13 @@ mod tests {
         assert_eq!(b["qualityProfileId"], 2);
         assert_eq!(b["addOptions"]["monitor"], "none");
         assert_eq!(b["artistName"], "A");
+    }
+
+    #[test]
+    fn album_request_keeps_that_album_monitored() {
+        let s = Settings { url: "x".into(), api_key: "k".into(), root_folder: "/music".into(), quality_profile_id: 2, metadata_profile_id: 3, everyone_can_request: true, hook_token: "t".into() };
+        let b = artist_body_for_album(&json!({ "artistName": "A" }), &s, "alb1");
+        assert_eq!(b["addOptions"]["monitor"], "none");
+        assert_eq!(b["addOptions"]["albumsToMonitor"], json!(["alb1"]));
     }
 }

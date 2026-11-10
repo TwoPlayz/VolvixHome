@@ -3,6 +3,7 @@
 //!   2. lyrics embedded in the file's tags (plain, or timestamped LRC text)
 //!   3. LRCLIB (lrclib.net), a free community lyrics database. Set VH_LYRICS_ONLINE=0 to never call out.
 //! Synced lyrics are a list of lines with the millisecond each one starts at; plain lyrics are just text.
+//! Enhanced LRC (`[00:01.00]<00:01.00>Hel<00:01.40>lo`) also gives each line its words with the millisecond each starts at.
 
 use std::path::Path;
 use std::time::Duration;
@@ -17,6 +18,30 @@ const DEFAULT_LRCLIB: &str = "https://lrclib.net";
 pub struct Line {
     pub ms: i64,
     pub text: String,
+    /// Word-by-word timing (enhanced LRC). Empty when the line is only synced as a whole.
+    /// Each word's text keeps its spacing, so joining them gives the line back.
+    pub words: Vec<Word>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Word {
+    pub ms: i64,
+    pub text: String,
+}
+
+fn line_json(l: &Line) -> Value {
+    let mut v = json!({ "ms": l.ms, "text": l.text });
+    if !l.words.is_empty() {
+        v["words"] = json!(l.words.iter().map(|w| json!({ "ms": w.ms, "text": w.text })).collect::<Vec<_>>());
+    }
+    v
+}
+
+fn line_from_json(l: &Value) -> Option<Line> {
+    let words = l["words"].as_array().map(|ws| ws.iter()
+        .filter_map(|w| Some(Word { ms: w["ms"].as_i64()?, text: w["text"].as_str()?.to_string() }))
+        .collect()).unwrap_or_default();
+    Some(Line { ms: l["ms"].as_i64()?, text: l["text"].as_str()?.to_string(), words })
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -34,7 +59,7 @@ impl Lyrics {
 
     pub fn to_json(&self) -> Value {
         json!({
-            "synced": self.synced.iter().map(|l| json!({ "ms": l.ms, "text": l.text })).collect::<Vec<_>>(),
+            "synced": self.synced.iter().map(line_json).collect::<Vec<_>>(),
             "plain": self.plain,
             "source": self.source,
             "instrumental": self.instrumental,
@@ -42,9 +67,7 @@ impl Lyrics {
     }
 
     pub fn from_json(v: &Value) -> Option<Lyrics> {
-        let synced = v["synced"].as_array()?.iter()
-            .filter_map(|l| Some(Line { ms: l["ms"].as_i64()?, text: l["text"].as_str()?.to_string() }))
-            .collect();
+        let synced = v["synced"].as_array()?.iter().filter_map(line_from_json).collect();
         Some(Lyrics {
             synced,
             plain: v["plain"].as_str().unwrap_or("").to_string(),
@@ -54,8 +77,8 @@ impl Lyrics {
     }
 }
 
-/// Parse LRC text: `[01:23.45] words`, several stamps on one line, and `[offset:+250]`.
-/// Returns no lines when the text has no timestamps (it's plain lyrics).
+/// Parse LRC text: `[01:23.45] words`, several stamps on one line, `[offset:+250]`, and enhanced LRC's
+/// per-word `<01:23.45>` stamps. Returns no lines when the text has no timestamps (it's plain lyrics).
 pub fn parse_lrc(text: &str) -> Vec<Line> {
     let mut offset = 0i64;
     let mut out: Vec<Line> = Vec::new();
@@ -72,14 +95,22 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
             } // other tags (ti:, ar:, al:, by:) are metadata: skipped
             rest = rest[end + 1..].trim_start();
         }
+        let text = strip_word_stamps(rest);
+        let first = stamps.first().copied().unwrap_or(0);
+        let words = parse_words(rest, first);
         for ms in stamps {
-            // word-by-word stamps like <00:12.00> are dropped: we sync by line
-            out.push(Line { ms, text: strip_word_stamps(rest) });
+            // a line repeated under several stamps (a chorus): its word stamps belong to the first one, so shift them
+            let shift = ms - first;
+            let words = words.iter().map(|w| Word { ms: w.ms + shift, text: w.text.clone() }).collect();
+            out.push(Line { ms, text: text.clone(), words });
         }
     }
     // a positive offset makes lyrics appear earlier, as in the LRC spec
     for l in out.iter_mut() {
         l.ms = (l.ms - offset).max(0);
+        for w in l.words.iter_mut() {
+            w.ms = (w.ms - offset).max(0);
+        }
     }
     out.sort_by_key(|l| l.ms);
     out
@@ -94,6 +125,46 @@ fn parse_stamp(tag: &str) -> Option<i64> {
         return None;
     }
     Some(m * 60_000 + (secs * 1000.0).round() as i64)
+}
+
+/// The words of an enhanced-LRC line: each `<mm:ss.xx>` starts a word that runs until the next stamp. Text before the
+/// first stamp starts with the line. A stamp with nothing after it just marks where the last word ends, so it's dropped.
+/// Empty when the line has no word stamps.
+fn parse_words(rest: &str, line_ms: i64) -> Vec<Word> {
+    let mut words: Vec<Word> = Vec::new();
+    let mut seen_stamp = false;
+    let mut cur = Word { ms: line_ms, text: String::new() };
+    let mut s = rest;
+    while !s.is_empty() {
+        if s.starts_with('<') {
+            if let Some(end) = s.find('>') {
+                if let Some(ms) = parse_stamp(&s[1..end]) {
+                    seen_stamp = true;
+                    if !cur.text.trim().is_empty() {
+                        words.push(cur);
+                    } else if let Some(last) = words.last_mut() {
+                        last.text.push_str(&cur.text); // keep the spacing with the word before
+                    }
+                    cur = Word { ms, text: String::new() };
+                    s = &s[end + 1..];
+                    continue;
+                }
+            }
+        }
+        let c = s.chars().next().unwrap();
+        cur.text.push(c);
+        s = &s[c.len_utf8()..];
+    }
+    if !seen_stamp {
+        return Vec::new();
+    }
+    if !cur.text.trim().is_empty() {
+        words.push(cur);
+    }
+    // the line's text is trimmed, so trim the ends of the words to match
+    if let Some(w) = words.first_mut() { w.text = w.text.trim_start().to_string(); }
+    if let Some(w) = words.last_mut() { w.text = w.text.trim_end().to_string(); }
+    words
 }
 
 fn strip_word_stamps(s: &str) -> String {
@@ -210,7 +281,7 @@ mod tests {
     fn parses_stamps_and_sorts() {
         let l = parse_lrc("[ti:Song]\n[00:12.50] second\n[00:01.00]first\n[01:02,5] third");
         assert_eq!(l.len(), 3);
-        assert_eq!(l[0], Line { ms: 1000, text: "first".into() });
+        assert_eq!(l[0], Line { ms: 1000, text: "first".into(), words: vec![] });
         assert_eq!(l[1].ms, 12_500);
         assert_eq!(l[2].ms, 62_500);
     }
@@ -230,9 +301,35 @@ mod tests {
     }
 
     #[test]
-    fn word_stamps_are_dropped() {
+    fn word_stamps_give_words() {
         let l = parse_lrc("[00:01.00]<00:01.00>hel<00:01.40>lo");
         assert_eq!(l[0].text, "hello");
+        assert_eq!(l[0].words, vec![Word { ms: 1000, text: "hel".into() }, Word { ms: 1400, text: "lo".into() }]);
+    }
+
+    #[test]
+    fn enhanced_lrc_spacing_lead_in_and_end_stamp() {
+        let l = parse_lrc("[00:05.00] I <00:05.50>saw <00:06.00>you<00:07.00>");
+        assert_eq!(l[0].text, "I saw you");
+        let w: Vec<(i64, &str)> = l[0].words.iter().map(|w| (w.ms, w.text.as_str())).collect();
+        assert_eq!(w, vec![(5000, "I "), (5500, "saw "), (6000, "you")]);
+        assert_eq!(l[0].words.iter().map(|w| w.text.as_str()).collect::<String>(), l[0].text);
+    }
+
+    #[test]
+    fn repeated_lines_shift_word_stamps_and_offset_applies() {
+        let l = parse_lrc("[offset:100]\n[00:10.00][00:30.00]<00:10.00>la <00:10.50>la");
+        assert_eq!(l[0].words[1].ms, 10_400);
+        assert_eq!(l[1].ms, 29_900);
+        assert_eq!(l[1].words[0].ms, 29_900);
+        assert_eq!(l[1].words[1].ms, 30_400);
+    }
+
+    #[test]
+    fn plain_lrc_lines_have_no_words() {
+        let l = parse_lrc("[00:01.00]just a line");
+        assert!(l[0].words.is_empty());
+        assert!(line_json(&l[0]).get("words").is_none());
     }
 
     #[test]
@@ -255,6 +352,8 @@ mod tests {
     #[test]
     fn json_roundtrip() {
         let l = from_text("[00:01.00]hi", "file").unwrap();
+        assert_eq!(Lyrics::from_json(&l.to_json()).unwrap(), l);
+        let l = from_text("[00:01.00]<00:01.00>hi <00:01.50>there", "file").unwrap();
         assert_eq!(Lyrics::from_json(&l.to_json()).unwrap(), l);
     }
 

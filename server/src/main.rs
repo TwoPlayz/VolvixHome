@@ -1111,7 +1111,7 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
             // monitored, monitors just this album and searches for it. It's tried first; if this Lidarr says no, fall
             // back to adding the artist and waiting for its releases.
             let mut add = item.clone();
-            add["artist"] = lidarr::artist_body(&item["artist"], &s, false);
+            add["artist"] = lidarr::artist_body_for_album(&item["artist"], &s, id);
             add["monitored"] = json!(true);
             add["profileId"] = json!(s.metadata_profile_id);
             add["addOptions"] = json!({ "addType": "manual", "searchForNewAlbum": true });
@@ -1125,7 +1125,7 @@ async fn lidarr_request(State(st): State<Shared>, headers: HeaderMap, Json(body)
             let existing = st.http.get(&s, &format!("artist?mbId={artist_mb}")).await.ok().and_then(|v| v.as_array().and_then(|a| a.first().cloned()));
             let artist_id = match existing {
                 Some(a) => a["id"].as_i64().unwrap_or(0),
-                None => match st.http.post(&s, "artist", &lidarr::artist_body(&item["artist"], &s, false)).await {
+                None => match st.http.post(&s, "artist", &lidarr::artist_body_for_album(&item["artist"], &s, id)).await {
                     Ok(added) => added["id"].as_i64().unwrap_or(0),
                     Err(e) => return error(StatusCode::BAD_GATEWAY, &e),
                 },
@@ -1225,6 +1225,11 @@ async fn finish_album_request(st: Shared, s: lidarr::Settings, album_mb: String,
             }
         }
     }
+    // Lidarr refreshes a newly added artist in the background; that refresh re-applies the add's monitoring options
+    // to every album. Monitoring/searching before it finishes can be undone, so let it finish first.
+    if album_id > 0 {
+        wait_for_artist_refresh(&st, &s, artist_id).await;
+    }
     let result: Result<(), String> = if album_id > 0 {
         ensure_wanted(&st, &s, artist_id, album_id).await.map_err(|e| format!("Lidarr has the album but couldn't start the search: {e}"))
     } else if album_type == "Single" || album_type == "EP" {
@@ -1238,6 +1243,23 @@ async fn finish_album_request(st: Shared, s: lidarr::Settings, album_mb: String,
         lidarr::save_requests(&st.cfg.data_dir, &list);
     }
 }
+
+/// Wait (up to ~2 minutes) until Lidarr has no RefreshArtist command queued or running for this artist.
+async fn wait_for_artist_refresh(st: &Shared, s: &lidarr::Settings, artist_id: i64) {
+    for _ in 0..60 {
+        let busy = match st.http.get(s, "command").await {
+            Ok(list) => list.as_array().map(|l| l.iter().any(|c| {
+                c["name"].as_str() == Some("RefreshArtist")
+                    && matches!(c["status"].as_str(), Some("queued") | Some("started"))
+                    && (artist_id <= 0 || c["body"]["artistId"].as_i64().map_or(true, |a| a == artist_id))
+            })).unwrap_or(false),
+            Err(_) => false,
+        };
+        if !busy { return; }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
 /// Take back a request that hasn't been downloaded yet: stop its download, tell Lidarr not to want it, forget the request.
 /// Only whoever asked can do it (or someone who manages members), and not once the music has arrived.
 async fn lidarr_cancel(State(st): State<Shared>, headers: HeaderMap, Path(foreign_id): Path<String>) -> Response {

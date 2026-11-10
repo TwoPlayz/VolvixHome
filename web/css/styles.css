@@ -2599,6 +2599,9 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .ly-line.now { color: var(--text); transform: scale(1.03); }
 .ly-line:hover { background: var(--hover); color: var(--text); }
 .ly-gap { font-size: 16px; }
+/* word-synced lines: the line being sung fills in word by word (--p = how much of each word has been sung) */
+.ly-line.now.ly-words .ly-w { color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: linear-gradient(90deg, var(--text) var(--p, 0%), var(--text-3) var(--p, 0%)); }
 .ly-plain { font-size: 17px; font-weight: 600; line-height: 1.7; color: var(--text); padding: 8px 10px 40px; }
 .ly-note { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 48px 20px; color: var(--text-2); }
 .ly-note strong { color: var(--text); font-size: 16px; }

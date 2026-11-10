@@ -1,4 +1,5 @@
 /* Volvix Home — lyrics panel. Synced lyrics follow the song (tap a line to jump there); plain lyrics just scroll.
+   Word-synced lyrics (enhanced LRC) also fill in each word as it's sung (tap a word to jump to it).
    Where they come from (the server decides): a .lrc file next to the song, the file's own tags, then LRCLIB. */
 window.Spin = window.Spin || {};
 (function (S) {
@@ -10,6 +11,8 @@ window.Spin = window.Spin || {};
   let lines = [];              // synced lines of that track
   let active = -1;
   let userScrolledAt = 0;
+  let wordFrame = 0;           // requestAnimationFrame id while words are being filled in
+  let lastPos = -1, lastPosAt = 0;
 
   function panel() { return S.$('[data-p="lyrics-panel"]'); }
 
@@ -31,7 +34,10 @@ window.Spin = window.Spin || {};
     if (ly.instrumental) return note('music', 'Instrumental', 'This song has no lyrics.');
     if (ly.synced && ly.synced.length) {
       return '<div class="ly-lines" data-lyrics-synced>' + ly.synced.map(function (l, i) {
-        return '<button class="ly-line' + (l.text ? '' : ' ly-gap') + '" data-ly="' + i + '">' + (l.text ? S.esc(l.text) : '♪') + '</button>';
+        const inner = l.words && l.words.length
+          ? l.words.map(function (w, j) { return '<span class="ly-w" data-lw="' + j + '">' + S.esc(w.text) + '</span>'; }).join('')
+          : (l.text ? S.esc(l.text) : '♪');
+        return '<button class="ly-line' + (l.text ? '' : ' ly-gap') + (l.words && l.words.length ? ' ly-words' : '') + '" data-ly="' + i + '">' + inner + '</button>';
       }).join('') + '</div>';
     }
     return '<div class="ly-plain">' + S.esc(ly.plain).replace(/\n/g, '<br>') + '</div>';
@@ -89,11 +95,43 @@ window.Spin = window.Spin || {};
     const el = idx >= 0 ? kids[idx] : null;
     if (!el) return;
     el.classList.add('now');
+    words();
     if (Date.now() - userScrolledAt > 4000) {
       const box = S.$('[data-lyrics-body]');
       const target = el.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2;
       if (instant) box.scrollTop = target; else box.scrollTo({ top: target, behavior: 'smooth' });
     }
+  }
+
+  /** Where the song is, in ms, smoothed between the player's progress ticks so words fill in evenly. */
+  function nowMs() {
+    const st = S.player.state;
+    const t = performance.now();
+    if (st.pos !== lastPos) { lastPos = st.pos; lastPosAt = t; }
+    return st.pos * 1000 + (st.playing ? Math.min(1000, t - lastPosAt) : 0);
+  }
+
+  /** Fill in the words of the line being sung (only for word-synced lyrics). Runs every frame while playing. */
+  function words() {
+    if (wordFrame) { cancelAnimationFrame(wordFrame); wordFrame = 0; }
+    if (!open || active < 0) return;
+    const l = lines[active];
+    if (!l || !l.words || !l.words.length) return;
+    const wrap = S.$('[data-lyrics-synced]');
+    const el = wrap && wrap.children[active];
+    if (!el) return;
+    const spans = el.querySelectorAll('.ly-w');
+    const ms = nowMs() + 60;
+    const nextLine = lines[active + 1];
+    for (let i = 0; i < l.words.length && i < spans.length; i++) {
+      const start = l.words[i].ms;
+      const next = l.words[i + 1];
+      // the last word runs until the next line, but no longer than a couple of seconds
+      const end = next ? next.ms : Math.min(nextLine ? nextLine.ms : start + 1000, start + 2000);
+      const p = end > start ? Math.max(0, Math.min(1, (ms - start) / (end - start))) : (ms >= start ? 1 : 0);
+      spans[i].style.setProperty('--p', (p * 100).toFixed(1) + '%');
+    }
+    if (S.player.state.playing) wordFrame = requestAnimationFrame(words);
   }
 
   function openFor(trackId) {
@@ -115,7 +153,9 @@ window.Spin = window.Spin || {};
     const line = e.target.closest('.ly-line');
     if (line && line.closest('[data-p="lyrics-panel"]')) {
       const l = lines[parseInt(line.dataset.ly, 10)];
-      if (l) { userScrolledAt = 0; S.player.seekTo(l.ms / 1000); }
+      const wEl = e.target.closest('.ly-w');
+      const w = wEl && l && l.words ? l.words[parseInt(wEl.dataset.lw, 10)] : null;
+      if (l) { userScrolledAt = 0; S.player.seekTo((w || l).ms / 1000); }
     }
   });
   // the reader scrolled by hand: leave them be for a few seconds
@@ -134,7 +174,8 @@ window.Spin = window.Spin || {};
     if (S.player.state.queueOpen) { open = false; paint(); return; }
     if (t.id !== shownId) { load(t); paint(); }
   });
-  S.player.progressHooks.push(function () { follow(false); });
+  // every progress tick also refreshes the words, so they keep up even when the browser skips animation frames
+  S.player.progressHooks.push(function () { follow(false); words(); });
 
   S.lyrics = { open: openFor, close: close, isOpen: function () { return open; } };
 })(window.Spin);
