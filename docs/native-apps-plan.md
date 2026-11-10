@@ -117,10 +117,29 @@ cargo run --manifest-path apps/windows/Cargo.toml --features native --bin volvix
 Debug builds also accept `VH_DEMO=album|nowplaying|artist|library|search:<words>` to open a screen
 and start playing without clicking (used for screenshots).
 
-Not yet checked by hand: clicking through the window (only scripted screens were tried), real
-cover art (the dev music has none), the tray and media overlay on screen, and decoding MP3/FLAC/M4A
-(the dev music is WAV). Next: those checks, gapless/next-song preloading, keyboard shortcuts,
-resume where you left off, then phase 3.
+- **Phase 3 (Windows parity) mostly done**, casting left out for now (as asked):
+  - Playlists: your own, Liked Songs (heart on every song), collaborative ones (on the server) and
+    household ones (read-only). Create, rename, delete, add, remove and reorder; accept, decline and
+    leave invites.
+  - App-data edits are saved safely: the server's copy is fetched, the edits applied, then sent back,
+    so changes made on the website aren't overwritten.
+  - Plays count like the website (after 30 s or half the song, not in a private session), feeding
+    stats and Made For You mixes. The mixes are ported from mixes.js with the same seeded random.
+  - Lyrics: synced lines follow the song; click a line to jump there.
+  - Get more music: Lidarr search, Get, your requests with Cancel.
+  - Household (what people play, their playlists, invites) and notifications (bell with an unread
+    count, polled every 30 s).
+  - Offline downloads of albums and playlists. Downloaded songs play from disk, and the app opens
+    from its saved library copy when the server can't be reached.
+  - Settings: account (name, password, sign out), volume leveling (ReplayGain), share what I'm
+    listening to, private session, downloads, start with Windows, tray, updates, server.
+  - Tests: core 35 unit + 8 live-server tests.
+
+Not yet checked by hand: clicking through the window (screens were opened with `VH_DEMO`, because
+synthetic input didn't reach the window here), sound (the test PC had no audio device during the
+phase 3 run), real cover art, MP3/FLAC/M4A decoding, the tray and media overlay. Still to build for
+full parity: party mode, casting, inviting people to a collaborative playlist (the website does it),
+word-by-word lyrics fill, gapless/preloading, admin pages (people, library folder, Lidarr settings).
 
 ## Questions for you (answered)
 

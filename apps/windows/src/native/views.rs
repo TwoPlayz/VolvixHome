@@ -1,14 +1,18 @@
-//! The screens. Each takes the app state and returns what to draw; clicks come back as Messages.
+//! The window's frame and the music screens (Home, Library, Album, Artist, Search, Now Playing,
+//! the player). Playlists, mixes, Get more music, household, notifications, settings and dialogs
+//! are in pages.rs. Each takes the app state and returns what to draw; clicks come back as Messages.
 use std::time::Duration;
 
-use iced::widget::{button, column, container, horizontal_space, mouse_area, row, scrollable, slider, text, text_input, Column, Row, Space};
+use iced::widget::{button, column, container, horizontal_space, mouse_area, opaque, row, scrollable, slider, stack, text, text_input, Column, Row, Space};
 use iced::{Alignment, Element, Length, Padding};
+use volvix_core::playlists::Kind;
 use volvix_core::{format_duration, search, Album, Repeat, Track};
 
+use crate::pages;
 use crate::ui::{self, icon, icon as ic};
-use crate::{App, LibTab, Message, Page, Screen, COVER};
+use crate::{App, LibTab, Message, NpTab, Page, Screen, COVER};
 
-type El<'a> = Element<'a, Message>;
+pub type El<'a> = Element<'a, Message>;
 
 pub fn view(app: &App) -> El<'_> {
     let body: El = match app.screen {
@@ -24,6 +28,7 @@ pub fn view(app: &App) -> El<'_> {
 pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
     let lib = &app.lib;
     let mut ids: Vec<String> = vec![];
+    let first_album = |tracks: &[String]| tracks.iter().find_map(|id| lib.track(id)).map(|t| t.album_id.clone());
     if let Some(t) = app.status.track.as_deref().and_then(|id| lib.track(id)) {
         ids.push(t.album_id.clone());
     }
@@ -35,16 +40,45 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                 ids.extend(home_quick(app).iter().map(|a| a.id.clone()));
                 ids.extend(lib.recent_albums(&app.data.recent, 12).iter().map(|a| a.id.clone()));
                 ids.extend(lib.recently_added(12).iter().map(|a| a.id.clone()));
+                ids.extend(volvix_core::mixes::top_albums(lib, &app.data, 6).iter().map(|a| a.id.clone()));
+                ids.extend(volvix_core::mixes::random_albums(lib, &app.me_id(), volvix_core::userdata::now(), 6).iter().map(|a| a.id.clone()));
                 ids.extend(lib.top_artists(12).iter().filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone()));
+                ids.extend(app.playlists().iter().filter_map(|p| first_album(&p.tracks)));
             }
             Page::Library => match app.lib_tab {
                 LibTab::Albums => ids.extend(lib.albums().iter().map(|a| a.id.clone())),
                 LibTab::Artists => ids.extend(lib.artists().iter().filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone())),
+                LibTab::Playlists => ids.extend(app.playlists().iter().filter_map(|p| first_album(&p.tracks))),
+                LibTab::Downloaded => {
+                    for s in &app.saved {
+                        if s.kind == "album" {
+                            ids.push(s.id.clone());
+                        } else if let Some(p) = app.playlist(&s.id) {
+                            ids.extend(first_album(&p.tracks));
+                        }
+                    }
+                }
             },
             Page::Album(id) => ids.push(id.clone()),
             Page::Artist(name) => {
                 let p = lib.artist_page(name);
                 ids.extend(p.albums.iter().chain(p.appears_on.iter()).map(|a| a.id.clone()));
+            }
+            Page::Playlist(id) => {
+                if let Some(p) = app.playlist(id) {
+                    ids.extend(p.tracks.iter().take(200).filter_map(|t| lib.track(t)).map(|t| t.album_id.clone()));
+                }
+            }
+            Page::Mix(id) => {
+                if let Some(m) = app.mixes.iter().find(|m| m.id == *id) {
+                    ids.extend(m.ids.iter().filter_map(|t| lib.track(t)).map(|t| t.album_id.clone()));
+                }
+            }
+            Page::Household => {
+                for m in &app.household.members {
+                    ids.extend(m.playlists.iter().filter_map(|p| p.tracks.first()).filter_map(|e| lib.track(&e.id)).map(|t| t.album_id.clone()));
+                    ids.extend(m.now.as_ref().and_then(|n| n["albumId"].as_str()).map(String::from));
+                }
             }
             Page::Search => {
                 if app.search.trim().is_empty() {
@@ -56,20 +90,21 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                     ids.extend(r.artists.iter().take(6).filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone()));
                 }
             }
+            Page::GetMusic | Page::Notifications | Page::Settings => {}
         }
     }
     let mut seen = std::collections::HashSet::new();
     ids.into_iter().filter(|id| seen.insert(id.clone())).map(|id| (id, COVER)).collect()
 }
 
-/* ---------- helpers ---------- */
+/* ---------- helpers (also used by pages.rs) ---------- */
 
-fn centered(e: El<'_>) -> El<'_> {
+pub fn centered(e: El<'_>) -> El<'_> {
     container(e).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill).into()
 }
 
 /// Cut a line so it fits ("A very long album ti…").
-fn clip(s: &str, max: usize) -> String {
+pub fn clip(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
@@ -80,33 +115,36 @@ fn clip(s: &str, max: usize) -> String {
     }
 }
 
-fn cover_of<'a>(app: &'a App, album: Option<&Album>, size: f32) -> El<'a> {
+pub fn cover_of<'a>(app: &'a App, album: Option<&Album>, size: f32) -> El<'a> {
     let handle = album.and_then(|a| app.cover_images.get(&(a.id.clone(), COVER)));
     ui::cover(handle, album.map(|a| a.title.as_str()).unwrap_or(""), size)
 }
 
-fn section<'a>(title: &'a str, body: El<'a>) -> El<'a> {
+/// A playlist's cover: its first song's album (Liked Songs gets a heart).
+pub fn playlist_cover<'a>(app: &'a App, tracks: &[String], liked: bool, name: &str, size: f32) -> El<'a> {
+    if liked {
+        return container(ic(icon::HEART_FILL, (size * 0.36) as u16).color(ui::TEXT)).width(size).height(size).center_x(size).center_y(size).style(ui::mix_tile("liked")).into();
+    }
+    match tracks.iter().find_map(|id| app.lib.track(id)).and_then(|t| app.lib.album_of(t)) {
+        Some(a) => cover_of(app, Some(a), size),
+        None => ui::cover(None, name, size),
+    }
+}
+
+pub fn section<'a>(title: &'a str, body: El<'a>) -> El<'a> {
     column![ui::title(title, 22), body].spacing(12).into()
 }
 
-fn album_card<'a>(app: &'a App, a: &'a Album, sub: String) -> El<'a> {
+pub fn card<'a>(art: El<'a>, title: String, sub: String, on: Message) -> El<'a> {
     let size = 164.0;
-    button(
-        column![
-            cover_of(app, Some(a), size),
-            text(clip(&a.title, 22)).size(14).color(ui::TEXT),
-            ui::dim(clip(&sub, 26), 13),
-        ]
-        .spacing(4)
-        .width(size),
-    )
-    .padding(8)
-    .style(ui::flat)
-    .on_press(Message::Go(Page::Album(a.id.clone())))
-    .into()
+    button(column![art, text(clip(&title, 22)).size(14).color(ui::TEXT), ui::dim(clip(&sub, 26), 13)].spacing(4).width(size)).padding(8).style(ui::flat).on_press(on).into()
 }
 
-fn album_grid<'a>(app: &'a App, albums: impl IntoIterator<Item = &'a Album>, artist_line: bool) -> El<'a> {
+fn album_card<'a>(app: &'a App, a: &'a Album, sub: String) -> El<'a> {
+    card(cover_of(app, Some(a), 164.0), a.title.clone(), sub, Message::Go(Page::Album(a.id.clone())))
+}
+
+pub fn album_grid<'a>(app: &'a App, albums: impl IntoIterator<Item = &'a Album>, artist_line: bool) -> El<'a> {
     let cards: Vec<El> = albums
         .into_iter()
         .map(|a| {
@@ -117,17 +155,28 @@ fn album_grid<'a>(app: &'a App, albums: impl IntoIterator<Item = &'a Album>, art
     Row::with_children(cards).spacing(4).wrap().into()
 }
 
-fn artist_card<'a>(app: &'a App, name: &'a str) -> El<'a> {
-    let size = 164.0;
-    button(column![cover_of(app, app.lib.artist_cover_album(name), size), text(clip(name, 22)).size(14).color(ui::TEXT), ui::dim("Artist", 13)].spacing(4).width(size))
-        .padding(8)
-        .style(ui::flat)
-        .on_press(Message::Go(Page::Artist(name.to_string())))
-        .into()
+fn artist_card<'a>(app: &'a App, name: String) -> El<'a> {
+    card(cover_of(app, app.lib.artist_cover_album(&name), 164.0), name.clone(), "Artist".into(), Message::Go(Page::Artist(name)))
 }
 
-/// A list of songs. `ids` is the play order the list stands for (clicking a song plays from there).
-fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered: bool, show_album: bool) -> El<'a> {
+pub fn playlist_card<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView) -> El<'a> {
+    let sub = match &p.kind {
+        Kind::Household { owner } => format!("By {owner}"),
+        Kind::Shared { .. } => format!("Collaborative · {} songs", p.tracks.len()),
+        _ => format!("{} song{}", p.tracks.len(), if p.tracks.len() == 1 { "" } else { "s" }),
+    };
+    card(playlist_cover(app, &p.tracks, p.kind == Kind::Liked, &p.name, 164.0), p.name.clone(), sub, Message::Go(Page::Playlist(p.id.clone())))
+}
+
+/// How a song list behaves: plain, or a playlist you can edit (remove / move songs).
+#[derive(Clone, Copy)]
+pub enum Rows<'a> {
+    Plain,
+    Playlist(&'a str),
+}
+
+/// A list of songs. Clicking one plays the list from there.
+pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered: bool, show_album: bool, rows: Rows<'_>) -> El<'a> {
     let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
     let discs = tracks.iter().map(|t| t.disc.max(1)).max().unwrap_or(1);
     let current = app.status.track.as_deref();
@@ -150,32 +199,76 @@ fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered: bo
         if t.explicit {
             title_line = title_line.push(container(text("E").size(10).color(ui::FRAME)).padding([0, 4]).style(|_| container::Style { background: Some(ui::TEXT_2.into()), border: iced::border::rounded(3.0), ..Default::default() }));
         }
+        if app.downloaded.contains(&t.id) {
+            title_line = title_line.push(ic(icon::DOWNLOADED, 11).color(ui::ACCENT));
+        }
         let mut sub = t.artist.clone();
         if show_album {
             if let Some(a) = app.lib.album_of(t) {
                 sub = format!("{sub} · {}", a.title);
             }
         }
-        let line = row![
+        let liked = app.is_liked(&t.id);
+        let small = |c: char, on: bool, m: Message| button(ic(c, 14)).style(ui::icon_btn(on)).padding(7).on_press(m);
+        let mut line = row![
             container(lead).width(if numbered { 32.0 } else { 48.0 }).center_x(Length::Fixed(if numbered { 32.0 } else { 48.0 })),
             column![title_line, ui::dim(clip(&sub, 80), 13)].spacing(1).width(Length::Fill),
-            button(ic(icon::ADD, 14)).style(ui::icon_btn(false)).padding(8).on_press(Message::AddToQueue(t.id.clone())),
-            container(ui::dim(format_duration(t.duration), 13)).width(56).align_x(Alignment::End),
+            small(if liked { icon::HEART_FILL } else { icon::HEART }, liked, Message::ToggleLike(t.id.clone())),
+            small(icon::PLAY_NEXT, false, Message::PlayNext(t.id.clone())),
+            small(icon::ADD, false, Message::AddToQueue(t.id.clone())),
+            small(icon::PLAYLIST, false, Message::AddToPlaylist(vec![t.id.clone()])),
         ]
-        .spacing(12)
+        .spacing(4)
         .align_y(Alignment::Center);
+        if let Rows::Playlist(pl) = rows {
+            line = line
+                .push(small(icon::UP, false, Message::MoveInPlaylist(pl.to_string(), i, i.saturating_sub(1))))
+                .push(small(icon::DOWN, false, Message::MoveInPlaylist(pl.to_string(), i, i + 1)))
+                .push(small(icon::DELETE, false, Message::RemoveFromPlaylist(pl.to_string(), i, t.id.clone())));
+        }
+        line = line.push(container(ui::dim(format_duration(t.duration), 13)).width(52).align_x(Alignment::End));
         col = col.push(button(line).width(Length::Fill).padding([6, 12]).style(ui::flat).on_press(Message::PlayTracks(ids.clone(), i, source.to_string())));
     }
     col.into()
 }
 
-fn header_buttons<'a>(play: Message, shuffle: Message) -> El<'a> {
-    row![
+pub fn header_buttons<'a>(play: Message, shuffle: Message, extra: Vec<El<'a>>) -> El<'a> {
+    let mut r = row![
         button(row![ic(icon::PLAY, 14), text("Play").size(15)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::primary).on_press(play),
         button(row![ic(icon::SHUFFLE, 14), text("Shuffle").size(15)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::secondary).on_press(shuffle),
     ]
     .spacing(10)
-    .into()
+    .align_y(Alignment::Center);
+    for e in extra {
+        r = r.push(e);
+    }
+    r.into()
+}
+
+/// A round icon button for page headers (download, edit, delete…). `on` = switched on (red).
+pub fn round_icon<'a>(c: char, on: bool, tip: &'a str, m: Option<Message>) -> El<'a> {
+    let b = button(container(ic(c, 16)).center_x(20).center_y(20)).width(42).height(42).padding(11).style(move |t, s| {
+        let mut st = ui::secondary(t, s);
+        if on {
+            st.text_color = ui::ACCENT;
+        }
+        st
+    });
+    iced::widget::tooltip(b.on_press_maybe(m), container(text(tip).size(12)).padding([4, 8]).style(ui::dialog), iced::widget::tooltip::Position::Bottom).into()
+}
+
+/// Download button for an album or playlist header.
+pub fn download_button<'a>(app: &'a App, kind: &str, id: &str, tracks: &[String]) -> El<'a> {
+    let saved = app.is_saved(kind, id);
+    let have = tracks.iter().filter(|t| app.downloaded.contains(*t)).count();
+    let tip = if !saved {
+        "Download to listen offline"
+    } else if have < tracks.len() {
+        "Downloading… (click to remove)"
+    } else {
+        "Downloaded (click to remove)"
+    };
+    round_icon(if saved && have == tracks.len() { icon::DOWNLOADED } else { icon::DOWNLOAD }, saved, tip, Some(Message::ToggleSaved(kind.to_string(), id.to_string())))
 }
 
 /* ---------- connect / sign in ---------- */
@@ -228,48 +321,102 @@ fn sign_in(app: &App) -> El<'_> {
 /* ---------- the main window ---------- */
 
 fn main_screen(app: &App) -> El<'_> {
-    let page: El = if app.now_playing { now_playing(app) } else { page(app) };
-    let content = container(scrollable(container(page).padding([24, 28]).width(Length::Fill)).style(ui::scroller).height(Length::Fill))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(ui::panel);
-    column![row![sidebar(app), content].spacing(8).height(Length::Fill), player_bar(app)].spacing(8).padding(8).into()
+    // Now Playing has its own scrolling panels; every other page scrolls as a whole
+    let content: El = if app.now_playing {
+        container(now_playing(app)).padding([24, 28]).width(Length::Fill).height(Length::Fill).into()
+    } else {
+        scrollable(container(page(app)).padding([24, 28]).width(Length::Fill)).style(ui::scroller).height(Length::Fill).into()
+    };
+    let content = container(content).width(Length::Fill).height(Length::Fill).style(ui::panel);
+    let mut body = column![];
+    if app.offline {
+        body = body.push(container(text("Offline: the server can't be reached. Downloaded music still plays.").size(13)).padding([6, 12]).width(Length::Fill).style(ui::error_box));
+    }
+    let base: El = body.push(row![sidebar(app), content].spacing(8).height(Length::Fill)).push(player_bar(app)).spacing(8).padding(8).into();
+    let mut layers = stack![base];
+    if let Some((msg, _)) = &app.toast {
+        layers = layers.push(
+            container(container(text(msg.as_str()).size(14)).padding([10, 16]).style(ui::toast))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::End)
+                .padding(Padding { bottom: 110.0, ..Padding::ZERO }),
+        );
+    }
+    if let Some(d) = &app.dialog {
+        let card = container(pages::dialog(app, d)).width(440).padding(24).style(ui::dialog);
+        layers = layers.push(opaque(mouse_area(container(opaque(card)).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill).style(ui::scrim)).on_press(Message::DialogCancel)));
+    }
+    layers.into()
 }
 
 fn sidebar(app: &App) -> El<'_> {
-    let item = |c: char, label: &'static str, page: Page| {
-        let active = !app.now_playing
-            && match (&app.page, &page) {
+    let is = |page: &Page| {
+        !app.now_playing
+            && match (&app.page, page) {
                 (Page::Album(_), Page::Library) | (Page::Artist(_), Page::Library) => true,
                 (a, b) => a == b,
-            };
-        button(row![ic(c, 18), text(label).size(15)].spacing(14).align_y(Alignment::Center)).width(Length::Fill).padding([10, 14]).style(ui::nav(active)).on_press(Message::Go(page))
+            }
+    };
+    let item = |c: char, label: &'static str, page: Page| {
+        let active = is(&page);
+        button(row![ic(c, 18), text(label).size(15)].spacing(14).align_y(Alignment::Center)).width(Length::Fill).padding([9, 14]).style(ui::nav(active)).on_press(Message::Go(page))
     };
     let logo = row![
         container(Space::new(14, 14)).style(|_| container::Style { background: Some(ui::ACCENT.into()), border: iced::border::rounded(7.0), ..Default::default() }),
-        ui::title("Volvix Home", 18)
+        ui::title("Volvix Home", 18),
+        horizontal_space(),
+        bell(app),
     ]
     .spacing(10)
     .align_y(Alignment::Center);
-    let who = app.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default();
     let mut nav = column![
-        container(logo).padding([8, 14]),
-        ui::gap(8),
+        container(logo).padding(Padding { top: 8.0, bottom: 8.0, left: 14.0, right: 4.0 }),
+        ui::gap(6),
         item(icon::HOME, "Home", Page::Home),
         item(icon::SEARCH, "Search", Page::Search),
         item(icon::LIBRARY, "Library", Page::Library),
     ]
     .spacing(2);
-    if !app.history.is_empty() || app.now_playing {
-        nav = nav.push(ui::gap(6)).push(button(row![ic(icon::BACK, 14), text("Back").size(14)].spacing(14).align_y(Alignment::Center)).width(Length::Fill).padding([8, 14]).style(ui::nav(false)).on_press(Message::Back));
+    if app.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false) {
+        nav = nav.push(item(icon::GLOBE, "Get more music", Page::GetMusic));
     }
-    let bottom = column![
-        ui::dim(clip(&who, 26), 13),
-        button(row![ic(icon::SIGN_OUT, 14), text("Sign out").size(13)].spacing(10).align_y(Alignment::Center)).padding([6, 0]).style(ui::nav(false)).on_press(Message::SignOut),
-    ]
-    .spacing(2)
-    .padding([8, 14]);
-    container(column![nav, Space::with_height(Length::Fill), bottom]).width(240).height(Length::Fill).padding(8).style(ui::panel).into()
+    nav = nav.push(item(icon::PEOPLE, "Household", Page::Household));
+    if !app.history.is_empty() || app.now_playing {
+        nav = nav.push(button(row![ic(icon::BACK, 14), text("Back").size(14)].spacing(14).align_y(Alignment::Center)).width(Length::Fill).padding([8, 14]).style(ui::nav(false)).on_press(Message::Back));
+    }
+
+    // your playlists
+    let head = row![ui::dim("Playlists", 13), horizontal_space(), button(ic(icon::ADD, 13)).padding(6).style(ui::icon_btn(false)).on_press(Message::NewPlaylist(vec![]))].align_y(Alignment::Center);
+    let mut list = Column::new().spacing(0);
+    for p in app.playlists().into_iter().filter(|p| !matches!(p.kind, Kind::Household { .. })) {
+        let active = is(&Page::Playlist(p.id.clone()));
+        let mark: El = match p.kind {
+            Kind::Liked => ic(icon::HEART_FILL, 12).color(ui::ACCENT).into(),
+            Kind::Shared { .. } => ic(icon::PEOPLE, 12).into(),
+            _ => ic(icon::PLAYLIST, 12).into(),
+        };
+        list = list.push(button(row![mark, text(clip(&p.name, 24)).size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([6, 14]).style(ui::nav(active)).on_press(Message::Go(Page::Playlist(p.id.clone()))));
+    }
+    let playlists = column![container(head).padding(Padding { top: 0.0, bottom: 0.0, left: 14.0, right: 4.0 }), scrollable(list).style(ui::scroller).height(Length::Fill)].spacing(2);
+
+    let who = app.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default();
+    let bottom = button(row![ic(icon::SETTINGS, 16), column![text(clip(&who, 22)).size(13), ui::dim("Settings and account", 11)]].spacing(12).align_y(Alignment::Center))
+        .width(Length::Fill)
+        .padding([8, 14])
+        .style(ui::nav(is(&Page::Settings)))
+        .on_press(Message::Go(Page::Settings));
+    container(column![nav, ui::gap(10), playlists, bottom].spacing(4)).width(240).height(Length::Fill).padding(8).style(ui::panel).into()
+}
+
+fn bell(app: &App) -> El<'_> {
+    let n = app.notes.unread;
+    let mut r = row![ic(icon::BELL, 16)].spacing(4).align_y(Alignment::Center);
+    if n > 0 {
+        r = r.push(container(text(if n > 99 { "99+".to_string() } else { n.to_string() }).size(11)).padding([1, 6]).style(ui::badge));
+    }
+    button(r).padding(8).style(ui::icon_btn(app.page == Page::Notifications && !app.now_playing)).on_press(Message::Go(Page::Notifications)).into()
 }
 
 fn page(app: &App) -> El<'_> {
@@ -279,14 +426,25 @@ fn page(app: &App) -> El<'_> {
         Page::Library => library(app),
         Page::Album(id) => album_page(app, id),
         Page::Artist(name) => artist_page(app, name),
+        Page::Playlist(id) => pages::playlist_page(app, id),
+        Page::Mix(id) => pages::mix_page(app, id),
+        Page::GetMusic => pages::get_music(app),
+        Page::Household => pages::household(app),
+        Page::Notifications => pages::notifications(app),
+        Page::Settings => pages::settings(app),
     }
 }
 
 fn greeting() -> &'static str {
-    // local hour from the system clock (no timezone crate: Windows' local time via the C runtime isn't needed for a greeting)
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let h = ((secs / 3600) as i64 + local_offset_hours()).rem_euclid(24);
-    if h < 12 { "Good morning" } else if h < 18 { "Good afternoon" } else { "Good evening" }
+    if h < 12 {
+        "Good morning"
+    } else if h < 18 {
+        "Good afternoon"
+    } else {
+        "Good evening"
+    }
 }
 
 fn local_offset_hours() -> i64 {
@@ -308,7 +466,11 @@ fn local_offset_hours() -> i64 {
 
 fn home_quick(app: &App) -> Vec<&Album> {
     let recent = app.lib.recent_albums(&app.data.recent, 6);
-    if recent.is_empty() { app.lib.recently_added(6) } else { recent }
+    if recent.is_empty() {
+        app.lib.recently_added(6)
+    } else {
+        recent
+    }
 }
 
 fn home(app: &App) -> El<'_> {
@@ -334,21 +496,48 @@ fn home(app: &App) -> El<'_> {
         })
         .collect();
     let mut c = column![ui::title(greeting(), 32), Row::with_children(tiles).spacing(10).wrap()].spacing(24);
+    if !app.mixes.is_empty() {
+        let cards: Vec<El> = app.mixes.iter().map(|m| pages::mix_card(m)).collect();
+        c = c.push(section("Made for you", Row::with_children(cards).spacing(4).wrap().into()));
+    }
     let recent = lib.recent_albums(&app.data.recent, 6);
     if !recent.is_empty() {
         c = c.push(section("Recently played", album_grid(app, recent, true)));
     }
+    let most = volvix_core::mixes::top_albums(lib, &app.data, 6);
+    if most.len() >= 2 {
+        c = c.push(section("Your most played", album_grid(app, most, true)));
+    }
     c = c.push(section("Recently added", album_grid(app, lib.recently_added(6), true)));
-    let artists: Vec<El> = lib.top_artists(6).into_iter().map(|n| artist_card(app, Box::leak(n.into_boxed_str()))).collect();
+    let pls: Vec<El> = app.playlists().iter().filter(|p| !matches!(p.kind, Kind::Household { .. })).take(6).map(|p| playlist_card(app, p)).collect();
+    if !pls.is_empty() {
+        c = c.push(section("Your playlists", Row::with_children(pls).spacing(4).wrap().into()));
+    }
+    let picks = volvix_core::mixes::random_albums(lib, &app.me_id(), volvix_core::userdata::now(), 6);
+    if picks.len() >= 3 {
+        c = c.push(section("Picked for today", album_grid(app, picks, true)));
+    }
+    let artists: Vec<El> = lib.top_artists(6).into_iter().map(|n| artist_card(app, n)).collect();
     c = c.push(section("Artists", Row::with_children(artists).spacing(4).wrap().into()));
     c.into()
 }
 
 fn library(app: &App) -> El<'_> {
     let tab = |label: &'static str, t: LibTab| button(text(label).size(14)).padding([7, 16]).style(ui::chip(app.lib_tab == t)).on_press(Message::LibTab(t));
-    let head = column![ui::title("Library", 32), row![tab("Albums", LibTab::Albums), tab("Artists", LibTab::Artists)].spacing(8)].spacing(14);
+    let head = column![ui::title("Library", 32), row![tab("Playlists", LibTab::Playlists), tab("Albums", LibTab::Albums), tab("Artists", LibTab::Artists), tab("Downloaded", LibTab::Downloaded)].spacing(8)].spacing(14);
     let body: El = match app.lib_tab {
         LibTab::Albums => album_grid(app, app.lib.albums_by_title(), true),
+        LibTab::Playlists => {
+            let new = card(
+                container(ic(icon::ADD, 40)).width(164).height(164).center_x(164).center_y(164).style(|_| container::Style { background: Some(ui::SURFACE_3.into()), border: iced::border::rounded(6.0), ..Default::default() }).into(),
+                "New playlist".into(),
+                "Make one".into(),
+                Message::NewPlaylist(vec![]),
+            );
+            let mut cards = vec![new];
+            cards.extend(app.playlists().iter().map(|p| playlist_card(app, p)));
+            Row::with_children(cards).spacing(4).wrap().into()
+        }
         LibTab::Artists => {
             let rows: Vec<El> = app
                 .lib
@@ -367,6 +556,7 @@ fn library(app: &App) -> El<'_> {
                 .collect();
             Column::with_children(rows).spacing(2).into()
         }
+        LibTab::Downloaded => pages::downloaded(app),
     };
     column![head, body].spacing(20).into()
 }
@@ -374,6 +564,7 @@ fn library(app: &App) -> El<'_> {
 fn album_page<'a>(app: &'a App, id: &str) -> El<'a> {
     let Some(a) = app.lib.album(id) else { return ui::dim("This album isn't on the server any more.", 15).into() };
     let tracks = app.lib.album_tracks(id);
+    let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
     let mut info = column![
         ui::dim("Album", 13),
         ui::title(a.title.as_str(), 40),
@@ -388,9 +579,10 @@ fn album_page<'a>(app: &'a App, id: &str) -> El<'a> {
     if let Some(g) = &a.genre {
         info = info.push(ui::dim(g.as_str(), 13));
     }
-    info = info.push(ui::gap(10)).push(header_buttons(Message::PlayAlbum(id.to_string(), 0), Message::ShuffleAlbum(id.to_string())));
+    let extra = vec![download_button(app, "album", id, &ids), round_icon(icon::PLAYLIST, false, "Add to a playlist", Some(Message::AddToPlaylist(ids.clone())))];
+    info = info.push(ui::gap(10)).push(header_buttons(Message::PlayAlbum(id.to_string(), 0), Message::ShuffleAlbum(id.to_string()), extra));
     let head = row![cover_of(app, Some(a), 220.0), info].spacing(28).align_y(Alignment::End);
-    let mut c = column![head, track_list(app, &tracks, &a.title, true, false)].spacing(28);
+    let mut c = column![head, track_list(app, &tracks, &a.title, true, false, Rows::Plain)].spacing(28);
     let mut foot = vec![];
     if let Some(l) = &a.label {
         foot.push(l.clone());
@@ -417,8 +609,6 @@ fn album_page<'a>(app: &'a App, id: &str) -> El<'a> {
 fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
     let p = app.lib.artist_page(name);
     let ids: Vec<String> = p.songs.iter().map(|t| t.id.clone()).collect();
-    let mut shuffled = ids.clone();
-    fastrand_shuffle(&mut shuffled);
     let n_albums = p.albums.len();
     let sub = if n_albums == 0 { "Appears on albums".to_string() } else { format!("{n_albums} album{} · {} songs", if n_albums == 1 { "" } else { "s" }, p.songs.len()) };
     let page_name = p.name.clone();
@@ -427,13 +617,13 @@ fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
         ui::title(page_name.clone(), 48),
         ui::dim(sub, 15),
         ui::gap(6),
-        header_buttons(Message::PlayTracks(ids, 0, page_name.clone()), Message::PlayTracks(shuffled, 0, page_name.clone())),
+        header_buttons(Message::PlayTracks(ids.clone(), 0, page_name.clone()), Message::ShuffleTracks(ids, page_name.clone()), vec![]),
     ]
     .spacing(6);
     let mut c = column![head].spacing(28);
     if !p.songs.is_empty() {
         let top: Vec<&Track> = p.songs.iter().take(5).copied().collect();
-        c = c.push(section("Songs", track_list(app, &top, &page_name, false, true)));
+        c = c.push(section("Songs", track_list(app, &top, &page_name, false, true, Rows::Plain)));
     }
     if !p.albums.is_empty() {
         c = c.push(section("Albums", album_grid(app, p.albums.clone(), false)));
@@ -442,17 +632,6 @@ fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
         c = c.push(section("Appears on", album_grid(app, p.appears_on.clone(), true)));
     }
     c.into()
-}
-
-fn fastrand_shuffle(v: &mut [String]) {
-    // tiny local shuffle so views don't need another crate (xorshift seeded from the clock)
-    let mut x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) | 1;
-    for i in (1..v.len()).rev() {
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        v.swap(i, (x % (i as u64 + 1)) as usize);
-    }
 }
 
 fn search_page(app: &App) -> El<'_> {
@@ -471,20 +650,36 @@ fn search_page(app: &App) -> El<'_> {
         }
         return c.push(section("Everything on your server", album_grid(app, all, true))).into();
     }
-    let r = search::search(&app.lib, &app.data.playlists, q);
-    if r.is_empty() {
-        return c.push(ui::dim(format!("Nothing in your library for \"{q}\"."), 15)).into();
+    let lists = app.playlists();
+    let r = search::search(&app.lib, &[], q);
+    let qn = search::norm(q);
+    let found_lists: Vec<&volvix_core::playlists::PlaylistView> = lists.iter().filter(|p| qn.split_whitespace().all(|w| search::norm(&format!("{} {}", p.name, p.description)).contains(w))).collect();
+    if r.is_empty() && found_lists.is_empty() {
+        c = c.push(ui::dim(format!("Nothing in your library for \"{q}\"."), 15));
     }
     if !r.artists.is_empty() {
-        let cards: Vec<El> = r.artists.iter().take(6).map(|n| artist_card(app, Box::leak(n.clone().into_boxed_str()))).collect();
+        let cards: Vec<El> = r.artists.iter().take(6).map(|n| artist_card(app, n.clone())).collect();
         c = c.push(section("Artists", Row::with_children(cards).spacing(4).wrap().into()));
     }
     if !r.songs.is_empty() {
         let list: Vec<&Track> = r.songs.iter().take(5).copied().collect();
-        c = c.push(section("Songs", track_list(app, &list, "Search", false, true)));
+        c = c.push(section("Songs", track_list(app, &list, "Search", false, true, Rows::Plain)));
     }
     if !r.albums.is_empty() {
         c = c.push(section("Albums", album_grid(app, r.albums.iter().take(12).copied(), true)));
+    }
+    if !found_lists.is_empty() {
+        let cards: Vec<El> = found_lists.iter().map(|p| playlist_card(app, p)).collect();
+        c = c.push(section("Playlists", Row::with_children(cards).spacing(4).wrap().into()));
+    }
+    // music you don't have yet
+    if app.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false) && q.chars().count() >= 2 {
+        c = c.push(
+            button(row![ic(icon::GLOBE, 16), text(format!("Look for \"{}\" to get more music", clip(q, 40))).size(15)].spacing(10).align_y(Alignment::Center))
+                .padding([10, 16])
+                .style(ui::secondary)
+                .on_press(Message::LookFurther(q.to_string())),
+        );
     }
     c.into()
 }
@@ -496,38 +691,55 @@ fn now_playing(app: &App) -> El<'_> {
         return column![ui::title("Now playing", 32), ui::dim("Nothing playing. Pick an album or a song to start.", 15)].spacing(12).into();
     };
     let album = app.lib.album_of(t);
+    let liked = app.is_liked(&t.id);
     let left = column![
         cover_of(app, album, 360.0),
         ui::gap(8),
-        ui::title(t.title.as_str(), 28),
-        button(text(t.artist.as_str()).size(16).color(ui::TEXT_2)).padding(0).style(ui::flat).on_press(Message::Go(Page::Artist(t.artist.clone()))),
-        button(text(album.map(|a| a.title.as_str()).unwrap_or("")).size(14).color(ui::TEXT_3)).padding(0).style(ui::flat).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
+        row![
+            column![
+                ui::title(clip(&t.title, 40), 28),
+                button(text(t.artist.as_str()).size(16).color(ui::TEXT_2)).padding(0).style(ui::flat).on_press(Message::Go(Page::Artist(t.artist.clone()))),
+                button(text(album.map(|a| a.title.as_str()).unwrap_or("")).size(14).color(ui::TEXT_3)).padding(0).style(ui::flat).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 20)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())),
+            button(ic(icon::PLAYLIST, 18)).padding(8).style(ui::icon_btn(false)).on_press(Message::AddToPlaylist(vec![t.id.clone()])),
+        ]
+        .align_y(Alignment::Start),
     ]
     .spacing(6)
     .width(360);
 
-    let pos = app.queue.position().unwrap_or(0);
-    let mut q = column![ui::title("Up next", 22), ui::dim(if app.queue.source.is_empty() { String::new() } else { format!("Playing from {}", app.queue.source) }, 13)].spacing(4);
-    let upcoming = app.queue.upcoming();
-    if upcoming.is_empty() {
-        q = q.push(ui::gap(8)).push(ui::dim("Nothing after this song.", 14));
-    }
-    let mut list = Column::new().spacing(2);
-    for (k, id) in upcoming.iter().enumerate().take(100) {
-        let Some(t) = app.lib.track(id) else { continue };
-        let index = pos + 1 + k;
-        let line = row![
-            cover_of(app, app.lib.album_of(t), 40.0),
-            column![text(clip(&t.title, 50)).size(14).color(ui::TEXT), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
-            button(ic('\u{E711}', 11)).style(ui::icon_btn(false)).padding(8).on_press(Message::RemoveFromQueue(index)),
-            ui::dim(format_duration(t.duration), 12),
-        ]
-        .spacing(12)
-        .align_y(Alignment::Center);
-        list = list.push(button(line).width(Length::Fill).padding([5, 8]).style(ui::flat).on_press(Message::JumpQueue(index)));
-    }
-    let right = column![q, list].spacing(10).width(Length::Fill);
-    row![left, right].spacing(40).into()
+    let tab = |label: &'static str, tb: NpTab| button(text(label).size(14)).padding([7, 16]).style(ui::chip(app.np_tab == tb)).on_press(Message::NpTab(tb));
+    let tabs = row![tab("Up next", NpTab::Queue), tab("Lyrics", NpTab::Lyrics)].spacing(8);
+    let right: El = match app.np_tab {
+        NpTab::Queue => {
+            let pos = app.queue.position().unwrap_or(0);
+            let mut list = Column::new().spacing(2);
+            list = list.push(ui::dim(if app.queue.source.is_empty() { String::new() } else { format!("Playing from {}", app.queue.source) }, 13));
+            let upcoming = app.queue.upcoming();
+            if upcoming.is_empty() {
+                list = list.push(ui::gap(8)).push(ui::dim("Nothing after this song.", 14));
+            }
+            for (k, id) in upcoming.iter().enumerate().take(100) {
+                let Some(t) = app.lib.track(id) else { continue };
+                let index = pos + 1 + k;
+                let line = row![
+                    cover_of(app, app.lib.album_of(t), 40.0),
+                    column![text(clip(&t.title, 50)).size(14).color(ui::TEXT), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
+                    button(ic(icon::CLOSE, 11)).style(ui::icon_btn(false)).padding(8).on_press(Message::RemoveFromQueue(index)),
+                    ui::dim(format_duration(t.duration), 12),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center);
+                list = list.push(button(line).width(Length::Fill).padding([5, 8]).style(ui::flat).on_press(Message::JumpQueue(index)));
+            }
+            scrollable(list).style(ui::scroller).height(Length::Fill).into()
+        }
+        NpTab::Lyrics => pages::lyrics(app, &t.id),
+    };
+    row![left, column![tabs, right].spacing(14).width(Length::Fill).height(Length::Fill)].spacing(40).into()
 }
 
 fn player_bar(app: &App) -> El<'_> {
@@ -536,18 +748,19 @@ fn player_bar(app: &App) -> El<'_> {
     let album = track.and_then(|t| app.lib.album_of(t));
 
     let left: El = match track {
-        Some(t) => button(
+        Some(t) => {
+            let liked = app.is_liked(&t.id);
             row![
-                cover_of(app, album, 56.0),
-                column![text(clip(&t.title, 34)).size(14).color(ui::TEXT), ui::dim(clip(&t.artist, 38), 12)].spacing(2),
+                button(row![cover_of(app, album, 56.0), column![text(clip(&t.title, 30)).size(14).color(ui::TEXT), ui::dim(clip(&t.artist, 34), 12)].spacing(2)].spacing(12).align_y(Alignment::Center))
+                    .padding(4)
+                    .style(ui::flat)
+                    .on_press(Message::ToggleNowPlaying),
+                button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 15)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())),
             ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        )
-        .padding(4)
-        .style(ui::flat)
-        .on_press(Message::ToggleNowPlaying)
-        .into(),
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into()
+        }
         None => row![ui::cover::<Message>(None, "", 56.0), ui::dim("Nothing playing", 13)].spacing(12).align_y(Alignment::Center).into(),
     };
 
@@ -580,9 +793,12 @@ fn player_bar(app: &App) -> El<'_> {
     let center = column![controls, progress].spacing(4).align_x(Alignment::Center).width(Length::FillPortion(2)).max_width(640);
 
     let vol_icon = if app.volume <= 0.001 { icon::MUTE } else { icon::VOLUME };
+    let lyrics_on = app.now_playing && app.np_tab == NpTab::Lyrics;
+    let queue_on = app.now_playing && app.np_tab == NpTab::Queue;
     let right = row![
         horizontal_space(),
-        button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(app.now_playing)).on_press(Message::ToggleNowPlaying),
+        button(ic(icon::LYRICS, 16)).padding(8).style(ui::icon_btn(lyrics_on)).on_press_maybe(has.then_some(if lyrics_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Lyrics) })),
+        button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }),
         button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute),
         container(slider(0.0..=1.0, app.volume, Message::Volume).step(0.01_f32).style(ui::slider)).width(110),
     ]
@@ -595,5 +811,5 @@ fn player_bar(app: &App) -> El<'_> {
         bar = bar.push(container(text(e.as_str()).size(12)).padding([4, 10]).style(ui::error_box));
     }
     let main = row![container(left).width(Length::FillPortion(1)), center, right].spacing(16).align_y(Alignment::Center);
-    container(bar.push(mouse_area(main)).spacing(4)).height(84).padding([8, 12]).center_y(84).style(ui::frame).into()
+    container(bar.push(main).spacing(4)).height(84).padding([8, 12]).center_y(84).style(ui::frame).into()
 }

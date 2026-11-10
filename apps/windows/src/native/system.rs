@@ -110,6 +110,19 @@ impl Tray {
         Some(Tray { _icon: icon, open, play, next, start, to_tray, auto, check, restart, quit })
     }
 
+    /// Keep the menu's ticks in step with a change made in Settings.
+    pub fn set_checks(&self, start: Option<bool>, to_tray: Option<bool>, auto: Option<bool>) {
+        if let Some(v) = start {
+            self.start.set_checked(v);
+        }
+        if let Some(v) = to_tray {
+            self.to_tray.set_checked(v);
+        }
+        if let Some(v) = auto {
+            self.auto.set_checked(v);
+        }
+    }
+
     pub fn set_tooltip(&self, s: &str) {
         let _ = self._icon.set_tooltip(Some(s));
     }

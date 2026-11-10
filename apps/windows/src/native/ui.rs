@@ -43,8 +43,23 @@ pub mod icon {
     pub const LIBRARY: char = '\u{E8F1}';
     pub const BACK: char = '\u{E72B}';
     pub const QUEUE: char = '\u{E90B}';
-    pub const SIGN_OUT: char = '\u{F3B1}';
     pub const ADD: char = '\u{E710}';
+    pub const HEART: char = '\u{EB51}';
+    pub const HEART_FILL: char = '\u{EB52}';
+    pub const DOWNLOAD: char = '\u{E896}';
+    pub const DOWNLOADED: char = '\u{E73E}';
+    pub const DELETE: char = '\u{E74D}';
+    pub const UP: char = '\u{E70E}';
+    pub const DOWN: char = '\u{E70D}';
+    pub const EDIT: char = '\u{E70F}';
+    pub const BELL: char = '\u{EA8F}';
+    pub const PEOPLE: char = '\u{E716}';
+    pub const SETTINGS: char = '\u{E713}';
+    pub const LYRICS: char = '\u{E8BD}';
+    pub const GLOBE: char = '\u{E774}';
+    pub const PLAYLIST: char = '\u{E8FD}';
+    pub const CLOSE: char = '\u{E711}';
+    pub const PLAY_NEXT: char = '\u{E893}';
 }
 
 pub fn icon<'a>(c: char, size: u16) -> iced::widget::Text<'a, Theme> {
@@ -230,6 +245,38 @@ fn tint_for(s: &str) -> Color {
     let h = s.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
     let palette = [rgb(0x3A, 0x2A, 0x4F), rgb(0x1F, 0x3B, 0x4D), rgb(0x4A, 0x2C, 0x2C), rgb(0x24, 0x40, 0x34), rgb(0x45, 0x3A, 0x22), rgb(0x2B, 0x2F, 0x4A)];
     palette[(h as usize) % palette.len()]
+}
+
+/// The see-through layer behind a dialog.
+pub fn scrim(_: &Theme) -> container::Style {
+    container::Style { background: Some(Color { a: 0.6, ..FRAME }.into()), ..Default::default() }
+}
+/// A dialog's card.
+pub fn dialog(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(SURFACE_2.into()),
+        border: Border { radius: 14.0.into(), width: 1.0, color: BORDER },
+        text_color: Some(TEXT),
+        shadow: Shadow { color: Color { a: 0.5, ..FRAME }, offset: Vector::new(0.0, 12.0), blur_radius: 32.0 },
+    }
+}
+/// The little message that pops up above the player.
+pub fn toast(_: &Theme) -> container::Style {
+    container::Style { background: Some(TEXT.into()), text_color: Some(FRAME), border: border::rounded(8.0), ..Default::default() }
+}
+/// The unread count on the bell.
+pub fn badge(_: &Theme) -> container::Style {
+    container::Style { background: Some(ACCENT.into()), text_color: Some(rgb(0xFF, 0xFF, 0xFF)), border: border::rounded(9.0), ..Default::default() }
+}
+/// Mix cards: a coloured tile per mix.
+pub fn mix_tile(seed: &str) -> impl Fn(&Theme) -> container::Style {
+    let tint = tint_for(seed);
+    move |_| container::Style {
+        background: Some(Background::Gradient(iced::Gradient::Linear(iced::gradient::Linear::new(0.8).add_stop(0.0, Color { a: 1.0, ..ACCENT }).add_stop(1.0, tint)))),
+        border: border::rounded(6.0),
+        text_color: Some(TEXT),
+        ..Default::default()
+    }
 }
 
 pub fn gap<'a, M: 'a>(px: u16) -> Element<'a, M> {

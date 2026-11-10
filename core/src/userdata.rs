@@ -32,6 +32,13 @@ pub enum Edit {
     RemoveAt { id: String, index: usize, track: String },
     Move { id: String, from: usize, to: usize },
     Like { track: String, on: bool, at: u64 },
+    /// one of the website's settings (`settings.leveling`, `settings.shareActivity`, …)
+    Setting(String, Value),
+}
+
+/// One of the website's settings, or `default` when unset.
+pub fn setting(d: &UserData, key: &str) -> Option<Value> {
+    d.rest.get("settings").and_then(|s| s.get(key)).cloned()
 }
 
 /// Now, in seconds.
@@ -221,6 +228,13 @@ pub fn apply(d: &mut UserData, e: &Edit) {
                 p.tracks.insert(0, entry(track, *at));
             }
         }
+        Edit::Setting(key, value) => {
+            let s = d.rest.entry("settings").or_insert_with(|| json!({}));
+            if !s.is_object() {
+                *s = json!({});
+            }
+            s.as_object_mut().expect("object").insert(key.clone(), value.clone());
+        }
     }
 }
 
@@ -335,6 +349,10 @@ mod tests {
         assert_eq!(d.playlists.len(), 1, "Liked Songs can't be deleted");
         apply(&mut d, &Edit::Like { track: "t1".into(), on: false, at: 2 });
         assert!(!is_liked(&d, "t1"));
+        d.rest.insert("settings".into(), json!({ "gapless": true }));
+        apply(&mut d, &Edit::Setting("leveling".into(), json!("album")));
+        assert_eq!(setting(&d, "leveling"), Some(json!("album")));
+        assert_eq!(setting(&d, "gapless"), Some(json!(true)), "other settings kept");
         assert!(new_playlist_id().starts_with("pl_"));
     }
 
