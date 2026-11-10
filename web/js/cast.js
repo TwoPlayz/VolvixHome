@@ -1,140 +1,137 @@
-/* Volvix Home — Cast (Chromecast and other Google Cast TVs / speakers) and AirPlay.
- *  Cast: Chrome / Edge on a computer or Android (not inside the Windows app or on iPhone). The device fetches the song
- *  itself from this server, using a short-lived signed link, so open Volvix Home at your server's network address
- *  (not "localhost"). While casting, this player keeps the queue and controls everything, but stays silent.
+/* Volvix Home — playing on TVs and speakers.
+ *  Cast (Chromecast and other Google Cast TVs / speakers): the SERVER talks to the device (see server/src/castdev.rs),
+ *  so it works from any address, in any browser, and inside the Windows and iPhone apps. The server finds the devices
+ *  on the network; the device fetches each song from the server itself, with a short-lived signed link.
+ *  While casting, this player keeps the queue and the clock but stays silent, and follows the TV's play / pause.
  *  AirPlay: Safari and the iPhone app: the system's own speaker picker. */
 window.Spin = window.Spin || {};
 (function (S) {
   'use strict';
 
-  const MIME = { FLAC: 'audio/flac', MP3: 'audio/mpeg', WAV: 'audio/wav', AAC: 'audio/mp4', ALAC: 'audio/mp4', OGG: 'audio/ogg', OPUS: 'audio/ogg' };
-  const C = S.cast = { active: false, name: '', ready: null };
-  let player = null, controller = null, loadedId = null, following = false, token = null;
+  const C = S.cast = { active: false, name: '', device: null, devices: [] };
+  // sentPlaying: playing / paused as last told to the TV (so a change on the TV's own remote can be told apart)
+  let loadedId = null, following = false, poll = null, loading = false, sentPlaying = null, sentVolume = null;
+  // right after a command the TV still reports its old state for a moment: don't follow it back
+  let quietUntil = 0;
+  const hush = function () { quietUntil = Date.now() + 3000; };
 
-  C.supported = function () {
-    const ua = navigator.userAgent;
-    return !window.VOLVIX_NATIVE && /Chrome\//.test(ua) && !/iPhone|iPad|Firefox/.test(ua);
-  };
+  C.supported = function () { return true; };
   C.airplay = function () { return !!window.WebKitPlaybackTargetAvailabilityEvent && typeof S.player.audio.webkitShowPlaybackTargetPicker === 'function'; };
 
-  /** Load Google's sender library the first time someone asks to cast. Resolves true when it's usable. */
-  function sdk() {
-    if (C.ready) return C.ready;
-    C.ready = new Promise(function (resolve) {
-      const timer = setTimeout(function () { resolve(false); }, 8000);
-      window.__onGCastApiAvailable = function (ok) {
-        clearTimeout(timer);
-        if (!ok) return resolve(false);
-        try {
-          const ctx = cast.framework.CastContext.getInstance();
-          ctx.setOptions({ receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID, autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED });
-          ctx.addEventListener(cast.framework.CastContextEventType.SESSION_STATE_CHANGED, onSession);
-          player = new cast.framework.RemotePlayer();
-          controller = new cast.framework.RemotePlayerController(player);
-          const E = cast.framework.RemotePlayerEventType;
-          controller.addEventListener(E.IS_PAUSED_CHANGED, remotePaused);
-          controller.addEventListener(E.CURRENT_TIME_CHANGED, remoteTime);
-          resolve(true);
-        } catch (e) { resolve(false); }
-      };
-      const s = document.createElement('script');
-      s.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
-      s.onerror = function () { clearTimeout(timer); resolve(false); };
-      document.head.appendChild(s);
-    });
-    return C.ready;
-  }
+  /** The TVs and speakers the server can see (refreshed in the background, so the menu opens instantly). */
+  C.refresh = function () {
+    return S.server.json('GET', '/api/cast/devices').then(function (r) { C.devices = r.devices || []; return C.devices; }).catch(function () { return C.devices; });
+  };
+  C.refresh();
+  setInterval(function () { if (document.visibilityState === 'visible') C.refresh(); }, 30000);
 
-  const session = function () { return cast.framework.CastContext.getInstance().getCurrentSession(); };
+  const api = function (path, body) { return S.server.json('POST', path, body); };
 
-  function onSession(e) {
-    const S_ = cast.framework.SessionState;
-    if (e.sessionState === S_.SESSION_STARTED || e.sessionState === S_.SESSION_RESUMED) begin();
-    else if (e.sessionState === S_.SESSION_ENDED) finish();
-  }
+  /** Start casting to a device: what's playing moves there, at the same spot. */
+  C.start = function (dev) {
+    if (S.party && S.party.active) { S.toast('Casting isn\'t available in a party', 'x'); return; }
+    const t = S.player.current();
+    if (!t) { S.toast('Start a song first, then cast it', 'devices'); return; }
+    C.active = true; C.device = dev.id; C.name = dev.name;
+    loadedId = null;
+    sentVolume = S.player.state.muted ? 0 : S.player.state.volume; // the TV keeps its own volume until you change it here
+    S.player.silent = true; S.player.render();
+    S.toast('Connecting to ' + dev.name + '…', 'devices');
+    loadTrack(t, S.player.state.pos, true);
+    clearInterval(poll);
+    poll = setInterval(follow, 1500);
+  };
 
-  function begin() {
-    const s = session();
-    if (S.party && S.party.active) { S.toast('Casting isn\'t available in a party', 'x'); s && cast.framework.CastContext.getInstance().endCurrentSession(true); return; }
-    if (/^(localhost|127\.|\[::1\])/.test(location.hostname)) {
-      S.toast('Open Volvix Home at your server\'s network address (not localhost) so the TV can reach it.', 'x');
-      cast.framework.CastContext.getInstance().endCurrentSession(true); return;
-    }
-    C.active = true; C.name = s && s.getCastDevice ? s.getCastDevice().friendlyName : 'a TV';
-    loadedId = null; S.player.silent = true; S.player.render();
-    S.toast('Casting to ' + C.name, 'devices');
-  }
-  function finish() {
+  function finish(message) {
     if (!C.active) return;
-    C.active = false; loadedId = null; S.player.silent = false; S.player.render();
-    S.toast('Stopped casting', 'devices');
+    clearInterval(poll); poll = null;
+    C.active = false; C.device = null; loadedId = null;
+    S.player.silent = false; S.player.render();
+    S.toast(message || 'Stopped casting', 'devices');
   }
 
-  function freshToken() {
-    if (token && token.expires - 600 > Date.now() / 1000) return Promise.resolve(token.token);
-    return S.server.json('POST', '/api/cast/token', {}).then(function (r) { token = r; return r.token; });
-  }
+  C.stop = function () {
+    const dev = C.device;
+    finish();
+    if (dev) api('/api/cast/control', { device: dev, action: 'stop' }).catch(function () {});
+  };
 
-  function loadTrack(t, pos) {
-    const s = session();
-    if (!s) return;
-    loadedId = t.id;
-    const al = S.data.album(t.albumId);
-    freshToken().then(function (tk) {
-      const base = location.origin;
-      const mi = new chrome.cast.media.MediaInfo(base + '/api/stream/' + encodeURIComponent(t.id) + '?cast=' + encodeURIComponent(tk), MIME[(al && al.quality && al.quality.codec || '').toUpperCase()] || 'audio/mpeg');
-      mi.streamType = chrome.cast.media.StreamType.BUFFERED;
-      mi.duration = t.duration || null;
-      const md = new chrome.cast.media.MusicTrackMediaMetadata();
-      md.title = t.title; md.artist = t.artist; md.albumName = al ? al.title : '';
-      if (al && al.cover) md.images = [new chrome.cast.Image(base + '/api/cover/' + encodeURIComponent(al.id) + '?cast=' + encodeURIComponent(tk))];
-      mi.metadata = md;
-      const req = new chrome.cast.media.LoadRequest(mi);
-      req.autoplay = !!S.player.state.playing;
-      req.currentTime = Math.max(0, pos || 0);
-      return s.loadMedia(req);
-    }).catch(function () { loadedId = null; S.toast('The TV couldn\'t play that song', 'x'); });
+  function loadTrack(t, pos, first) {
+    loadedId = t.id; loading = true; sentPlaying = !!S.player.state.playing; hush();
+    api('/api/cast/play', { device: C.device, track: t.id, at: Math.max(0, pos || 0), autoplay: !!S.player.state.playing, origin: location.origin })
+      .then(function () { loading = false; if (first) S.toast('Casting to ' + C.name, 'devices'); })
+      .catch(function (e) {
+        loading = false; loadedId = null;
+        if (first) finish(e.message || 'Couldn\'t cast to ' + C.name); else S.toast(e.message || 'The TV couldn\'t play that song', 'x');
+      });
   }
 
   /** Keep the TV doing what this player says: song, play / pause, volume. */
   function sync() {
-    if (!C.active || !player) return;
+    if (!C.active || loading) return;
     const t = S.player.current(), st = S.player.state;
-    if (!t) { if (loadedId && session()) { try { session().getSessionObj().stop(function () {}, function () {}); } catch (e) { /* ignore */ } } loadedId = null; return; }
+    if (!t) { C.stop(); return; }
     if (t.id !== loadedId) { loadTrack(t, st.pos); return; }
-    if (player.isMediaLoaded) {
-      if (st.playing === player.isPaused) controller.playOrPause();
-      const v = st.muted ? 0 : st.volume;
-      if (Math.abs((player.volumeLevel || 0) - v) > 0.02) { player.volumeLevel = v; controller.setVolumeLevel(); }
+    if (sentPlaying !== !!st.playing) {
+      // played / paused here: tell the TV
+      sentPlaying = !!st.playing; hush();
+      api('/api/cast/control', { device: C.device, action: st.playing ? 'play' : 'pause' }).catch(function () {});
+    }
+    const v = st.muted ? 0 : st.volume;
+    if (sentVolume === null || Math.abs(v - sentVolume) > 0.02) {
+      sentVolume = v;
+      clearTimeout(volTimer);
+      volTimer = setTimeout(function () { api('/api/cast/control', { device: C.device, action: 'volume', value: v }).catch(function () {}); }, 150);
     }
   }
+  let volTimer = null;
   S.player.hooks.push(sync);
   S.player.seekHooks.push(function (sec) {
-    if (!C.active || following || !player || !player.isMediaLoaded) return;
-    player.currentTime = sec; controller.seek();
+    if (!C.active || following || loading) return;
+    hush();
+    api('/api/cast/control', { device: C.device, action: 'seek', value: sec }).catch(function () {});
   });
 
-  // someone paused / resumed on the TV (its remote, the Google Home app…)
-  function remotePaused() {
-    if (!C.active || !player || !player.isMediaLoaded) return;
-    const st = S.player.state;
-    if (st.playing === player.isPaused) S.player.toggle();
-  }
-  // the TV is the clock: this player follows it
-  function remoteTime() {
-    if (!C.active || !player || !player.isMediaLoaded) return;
-    const local = S.player.audio.currentTime || 0;
-    if (Math.abs(local - player.currentTime) > 1) { following = true; try { S.player.seekTo(player.currentTime); } finally { following = false; } }
+  /** The TV is the clock: follow its position, and its play / pause from its own remote or the Google Home app. */
+  function follow() {
+    if (!C.active || loading) return;
+    S.server.json('GET', '/api/cast/status?device=' + encodeURIComponent(C.device)).then(function (r) {
+      const s = r.status || {};
+      if (!C.active || loading) return;
+      if (!s.connected) { finish('Lost the connection to ' + C.name); return; }
+      if (s.playerState === 'IDLE' && s.idleReason === 'CANCELLED') { finish(C.name + ' is playing something else now'); return; }
+      if (s.playerState === 'IDLE' && s.idleReason === 'ERROR') { S.toast(C.name + ' couldn\'t play that song', 'x'); return; }
+      const st = S.player.state;
+      if (Date.now() < quietUntil) return;
+      if (s.playerState === 'PLAYING' || s.playerState === 'PAUSED') {
+        const remotePlaying = s.playerState === 'PLAYING';
+        // changed on the TV itself (its remote, the Google Home app): this player follows
+        if (remotePlaying !== sentPlaying) { sentPlaying = remotePlaying; if (!!st.playing !== remotePlaying) S.player.toggle(); }
+        if (Math.abs((S.player.audio.currentTime || 0) - s.currentTime) > 2) {
+          following = true; try { S.player.seekTo(s.currentTime); } finally { following = false; }
+        }
+      }
+    }).catch(function () { /* a missed poll is fine */ });
   }
 
-  C.request = function () {
-    if (!C.supported()) { S.toast('Casting works in Chrome or Edge on a computer or Android, not in the app or on iPhone.', 'x'); return; }
-    sdk().then(function (ok) {
-      if (!ok) { S.toast('Couldn\'t load Google Cast (no internet, or a blocker is in the way).', 'x'); return; }
-      cast.framework.CastContext.getInstance().requestSession().catch(function () { /* cancelled */ });
+  /** Add a TV by its address (when the server doesn't find it by itself, e.g. it runs in Docker). */
+  C.addByAddress = function () {
+    S.modal({
+      title: 'Add a TV or speaker',
+      body: '<p class="modal-text">Type its address on your network. You can find it in the Google Home app: the device → Settings → Device information.</p>' +
+        '<label class="field"><span class="label">Address</span><input class="input" data-cast-host placeholder="192.168.1.40" inputmode="decimal" autocomplete="off"></label>',
+      actions: [{ label: 'Cancel', kind: 'secondary' }, { label: 'Add', kind: 'primary', onClick: function (close) {
+        const input = document.querySelector('[data-cast-host]');
+        const host = input ? input.value.trim() : '';
+        if (!host) return;
+        api('/api/cast/devices', { host: host }).then(function (r) {
+          close(); C.refresh();
+          S.toast((r.device && r.device.name || 'That device') + ' added', 'check');
+        }).catch(function (e) { S.toast(e.message || 'Couldn\'t add it', 'x'); });
+      } }]
     });
   };
-  C.stop = function () { try { cast.framework.CastContext.getInstance().endCurrentSession(true); } catch (e) { /* ignore */ } };
+
   // AirPlay speakers can't fetch a downloaded copy (it lives inside the app), so while AirPlay is on, play from the server
   S.player.audio.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', function () {
     const wireless = !!S.player.audio.webkitCurrentPlaybackTargetIsWireless;

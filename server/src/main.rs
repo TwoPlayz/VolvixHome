@@ -17,6 +17,7 @@
 mod artistinfo;
 mod auth;
 mod cast;
+mod castdev;
 mod devices;
 mod library;
 mod lidarr;
@@ -94,6 +95,8 @@ struct AppState {
     cast_key: String,
     transcoder: transcode::Transcoder,
     artists: artistinfo::Client,
+    /// Chromecasts / Cast speakers the server can play on (castdev.rs)
+    caster: castdev::Caster,
     shares: shares::Shares,
     /// custom look for albums without cover art: album id -> { bg, font } (shared by the household)
     covers: Mutex<HashMap<String, Value>>,
@@ -827,6 +830,113 @@ async fn cast_token(State(st): State<Shared>, headers: HeaderMap) -> Response {
     let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
     let exp = auth::now() + cast::LIFETIME;
     Json(json!({ "token": cast::sign(&st.cast_key, &user.id, exp), "expires": exp })).into_response()
+}
+
+/* ---------------- casting from the server (castdev.rs) ---------------- */
+
+/// The TVs and speakers the server can play on (found on the network, or added by address).
+async fn cast_devices(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    Json(json!({ "devices": st.caster.devices() })).into_response()
+}
+
+#[derive(Deserialize)]
+struct CastHost { host: String }
+
+/// Add a TV by its address (when it isn't found automatically, e.g. the server runs in Docker without host networking).
+async fn cast_add_device(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<CastHost>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    match st.caster.add(&body.host).await {
+        Ok(d) => Json(json!({ "device": d })).into_response(),
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e),
+    }
+}
+
+async fn cast_remove_device(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    st.caster.remove(&id);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Deserialize)]
+struct CastPlay {
+    device: String,
+    track: String,
+    #[serde(default)]
+    at: f64,
+    #[serde(default = "yes_please")]
+    autoplay: bool,
+    /// the address the app reaches this server at (location.origin): the TV fetches the song from there too
+    #[serde(default)]
+    origin: String,
+}
+fn yes_please() -> bool { true }
+
+/// The base address a Cast device should fetch songs from: the app's own address, unless that's only reachable from
+/// the app's own computer (localhost, the Windows app's built-in page), then this server's address on the network.
+fn cast_base(st: &AppState, origin: &str, device_host: &str) -> String {
+    let o = origin.trim().trim_end_matches('/');
+    let host = o.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("");
+    let bare = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host).trim_start_matches('[').trim_end_matches(']');
+    let local_only = bare.is_empty() || bare == "localhost" || bare.ends_with(".localhost") || bare.starts_with("127.") || bare == "::1";
+    if (o.starts_with("http://") || o.starts_with("https://")) && !local_only { return o.to_string(); }
+    let ip = castdev::local_ip_towards(device_host).map(|i| i.to_string()).unwrap_or_else(|| "127.0.0.1".into());
+    format!("http://{ip}:{}", st.cfg.port)
+}
+
+async fn cast_play(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<CastPlay>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    let Some(dev) = st.caster.device(&body.device) else { return error(StatusCode::NOT_FOUND, "That TV isn't on the network any more.") };
+    let info = {
+        let lib = st.lib.read().unwrap();
+        lib.catalog.tracks.iter().find(|t| t.id == body.track).map(|t| {
+            let al = lib.catalog.albums.iter().find(|a| a.id == t.album_id);
+            (t.title.clone(), t.artist.clone(), t.duration, al.map(|a| (a.id.clone(), a.title.clone(), a.cover, a.cover_v, a.quality.codec.to_uppercase())))
+        })
+    };
+    let Some((title, artist, duration, album)) = info else { return error(StatusCode::NOT_FOUND, "No such song.") };
+    let token = cast::sign(&st.cast_key, &user.id, auth::now() + cast::LIFETIME);
+    let base = cast_base(&st, &body.origin, &dev.host);
+    let codec = album.as_ref().map(|a| a.4.clone()).unwrap_or_default();
+    // Cast devices play FLAC, MP3, AAC, Opus/Vorbis and WAV; anything else (ALAC, AIFF…) is sent as AAC instead
+    let (content_type, q) = match codec.as_str() {
+        "FLAC" => ("audio/flac", ""),
+        "MP3" => ("audio/mpeg", ""),
+        "AAC" | "M4A" | "MP4" => ("audio/mp4", ""),
+        "OPUS" | "OGG" | "VORBIS" => ("audio/ogg", ""),
+        "WAV" => ("audio/wav", ""),
+        _ if st.transcoder.available() => ("audio/mp4", "&q=high"),
+        _ => ("audio/mp4", ""),
+    };
+    let image = album.as_ref().filter(|a| a.2).map(|a| format!("{base}/api/cover/{}?s=640&v={}&cast={token}", a.0, a.3));
+    let media = castdev::Media {
+        url: format!("{base}/api/stream/{}?cast={token}{q}", body.track),
+        content_type: content_type.into(), title, artist,
+        album: album.as_ref().map(|a| a.1.clone()).unwrap_or_default(),
+        image, duration: if duration > 0 { Some(duration as f64) } else { None }, track: body.track.clone(),
+    };
+    match st.caster.play(&dev, media, body.at, body.autoplay).await {
+        Ok(s) => Json(json!({ "status": s, "device": dev })).into_response(),
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e),
+    }
+}
+
+#[derive(Deserialize)]
+struct CastControl { device: String, action: String, #[serde(default)] value: Option<f64> }
+
+async fn cast_control(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<CastControl>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    let Some(dev) = st.caster.device(&body.device) else { return error(StatusCode::NOT_FOUND, "That TV isn't on the network any more.") };
+    match st.caster.control(&dev, &body.action, body.value).await {
+        Ok(s) => Json(json!({ "status": s })).into_response(),
+        Err(e) => error(StatusCode::BAD_GATEWAY, &e),
+    }
+}
+
+async fn cast_status(State(st): State<Shared>, headers: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    let Some(dev) = q.get("device").and_then(|d| st.caster.device(d)) else { return Json(json!({ "status": castdev::Status::default() })).into_response() };
+    Json(json!({ "status": st.caster.status(&dev).await })).into_response()
 }
 
 async fn stream(State(st): State<Shared>, Path(id): Path<String>, req: Request) -> Response {
@@ -2057,6 +2167,7 @@ async fn main() {
         cast_key: load_cast_key(&cfg.data_dir),
         transcoder: transcode::Transcoder::new(&cfg.data_dir),
         artists: artistinfo::Client::new(),
+        caster: castdev::Caster::new(&cfg.data_dir),
         shares: shares::Shares::load(&cfg.data_dir),
         covers: Mutex::new(vault::read(&cfg.data_dir.join("covers.json")).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()),
         watch: watch_tx.0,
@@ -2159,6 +2270,11 @@ async fn main() {
         .route("/api/stream/{id}", get(stream).options(cast_preflight))
         .route("/api/cover/{id}", get(cover).options(cast_preflight))
         .route("/api/cast/token", post(cast_token))
+        .route("/api/cast/devices", get(cast_devices).post(cast_add_device))
+        .route("/api/cast/devices/{id}", delete(cast_remove_device))
+        .route("/api/cast/play", post(cast_play))
+        .route("/api/cast/control", post(cast_control))
+        .route("/api/cast/status", get(cast_status))
         .route("/api/shares", get(share_list).post(share_create))
         .route("/api/shares/{token}", delete(share_cancel))
         .route("/s/{token}", get(share_page))
