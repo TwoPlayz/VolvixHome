@@ -1,11 +1,11 @@
-﻿//! The Windows app's own settings, saved in %LOCALAPPDATA%\Volvix Home\config.json next to the server address.
+//! The Windows app's own settings, saved in %LOCALAPPDATA%\Volvix Home\config.json next to the server address.
 
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const RUN_NAME: &str = "Volvix Home";
+use crate::RUN_NAME;
 
 #[derive(Clone)]
 pub struct Settings {

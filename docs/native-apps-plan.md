@@ -96,7 +96,33 @@ from the core. Built and shipped through the existing iOS CI.
 - The Windows MVP signing in to a local dev server, browsing the library and playing a song
   with the queue, with a screenshot. Not released; today's 0.35 apps are untouched.
 
-## Questions for you
+## Where it stands (2026-11-10)
+
+- **Phase 1 done**: `core/` with 23 unit tests and 5 tests against a dev server
+  (`cargo test` in `core/`; with a dev server running: `cargo test -- --ignored`, see `core/tests/server.rs`).
+- **Phase 2 MVP working**: `apps/windows/src/native/` (iced 0.13, rodio 0.20 on symphonia).
+  Signs in, Home, Library (albums/artists), Album, Artist, Search, playback that streams with
+  range requests, queue (play next, add, remove, jump, shuffle, repeat), mini player, Now Playing,
+  media keys and the Windows media overlay (souvlaki), tray menu, one copy only, updater wiring.
+  Keeps its own data in `%LOCALAPPDATA%\Volvix Home Native` and its own startup entry, so it runs
+  beside today's app. The release build of today's app is unchanged (the native binary needs
+  `--features native`).
+
+Run it (with `powershell -File dev.ps1` running):
+
+```
+cargo run --manifest-path apps/windows/Cargo.toml --features native --bin volvix-home-native
+```
+
+Debug builds also accept `VH_DEMO=album|nowplaying|artist|library|search:<words>` to open a screen
+and start playing without clicking (used for screenshots).
+
+Not yet checked by hand: clicking through the window (only scripted screens were tried), real
+cover art (the dev music has none), the tray and media overlay on screen, and decoding MP3/FLAC/M4A
+(the dev music is WAV). Next: those checks, gapless/next-song preloading, keyboard shortcuts,
+resume where you left off, then phase 3.
+
+## Questions for you (answered)
 
 1. **Slint or iced** for the Windows app?
 2. OK for the native Windows app to live as a second binary (`volvix-home-native`) inside

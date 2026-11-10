@@ -80,8 +80,8 @@ pub fn run(on: &dyn Fn(State)) -> State {
     if !newer(tag, env!("CARGO_PKG_VERSION")) { return State::UpToDate; }
     let version = tag.trim_start_matches('v').to_string();
     let find = |name: &str| release["assets"].as_array().and_then(|l| l.iter().find(|x| x["name"].as_str() == Some(name))).and_then(|x| x["browser_download_url"].as_str()).map(String::from);
-    let Some(exe_url) = find("volvix-home.exe") else { return State::Failed("That release has no Windows app.".into()) };
-    let sha_url = find("volvix-home.exe.sha256");
+    let Some(exe_url) = find(crate::RELEASE_EXE) else { return State::Failed("That release has no Windows app.".into()) };
+    let sha_url = find(&format!("{}.sha256", crate::RELEASE_EXE));
 
     on(State::Downloading(version.clone()));
     let mut bytes = Vec::new();
@@ -100,7 +100,7 @@ pub fn run(on: &dyn Fn(State)) -> State {
     }
     if bytes.len() < 1_000_000 || &bytes[..2] != b"MZ" { return State::Failed("The download isn't a Windows program.".into()); }
 
-    let new = dir().join("volvix-home.exe.new");
+    let new = dir().join(format!("{}.new", crate::RELEASE_EXE));
     if std::fs::write(&new, &bytes).is_err() { return State::Failed("Couldn't save the update.".into()); }
     match install(&new) {
         Ok(()) => State::Ready(version),
