@@ -133,7 +133,7 @@ and start playing without clicking (used for screenshots).
     from its saved library copy when the server can't be reached.
   - Settings: account (name, password, sign out), volume leveling (ReplayGain), share what I'm
     listening to, private session, downloads, start with Windows, tray, updates, server.
-  - Tests: core 35 unit + 8 live-server tests.
+  - Tests: core 34 unit + 8 live-server tests; the Windows app 2 (ReplayGain).
 
 Not yet checked by hand: clicking through the window (screens were opened with `VH_DEMO`, because
 synthetic input didn't reach the window here), sound (the test PC had no audio device during the
