@@ -65,6 +65,7 @@ window.Spin.views = window.Spin.views || {};
       '</div>';
 
     renderSidebarPlaylists();
+    watchTabbar();
   }
 
   function playerBar() {
@@ -115,6 +116,20 @@ window.Spin.views = window.Spin.views || {};
         '<span class="pl-text"><span class="pl-name">' + S.esc(pl.name) + '</span><span class="pl-sub">' + sub + '</span></span></a>';
     }).join('') || '<p class="pl-empty">Create your first playlist with +</p>';
     setActive(S.router.current());
+  }
+
+  /** On a phone the mini player floats just above the tab bar: keep that gap right whatever the tab bar's real height
+   *  (it's taller on iPhones with a home bar, and with larger text). */
+  function watchTabbar() {
+    const tabs = S.$('.tabbar');
+    if (!tabs) return;
+    const measure = function () {
+      const h = tabs.offsetHeight;
+      if (h) document.documentElement.style.setProperty('--tabbar-h', h + 'px');
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    if (window.ResizeObserver) new ResizeObserver(measure).observe(tabs);
   }
 
   function bindShell() {

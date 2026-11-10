@@ -28,7 +28,7 @@ Spin.views = Spin.views || {};
 
       root.innerHTML =
         '<header class="album-head">' +
-          '<div class="album-cover">' + S.cover(album) + '</div>' +
+          '<div class="album-cover">' + S.cover(album, '', true) + '</div>' +
           '<div class="album-info">' +
             '<div class="eyebrow">Album</div>' +
             '<h1 class="album-title">' + S.esc(album.title) + '</h1>' +

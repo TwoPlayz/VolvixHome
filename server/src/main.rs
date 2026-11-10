@@ -844,18 +844,57 @@ async fn stream(State(st): State<Shared>, Path(id): Path<String>, req: Request) 
     }
 }
 
-async fn cover(State(st): State<Shared>, headers: HeaderMap, uri: axum::http::Uri, Path(id): Path<String>) -> Response {
+/// A copy of the cover no bigger than `size` px, as JPEG, made once and kept in <data>/cache/covers. Covers people drop
+/// in folders can be huge (5000×5000), which browsers take a moment to decode every time a page shows them.
+/// None = use the original (it's already small enough, or it couldn't be read as an image).
+async fn sized_cover(st: &Shared, id: &str, size: u32) -> Option<Vec<u8>> {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric()) { return None; }
+    let stamp = st.lib.read().unwrap().cover_stamp(id)?;
+    let dir = st.cfg.data_dir.join("cache").join("covers");
+    let file = dir.join(format!("{id}-{size}-{stamp}.jpg"));
+    if let Ok(b) = std::fs::read(&file) { return Some(b); }
+    let original = st.lib.read().unwrap().cover(id)?;
+    static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let _permit = GATE.get_or_init(|| tokio::sync::Semaphore::new(2)).acquire().await; // resizing is heavy: two at a time
+    if let Ok(b) = std::fs::read(&file) { return Some(b); } // made by another request while this one waited
+    let made = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+        let img = image::load_from_memory(&original).ok()?;
+        if img.width() <= size && img.height() <= size { return None; }
+        let small = img.thumbnail(size, size).to_rgb8();
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 86).encode_image(&small).ok()?;
+        Some(out.into_inner())
+    }).await.ok()??;
+    let _ = std::fs::create_dir_all(&dir);
+    // older copies of this cover at this size (from before the picture changed) are no use any more
+    if let Ok(list) = std::fs::read_dir(&dir) {
+        let prefix = format!("{id}-{size}-");
+        for e in list.flatten() {
+            if e.file_name().to_string_lossy().starts_with(&prefix) { let _ = std::fs::remove_file(e.path()); }
+        }
+    }
+    let _ = std::fs::write(&file, &made);
+    Some(made)
+}
+
+async fn cover(State(st): State<Shared>, headers: HeaderMap, uri: axum::http::Uri, Path(id): Path<String>, Query(q): Query<HashMap<String, String>>) -> Response {
     let by_cast = cast_user(&st, &uri).is_some();
     if !by_cast {
         if let Err(r) = signed_in(&st, &headers) {
             return r;
         }
     }
-    let bytes = st.lib.read().unwrap().cover(&id);
+    // ?s=640 / ?s=1200: a smaller copy for the page (only these sizes, so the cache stays small)
+    let size = q.get("s").and_then(|s| s.parse::<u32>().ok()).filter(|s| matches!(s, 640 | 1200));
+    let sized = match size { Some(sz) => sized_cover(&st, &id, sz).await, None => None };
+    let bytes = sized.or_else(|| st.lib.read().unwrap().cover(&id));
     match bytes {
         Some(b) => {
             let kind = if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
-            let r = ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=86400")], b).into_response();
+            // with ?v= (the cover's version, which changes when the picture does) the app may keep it for good and never
+            // ask again; without it, a day
+            let cache = if q.contains_key("v") { "private, max-age=31536000, immutable" } else { "private, max-age=86400" };
+            let r = ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, cache)], b).into_response();
             if by_cast { with_cors(r) } else { r }
         }
         None => error(StatusCode::NOT_FOUND, "No cover."),
@@ -1960,6 +1999,12 @@ fn start_scan(st: Shared) {
         let (a, t) = (fresh.catalog.albums.len(), fresh.catalog.tracks.len());
         *st.lib.write().unwrap() = fresh;
         println!("library: {a} albums, {t} tracks in {}", dir.display());
+        // make the small cover copies the pages use now, one by one in the background, so nobody waits for the first one
+        let warm = st.clone();
+        tokio::runtime::Handle::current().spawn(async move {
+            let ids: Vec<String> = warm.lib.read().unwrap().catalog.albums.iter().filter(|a| a.cover).map(|a| a.id.clone()).collect();
+            for id in ids { let _ = sized_cover(&warm, &id, 640).await; }
+        });
         notify_ready(&st);
         if st.rescan_pending.swap(false, std::sync::atomic::Ordering::Relaxed) { start_scan(st.clone()); }
     });

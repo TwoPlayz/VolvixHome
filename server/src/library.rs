@@ -86,6 +86,8 @@ pub struct Quality {
     pub kbps: Option<u32>,
 }
 
+fn is_zero(n: &u64) -> bool { *n == 0 }
+
 #[derive(Serialize, Clone)]
 pub struct Album {
     pub id: String,
@@ -100,6 +102,9 @@ pub struct Album {
     #[serde(rename = "trackIds")]
     pub track_ids: Vec<String>,
     pub cover: bool,
+    /// changes whenever the cover image changes (its file time), so the app can cache covers forever under ?v=
+    #[serde(rename = "coverV", skip_serializing_if = "is_zero")]
+    pub cover_v: u64,
     pub quality: Quality,
     /// newest file time, for "Recently added"
     pub added: u64,
@@ -175,6 +180,14 @@ impl Library {
     }
 
     /// Cover bytes for an album (embedded picture or an image file in the album folder).
+    /// When the album's picture last changed (file time of the cover image, or of the song it's embedded in),
+    /// so resized copies can be redone when you swap the picture.
+    pub fn cover_stamp(&self, album_id: &str) -> Option<u64> {
+        let p = match self.covers.get(album_id)? { CoverSource::File(p) | CoverSource::Embedded(p) => p };
+        let t = std::fs::metadata(p).ok()?.modified().ok()?;
+        Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs())
+    }
+
     pub fn cover(&self, album_id: &str) -> Option<Vec<u8>> {
         match self.covers.get(album_id)? {
             CoverSource::File(p) => std::fs::read(p).ok(),
@@ -388,6 +401,7 @@ pub fn scan(root: &Path) -> Library {
                 catalog_number: None,
                 track_ids: Vec::new(),
                 cover: false,
+                cover_v: 0,
                 quality: s.quality.clone(),
                 added: 0,
             });
@@ -423,6 +437,7 @@ pub fn scan(root: &Path) -> Library {
             lib.covers.insert(album_id.clone(), CoverSource::Embedded(s.path.clone()));
         }
         album.cover = lib.covers.contains_key(&album_id);
+        if album.cover && album.cover_v == 0 { album.cover_v = lib.cover_stamp(&album_id).unwrap_or(1); }
 
         lib.files.insert(track_id.clone(), s.path.clone());
         lib.catalog.tracks.push(Track {

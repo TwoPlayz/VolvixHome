@@ -38,7 +38,7 @@ window.Spin = window.Spin || {};
         id: a.id, title: a.title, artist: a.artist, year: a.year || null, genre: a.genre || null,
         label: a.label || null, copyright: a.copyright || null, catalogNumber: a.catalogNumber || null,
         trackIds: (a.trackIds || []).filter(function (id) { return TRACKS[id]; }),
-        cover: !!a.cover, added: a.added || 0, art: artFor(a.id), look: (cat.covers && cat.covers[a.id]) || null,
+        cover: !!a.cover, coverV: a.coverV || 0, added: a.added || 0, art: artFor(a.id), look: (cat.covers && cat.covers[a.id]) || null,
         format: 'digital',
         // e.g. "24/96" for the quality badge; lossy files report their bitrate instead
         maxQuality: q.lossless && q.bits ? q.bits + '/' + (q.khz || 44.1) : null,
@@ -144,7 +144,15 @@ window.Spin = window.Spin || {};
       const q = S.server.streamQuality();
       return '/api/stream/' + encodeURIComponent(trackId) + (q !== 'original' ? '?q=' + q : '');
     },
-    coverUrl: function (albumId) { return '/api/cover/' + encodeURIComponent(albumId); },
+    /** size: 640 or 1200 for a smaller copy made by the server (much quicker to show); none = the original.
+     *  The cover's version goes in the address, so the browser keeps it for good and asks again only when it changes. */
+    coverUrl: function (albumId, size) {
+      const a = byId[albumId];
+      const q = [];
+      if (size) q.push('s=' + size);
+      if (a && a.coverV) q.push('v=' + a.coverV);
+      return '/api/cover/' + encodeURIComponent(albumId) + (q.length ? '?' + q.join('&') : '');
+    },
     json: function (method, path, body) {
       return fetch(path, {
         method: method, credentials: 'same-origin',

@@ -27,11 +27,21 @@ window.Spin = window.Spin || {};
     return '<a class="btn ' + (cls || 'btn-primary btn-sm') + ' web-btn" href="' + S.webUrl(hash) + '" target="_blank" rel="noopener">' + S.esc(label) + S.icon('external', 13) + '</a>';
   };
   document.documentElement.setAttribute('data-platform', S.platform);
-  // In the iPhone app the page should feel native: no pinch-zoom, and no zoom when a text field gets focus.
-  // (The website keeps pinch-zoom for accessibility.)
-  if (S.platform === 'ios') {
+  // Inside the Volvix apps (iPhone, Windows: they set window.VOLVIX_NATIVE) the page should feel like an app, not a
+  // website: no pinch or double-tap zoom, no zoom when a text field gets focus, no tap flash or long-press previews.
+  // The website in a browser keeps normal zooming (accessibility).
+  S.native = (window.VOLVIX_NATIVE && window.VOLVIX_NATIVE.app) || null;
+  if (S.native) {
+    document.documentElement.setAttribute('data-native', S.native);
     const vp = document.querySelector('meta[name="viewport"]');
     if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+    ['gesturestart', 'gesturechange'].forEach(function (ev) {
+      document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
+    });
+    document.addEventListener('touchmove', function (e) { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+    // Ctrl + mouse wheel / Ctrl +/- zoom in the Windows app
+    document.addEventListener('wheel', function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+    document.addEventListener('keydown', function (e) { if (e.ctrlKey && ['+', '=', '-', '_', '0'].indexOf(e.key) !== -1) e.preventDefault(); });
   }
 
   /* ---------- basics ---------- */
@@ -197,7 +207,23 @@ window.Spin = window.Spin || {};
 
   /* ---------- covers & avatars ---------- */
   /** Generated flat album art — no external images. */
-  S.cover = function (album, extraClass) {
+  // covers already shown (this visit or an earlier one): the browser keeps them for good (their address carries the
+  // cover's version), so they're drawn straight away with no loading indicator or fade
+  const coverSeen = {};
+  try { (JSON.parse(localStorage.getItem('vh_covers_seen') || '[]') || []).forEach(function (u) { coverSeen[u] = true; }); } catch (e) { /* private mode */ }
+  let seenSave = null;
+  S._coverLoaded = function (img) {
+    img.parentNode.classList.remove('cover--loading');
+    const u = img.getAttribute('src');
+    if (coverSeen[u] || u.indexOf('v=') === -1) { coverSeen[u] = true; return; }
+    coverSeen[u] = true;
+    clearTimeout(seenSave);
+    seenSave = setTimeout(function () {
+      try { localStorage.setItem('vh_covers_seen', JSON.stringify(Object.keys(coverSeen).filter(function (k) { return k.indexOf('v=') !== -1; }).slice(-3000))); } catch (e) { /* full or private */ }
+    }, 1000);
+  };
+  /** big = for large art (album page, Now Playing): a 1200 px copy instead of 640 px. */
+  S.cover = function (album, extraClass, big) {
     if (!album) return '<div class="cover cover--empty ' + (extraClass || '') + '">' + S.icon('music', 22) + '</div>';
     const a = album.art || {};
     // no cover file: the album's name is printed on generated art (in the background and font someone chose, if they did)
@@ -205,10 +231,11 @@ window.Spin = window.Spin || {};
     const text = !album.cover ? '<span class="cover-title">' + S.esc(album.title) + '</span><span class="cover-artist">' + S.esc(album.artist) + '</span>' : '';
     // has a cover file: a plain tile while it loads, so the generated art doesn't flash first; it fades in once decoded.
     // Only if the picture fails does the generated art show.
-    const real = album.cover && S.server;
-    return '<div class="cover cover--' + (look ? 'custom' : (a.variant || 'plain')) + (real ? ' cover--loading' : '') + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '"' +
+    const src = album.cover && S.server ? S.server.coverUrl(album.id, big ? 1200 : 640) : '';
+    const seen = src && coverSeen[src];
+    return '<div class="cover cover--' + (look ? 'custom' : (a.variant || 'plain')) + (src && !seen ? ' cover--loading' : '') + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '"' +
       (look ? ' data-bg="' + S.esc(look.bg) + '" data-font="' + S.esc(look.font) + '"' : '') + '>' + text +
-      (real ? '<img class="cover-img" src="' + S.server.coverUrl(album.id) + '" alt="" loading="lazy" decoding="async" onload="this.parentNode.classList.remove(\'cover--loading\')" onerror="this.parentNode.classList.remove(\'cover--loading\');this.remove()">' : '') +
+      (src ? '<img class="cover-img" src="' + src + '" alt=""' + (seen ? '' : ' loading="lazy" decoding="async"') + ' onload="Spin._coverLoaded(this)" onerror="this.parentNode.classList.remove(\'cover--loading\');this.remove()">' : '') +
       '</div>';
   };
 

@@ -8,7 +8,8 @@ Spin.views = Spin.views || {};
   S.mixCard = function (m) {
     const albums = [];
     m.ids.forEach(function (id) { const t = S.data.track(id); if (t && albums.indexOf(t.albumId) === -1 && albums.length < 4) albums.push(t.albumId); });
-    const art = S.collage(albums);
+    // the mix's name is printed on its cover, so you can tell the mixes apart at a glance
+    const art = S.collage(albums) + '<span class="mix-label" aria-hidden="true">' + S.icon(m.icon || 'music', 14) + '<span>' + S.esc(m.title) + '</span></span>';
     return '<a class="card mix-card" href="#/mix/' + m.id + '"><span class="card-art">' + art + '</span>' +
       '<span class="card-title">' + S.esc(m.title) + '</span><span class="card-sub">' + S.esc(m.sub) + '</span></a>';
   };

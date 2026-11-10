@@ -50,7 +50,7 @@ window.Spin = window.Spin || {};
         '<div class="np-from"><span>Playing from</span><strong>' + S.esc(from) + '</strong></div>' +
         '<span class="np-head-spacer"></span>' +
       '</div>' +
-      '<div class="np-art">' + S.cover(album) + '</div>' +
+      '<div class="np-art">' + S.cover(album, '', true) + '</div>' +
       '<div class="np-meta">' +
         '<div class="np-text"><div class="np-title">' + S.albumLink(album, t.title) + (t.explicit ? ' ' + S.explicitBadge() : '') + '</div>' +
           '<div class="np-artist">' + S.artistLink(t.artist) + '</div></div>' +

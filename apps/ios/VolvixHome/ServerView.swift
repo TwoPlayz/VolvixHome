@@ -31,6 +31,8 @@ struct ServerView: UIViewRepresentable {
         web.scrollView.backgroundColor = bg
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
+        web.scrollView.minimumZoomScale = 1
+        web.scrollView.maximumZoomScale = 1
         web.allowsBackForwardNavigationGestures = true
         web.navigationDelegate = c
         web.uiDelegate = c
@@ -76,6 +78,13 @@ struct ServerView: UIViewRepresentable {
                      for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if sameHost(action.request.url) { webView.load(action.request) }
             return nil
+        }
+
+        // An app, not a web page: no pinch-zoom (the page also turns off double-tap zoom once it sees VOLVIX_NATIVE).
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.scrollView.pinchGestureRecognizer?.isEnabled = false
+            webView.scrollView.minimumZoomScale = 1
+            webView.scrollView.maximumZoomScale = 1
         }
 
         // If the server can't be reached, show a simple retry instead of a blank page.
