@@ -111,6 +111,133 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for Logo {
     }
 }
 
+/// A slider that follows the mouse by itself while dragged: the handle is drawn from the drag
+/// position straight away, and the app only hears about it when you let go (seek) or every
+/// `every` ms (volume). So dragging never waits for the whole window to be rebuilt.
+pub struct Scrub<'a, M> {
+    value: f32,
+    max: f32,
+    on_change: Option<Box<dyn Fn(f32) -> M + 'a>>,
+    on_release: Box<dyn Fn(f32) -> M + 'a>,
+    every: std::time::Duration,
+}
+
+#[derive(Default)]
+struct ScrubState {
+    dragging: bool,
+    value: f32,
+    last_sent: Option<Instant>,
+}
+
+pub fn scrub<'a, M: 'a>(value: f32, max: f32, on_release: impl Fn(f32) -> M + 'a) -> Scrub<'a, M> {
+    Scrub { value, max: max.max(0.0001), on_change: None, on_release: Box::new(on_release), every: std::time::Duration::from_millis(50) }
+}
+
+impl<'a, M> Scrub<'a, M> {
+    /// Also report while dragging (at most every 50 ms).
+    pub fn on_change(mut self, f: impl Fn(f32) -> M + 'a) -> Self {
+        self.on_change = Some(Box::new(f));
+        self
+    }
+
+    fn at(&self, bounds: Rectangle, x: f32) -> f32 {
+        ((x - bounds.x) / bounds.width).clamp(0.0, 1.0) * self.max
+    }
+}
+
+const SCRUB_H: f32 = 16.0;
+
+impl<'a, M: Clone, Th, R: renderer::Renderer> Widget<M, Th, R> for Scrub<'a, M> {
+    fn tag(&self) -> iced::advanced::widget::tree::Tag {
+        iced::advanced::widget::tree::Tag::of::<ScrubState>()
+    }
+    fn state(&self) -> iced::advanced::widget::tree::State {
+        iced::advanced::widget::tree::State::new(ScrubState::default())
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fixed(SCRUB_H))
+    }
+
+    fn layout(&self, _tree: &mut Tree, _r: &R, limits: &layout::Limits) -> layout::Node {
+        layout::Node::new(limits.resolve(Length::Fill, Length::Fixed(SCRUB_H), Size::ZERO))
+    }
+
+    fn draw(&self, tree: &Tree, renderer: &mut R, _theme: &Th, _style: &renderer::Style, layout: Layout<'_>, cursor: mouse::Cursor, _viewport: &Rectangle) {
+        let st = tree.state.downcast_ref::<ScrubState>();
+        let b = layout.bounds();
+        let v = if st.dragging { st.value } else { self.value };
+        let f = (v / self.max).clamp(0.0, 1.0);
+        let live = st.dragging || cursor.is_over(b);
+        let rail = Rectangle { x: b.x, y: b.center_y() - 2.0, width: b.width, height: 4.0 };
+        let round = Border { radius: 2.0.into(), width: 0.0, color: Color::TRANSPARENT };
+        renderer.fill_quad(Quad { bounds: rail, border: round, shadow: Shadow::default() }, Color { a: 0.2, ..ui::TEXT });
+        renderer.fill_quad(Quad { bounds: Rectangle { width: rail.width * f, ..rail }, border: round, shadow: Shadow::default() }, if live { ui::ACCENT } else { ui::TEXT });
+        if live {
+            let r = 6.0;
+            renderer.fill_quad(
+                Quad {
+                    bounds: Rectangle { x: b.x + b.width * f - r, y: b.center_y() - r, width: 2.0 * r, height: 2.0 * r },
+                    border: Border { radius: r.into(), width: 0.0, color: Color::TRANSPARENT },
+                    shadow: Shadow::default(),
+                },
+                ui::TEXT,
+            );
+        }
+    }
+
+    fn on_event(&mut self, tree: &mut Tree, event: Event, layout: Layout<'_>, cursor: mouse::Cursor, _r: &R, _c: &mut dyn Clipboard, shell: &mut Shell<'_, M>, _viewport: &Rectangle) -> Status {
+        let st = tree.state.downcast_mut::<ScrubState>();
+        let b = layout.bounds();
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(p) = cursor.position_over(b) {
+                    st.dragging = true;
+                    st.value = self.at(b, p.x);
+                    st.last_sent = Some(Instant::now());
+                    if let Some(f) = &self.on_change {
+                        shell.publish(f(st.value));
+                    }
+                    shell.request_redraw(RedrawRequest::NextFrame);
+                    return Status::Captured;
+                }
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) if st.dragging => {
+                st.value = self.at(b, position.x);
+                if let Some(f) = &self.on_change {
+                    if st.last_sent.map(|t| t.elapsed() >= self.every).unwrap_or(true) {
+                        st.last_sent = Some(Instant::now());
+                        shell.publish(f(st.value));
+                    }
+                }
+                shell.request_redraw(RedrawRequest::NextFrame);
+                return Status::Captured;
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if st.dragging => {
+                st.dragging = false;
+                shell.publish((self.on_release)(st.value));
+                return Status::Captured;
+            }
+            _ => {}
+        }
+        Status::Ignored
+    }
+
+    fn mouse_interaction(&self, _tree: &Tree, layout: Layout<'_>, cursor: mouse::Cursor, _viewport: &Rectangle, _r: &R) -> mouse::Interaction {
+        if cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::None
+        }
+    }
+}
+
+impl<'a, M: Clone + 'a, Th: 'a, R: renderer::Renderer + 'a> From<Scrub<'a, M>> for Element<'a, M, Th, R> {
+    fn from(s: Scrub<'a, M>) -> Self {
+        Element::new(s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

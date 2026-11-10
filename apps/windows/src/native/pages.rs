@@ -42,7 +42,7 @@ pub fn playlist_page<'a>(app: &'a App, id: &str) -> El<'a> {
     let body: El = if tracks.is_empty() {
         ui::dim(if p.kind == Kind::Liked { "Songs you like (the heart) show up here." } else { "No songs yet. Use the playlist button on any song to add it here." }, 15).into()
     } else {
-        track_list(app, &tracks, &p.name, false, true, if p.can_edit() { Rows::Playlist(id) } else { Rows::Plain })
+        track_list(app, &tracks, &p.name, false, true, if p.can_edit() { Rows::Playlist { id, liked: p.kind == Kind::Liked } } else { Rows::Plain })
     };
     column![head, body].spacing(28).into()
 }
@@ -342,13 +342,52 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str) -> El<'a> {
 
 /* ---------- credits (Now Playing) ---------- */
 
+/// A link-looking text button (names in Credits).
+fn link<'a>(label: String, to: Message) -> El<'a> {
+    button(text(label).size(15)).padding(0).on_press(to).style(|_, s| button::Style {
+        text_color: if matches!(s, button::Status::Hovered) { ui::ACCENT } else { ui::TEXT },
+        ..Default::default()
+    }).into()
+}
+
+/// "Jane Doe, Sam Lee & Kit Moss": each name that's an artist in your library opens their page
+/// (a band name with "&" in it, like "Juniper & Ash", stays whole).
+fn people_links<'a>(app: &'a App, names: &str) -> El<'a> {
+    let mut parts: Vec<El> = vec![];
+    let push_name = |parts: &mut Vec<El<'a>>, n: &str| {
+        let n = n.trim();
+        if app.lib.has_artist(n) {
+            parts.push(link(n.to_string(), Message::Go(Page::Artist(n.to_string()))));
+        } else {
+            parts.push(text(n.to_string()).size(15).into());
+        }
+    };
+    for (i, piece) in names.split(", ").enumerate() {
+        if i > 0 {
+            parts.push(text(", ").size(15).into());
+        }
+        if app.lib.has_artist(piece) || !piece.contains(" & ") {
+            push_name(&mut parts, piece);
+        } else {
+            for (j, n) in piece.split(" & ").enumerate() {
+                if j > 0 {
+                    parts.push(text(" & ").size(15).into());
+                }
+                push_name(&mut parts, n);
+            }
+        }
+    }
+    Row::with_children(parts).wrap().into()
+}
+
 pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
     let album = app.lib.album_of(t);
     let row_of = |k: String, v: String| -> El<'a> { row![container(ui::dim(k, 14)).width(150), text(v).size(15)].spacing(16).into() };
+    let row_el = |k: String, v: El<'a>| -> El<'a> { row![container(ui::dim(k, 14)).width(150), v].spacing(16).into() };
     let own: Vec<&volvix_core::Credit> = t.credits.iter().filter(|c| c.role != "ISRC").collect();
-    let mut people = Column::new().spacing(10).push(row_of("Artist".into(), t.artist.clone()));
+    let mut people = Column::new().spacing(10).push(row_el("Artist".into(), people_links(app, &t.artist)));
     for c in &own {
-        people = people.push(row_of(c.role.clone(), c.names.clone()));
+        people = people.push(row_el(c.role.clone(), people_links(app, &c.names)));
     }
     // MusicBrainz fills in what the file doesn't say
     let note: String = match app.credits.get(&t.id) {
@@ -363,7 +402,7 @@ pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
         Some(Ok(list)) => {
             let extra: Vec<&volvix_core::Credit> = list.iter().filter(|c| !own.iter().any(|o| o.role == c.role)).collect();
             for c in &extra {
-                people = people.push(row_of(c.role.clone(), c.names.clone()));
+                people = people.push(row_el(c.role.clone(), people_links(app, &c.names)));
             }
             if list.is_empty() {
                 if own.is_empty() { "No credits found for this song in the file or on MusicBrainz.".into() } else { String::new() }
@@ -375,12 +414,14 @@ pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
         }
     };
     let mut detail_rows: Vec<El> = vec![];
+    if let Some(a) = album {
+        detail_rows.push(row_el("Album".into(), link(a.title.clone(), Message::Go(Page::Album(a.id.clone())))));
+    }
     let mut add = |k: &str, v: Option<String>| {
         if let Some(v) = v.filter(|v| !v.is_empty()) {
             detail_rows.push(row_of(k.to_string(), v));
         }
     };
-    add("Album", album.map(|a| a.title.clone()));
     add("Year", album.and_then(|a| a.year).map(|y| y.to_string()));
     add("Label", album.and_then(|a| a.label.clone()));
     add("Genre", album.and_then(|a| a.genre.clone()));

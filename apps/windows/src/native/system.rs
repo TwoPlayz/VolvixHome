@@ -40,18 +40,114 @@ pub fn single_instance(wait: bool) -> Option<Receiver<()>> {
     Some(rx)
 }
 
-/// Start resizing the borderless window from an edge: hands the drag to Windows, as its own frame
-/// would (`hit` is HTLEFT=10 … HTBOTTOMRIGHT=17).
-pub fn start_resize(hwnd: isize, hit: usize) {
-    extern "system" {
-        fn ReleaseCapture() -> i32;
-        fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
-    }
-    const WM_NCLBUTTONDOWN: u32 = 0x00A1;
-    // SAFETY: plain Win32 calls on our own window handle
+/* ---------- the window frame ----------
+ * The window keeps Windows' own frame styles (caption, sizing border, minimize/maximize boxes), so
+ * minimizing, maximizing, restoring and closing animate like any app and snapping works. We only
+ * hide the caption by claiming its space as our own (WM_NCCALCSIZE), and tell Windows which parts
+ * of our drawn title bar act as the caption and where the edges resize (WM_NCHITTEST). */
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[link(name = "comctl32")]
+extern "system" {
+    fn SetWindowSubclass(hwnd: isize, proc_: SubclassProc, id: usize, data: usize) -> i32;
+    fn DefSubclassProc(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+}
+extern "system" {
+    fn IsZoomed(hwnd: isize) -> i32;
+    fn GetDpiForWindow(hwnd: isize) -> u32;
+    fn GetSystemMetricsForDpi(index: i32, dpi: u32) -> i32;
+    fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
+    fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+}
+
+type SubclassProc = unsafe extern "system" fn(isize, u32, usize, isize, usize, usize) -> isize;
+
+const WM_NCCALCSIZE: u32 = 0x0083;
+const WM_NCHITTEST: u32 = 0x0084;
+const HTCLIENT: isize = 1;
+const HTCAPTION: isize = 2;
+const HTTOP: isize = 12;
+const HTTOPLEFT: isize = 13;
+const HTTOPRIGHT: isize = 14;
+
+/// Our title bar's height and the width of its window buttons, in logical pixels (×100, packed).
+static BAR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn frame_thickness(hwnd: isize) -> i32 {
+    // SAFETY: plain Win32 queries
     unsafe {
-        ReleaseCapture();
-        PostMessageW(hwnd, WM_NCLBUTTONDOWN, hit, 0);
+        let dpi = GetDpiForWindow(hwnd).max(96);
+        GetSystemMetricsForDpi(32 /* SM_CXSIZEFRAME */, dpi) + GetSystemMetricsForDpi(92 /* SM_CXPADDEDBORDER */, dpi)
+    }
+}
+
+unsafe extern "system" fn frame_proc(hwnd: isize, msg: u32, wparam: usize, lparam: isize, _id: usize, _data: usize) -> isize {
+    match msg {
+        WM_NCCALCSIZE if wparam != 0 => {
+            // the first rect of NCCALCSIZE_PARAMS is the new window rect; what we leave is the client area
+            let r = &mut *(lparam as *mut Rect);
+            let f = frame_thickness(hwnd);
+            if IsZoomed(hwnd) != 0 {
+                // maximized windows hang over the screen edge by the frame: keep everything on screen
+                r.left += f;
+                r.right -= f;
+                r.top += f;
+                r.bottom -= f;
+            } else {
+                // keep the side and bottom sizing borders (invisible on Windows 10/11), drop the caption
+                r.left += f;
+                r.right -= f;
+                r.bottom -= f;
+            }
+            0
+        }
+        WM_NCHITTEST => {
+            let hit = DefSubclassProc(hwnd, msg, wparam, lparam);
+            if hit != HTCLIENT {
+                return hit; // sides and bottom: Windows' own sizing
+            }
+            let mut w = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+            GetWindowRect(hwnd, &mut w);
+            let (x, y) = ((lparam & 0xFFFF) as i16 as i32, ((lparam >> 16) & 0xFFFF) as i16 as i32);
+            let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
+            let packed = BAR.load(std::sync::atomic::Ordering::Relaxed);
+            let (bar_h, buttons_w) = (((packed >> 32) as f32 / 100.0 * scale) as i32, ((packed & 0xFFFF_FFFF) as f32 / 100.0 * scale) as i32);
+            let zoomed = IsZoomed(hwnd) != 0;
+            let f = frame_thickness(hwnd);
+            // the top edge resizes (we took the caption, and with it the top border)
+            if !zoomed && y < w.top + f {
+                return if x < w.left + 2 * f { HTTOPLEFT } else if x > w.right - 2 * f { HTTOPRIGHT } else { HTTOP };
+            }
+            // our title bar: caption (drag, double-click, snap) except over the window buttons
+            let top = if zoomed { w.top + f } else { w.top };
+            let right = w.right - f; // the client area ends a frame's width in, maximized or not
+            if y < top + bar_h && x < right - buttons_w {
+                return HTCAPTION;
+            }
+            HTCLIENT
+        }
+        _ => DefSubclassProc(hwnd, msg, wparam, lparam),
+    }
+}
+
+/// Hide the standard title bar, keeping the frame. `bar_h` and `buttons_w` are our drawn title
+/// bar's height and window buttons' width, in logical pixels.
+pub fn install_frame(hwnd: isize, bar_h: f32, buttons_w: f32) {
+    BAR.store((((bar_h * 100.0) as u64) << 32) | (buttons_w * 100.0) as u64, std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: subclassing our own window, on its own thread (the UI thread), then asking Windows to
+    // recalculate the frame
+    unsafe {
+        SetWindowSubclass(hwnd, frame_proc, 1, 0);
+        const SWP: u32 = 0x0020 /* FRAMECHANGED */ | 0x0002 /* NOMOVE */ | 0x0001 /* NOSIZE */ | 0x0004 /* NOZORDER */ | 0x0010 /* NOACTIVATE */;
+        SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP);
     }
 }
 

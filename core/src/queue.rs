@@ -200,6 +200,31 @@ impl Queue {
         }
     }
 
+    /// Drag a song to another place in the queue (the playing song can move too and keeps playing).
+    pub fn move_item(&mut self, from: usize, to: usize) {
+        if from >= self.order.len() || to >= self.order.len() || from == to {
+            return;
+        }
+        let current = self.pos;
+        let item = self.order.remove(from);
+        self.order.insert(to, item.clone());
+        self.pos = current.map(|p| {
+            if p == from {
+                to
+            } else if from < p && to >= p {
+                p - 1
+            } else if from > p && to <= p {
+                p + 1
+            } else {
+                p
+            }
+        });
+        // the list's own order follows when shuffle is off (so turning shuffle on and off keeps the change)
+        if !self.shuffle {
+            self.original = self.order.clone();
+        }
+    }
+
     pub fn clear(&mut self) {
         *self = Queue { shuffle: self.shuffle, repeat: self.repeat, ..Default::default() };
     }
@@ -287,6 +312,25 @@ mod tests {
         q.set_shuffle(true);
         q.set_shuffle(false);
         assert_eq!(q.items(), &["t1", "t2", "t3", "y"].map(String::from), "removed and added songs carry over to the unshuffled order");
+    }
+
+    #[test]
+    fn drag_to_reorder() {
+        let mut q = Queue::new();
+        q.play(ids(5), 2, "");
+        q.move_item(4, 0); // t5 to the top: the playing t3 shifts down one
+        assert_eq!(q.items(), &["t5", "t1", "t2", "t3", "t4"].map(String::from));
+        assert_eq!(q.current(), Some("t3"));
+        q.move_item(3, 4); // the playing song itself
+        assert_eq!(q.current(), Some("t3"));
+        assert_eq!(q.position(), Some(4));
+        q.move_item(0, 2);
+        assert_eq!(q.current(), Some("t3"));
+        q.move_item(9, 0); // out of range: nothing
+        assert_eq!(q.len(), 5);
+        q.set_shuffle(true);
+        q.set_shuffle(false);
+        assert_eq!(q.items(), &["t1", "t2", "t5", "t4", "t3"].map(String::from), "the new order is kept");
     }
 
     #[test]

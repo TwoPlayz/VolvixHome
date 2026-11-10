@@ -11,6 +11,11 @@ pub struct Library {
     track_index: HashMap<String, usize>,
     /// artist names, A to Z (case-insensitive, "The " ignored for sorting)
     artists: Vec<String>,
+    /// album indexes A to Z by title, and newest-added first (worked out once, not on every redraw)
+    by_title: Vec<usize>,
+    by_added: Vec<usize>,
+    /// album indexes per artist name (lower case)
+    by_artist: HashMap<String, Vec<usize>>,
     pub scanning: bool,
 }
 
@@ -45,6 +50,20 @@ impl Library {
         let mut artists: Vec<String> = seen.into_values().collect();
         artists.sort_by_key(|a| sort_key(a));
         lib.artists = artists;
+        let mut by_title: Vec<usize> = (0..lib.albums.len()).collect();
+        by_title.sort_by_cached_key(|&i| sort_key(&lib.albums[i].title));
+        let mut by_added: Vec<usize> = (0..lib.albums.len()).collect();
+        by_added.sort_by(|&a, &b| lib.albums[b].added.cmp(&lib.albums[a].added).then_with(|| lib.albums[a].title.cmp(&lib.albums[b].title)));
+        let mut by_artist: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, a) in lib.albums.iter().enumerate() {
+            by_artist.entry(a.artist.to_lowercase()).or_default().push(i);
+        }
+        for list in by_artist.values_mut() {
+            list.sort_by(|&a, &b| lib.albums[b].year.unwrap_or(0).cmp(&lib.albums[a].year.unwrap_or(0)).then_with(|| lib.albums[a].title.cmp(&lib.albums[b].title)));
+        }
+        lib.by_title = by_title;
+        lib.by_added = by_added;
+        lib.by_artist = by_artist;
         lib
     }
 
@@ -95,17 +114,12 @@ impl Library {
 
     /// Albums newest-added first ("Recently added").
     pub fn recently_added(&self, n: usize) -> Vec<&Album> {
-        let mut list: Vec<&Album> = self.albums.iter().collect();
-        list.sort_by(|a, b| b.added.cmp(&a.added).then_with(|| a.title.cmp(&b.title)));
-        list.truncate(n);
-        list
+        self.by_added.iter().take(n).map(|&i| &self.albums[i]).collect()
     }
 
     /// Albums A to Z by title.
     pub fn albums_by_title(&self) -> Vec<&Album> {
-        let mut list: Vec<&Album> = self.albums.iter().collect();
-        list.sort_by_key(|a| sort_key(&a.title));
-        list
+        self.by_title.iter().map(|&i| &self.albums[i]).collect()
     }
 
     /// Artists with the most albums first, then alphabetical (Home's "Artists" shelf).
@@ -121,10 +135,13 @@ impl Library {
 
     /// Albums whose album artist is `name` (case-insensitive), newest first.
     pub fn albums_by(&self, name: &str) -> Vec<&Album> {
-        let n = name.to_lowercase();
-        let mut list: Vec<&Album> = self.albums.iter().filter(|a| a.artist.to_lowercase() == n).collect();
-        list.sort_by(|a, b| b.year.unwrap_or(0).cmp(&a.year.unwrap_or(0)).then_with(|| a.title.cmp(&b.title)));
-        list
+        self.by_artist.get(&name.to_lowercase()).map(|l| l.iter().map(|&i| &self.albums[i]).collect()).unwrap_or_default()
+    }
+
+    /// Is there an artist by this name in the library (case-insensitive)?
+    pub fn has_artist(&self, name: &str) -> bool {
+        let n = name.trim().to_lowercase();
+        self.by_artist.contains_key(&n) || self.artists.iter().any(|a| a.to_lowercase() == n)
     }
 
     /// Albums by others with at least one song by `name` on them (features, compilations).

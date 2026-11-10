@@ -61,6 +61,10 @@ pub fn app_dir() -> PathBuf {
 
 /// Covers are asked for at this size (the server makes and keeps these copies).
 pub const COVER: u32 = 640;
+/// The app's own title bar: its height, and how wide the three window buttons are (logical px).
+pub const TITLE_BAR: f32 = 32.0;
+pub const TITLE_BUTTONS: f32 = 46.0 * 3.0;
+
 /// Roughly how tall one lyrics line is, to keep the sung line in view.
 pub const LYRIC_LINE: f32 = 50.0;
 
@@ -96,6 +100,33 @@ pub enum NpTab {
     Queue,
     Lyrics,
     Credits,
+}
+
+/// What a row is being dragged within.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DragList {
+    Queue,
+    Playlist(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Drag {
+    pub list: DragList,
+    pub from: usize,
+    pub over: usize,
+}
+
+/// Things the screens show that are worth working out once per change, not on every redraw
+/// (a redraw happens for every tick of the clock and every mouse move).
+#[derive(Default)]
+pub struct Cache {
+    pub playlists: Vec<PlaylistView>,
+    /// the search words these results are for, and the results (ids)
+    pub search: Option<(String, Vec<String>, Vec<String>, Vec<String>)>,
+    pub top_albums: Vec<String>,
+    pub picks: Vec<String>,
+    /// the playing song is in one of your playlists (the mini player's tick)
+    pub current_in_playlist: bool,
 }
 
 /// Search's filter chips, as on the website.
@@ -186,14 +217,16 @@ pub enum Message {
     PlayAlbum(String, usize),
     ShuffleAlbum(String),
     AddToQueue(String),
-    PlayNext(String),
+    Forward,
+    /// drag to reorder: picked up a row, moved over another, let go anywhere
+    DragStart(DragList, usize),
+    DragOver(usize),
+    DragEnd,
     TogglePlay,
     Next,
     Previous,
     ToggleShuffle,
     CycleRepeat,
-    SeekDrag(f32),
-    SeekCommit,
     SeekTo(f32),
     Volume(f32),
     ToggleMute,
@@ -256,8 +289,6 @@ pub enum Message {
     Minimize,
     ToggleMaximize,
     CloseWindow,
-    /// start resizing from an edge (a Win32 hit-test code: HTLEFT…HTBOTTOMRIGHT)
-    ResizeEdge(usize),
     Maximized(bool),
     CheckMaximized,
     SetShare(bool),
@@ -338,7 +369,11 @@ pub struct App {
     image_pending: HashSet<String>,
 
     pub page: Page,
-    history: Vec<Page>,
+    pub history: Vec<Page>,
+    pub forward: Vec<Page>,
+    pub drag: Option<Drag>,
+    pub cache: Cache,
+    start_hidden: bool,
     pub search: String,
     pub lib_tab: LibTab,
     pub now_playing: bool,
@@ -352,7 +387,6 @@ pub struct App {
     last_ended: u64,
     pub volume: f32,
     muted_from: Option<f32>,
-    pub seeking: Option<f32>,
     presence: (Option<String>, bool),
     presence_at: Instant,
     next_poll: Instant,
@@ -373,7 +407,7 @@ fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl s
 }
 
 impl App {
-    fn new(instance: Receiver<()>) -> (App, Task<Message>) {
+    fn new(instance: Receiver<()>, start_hidden: bool) -> (App, Task<Message>) {
         let dir = app_dir();
         let saved = SavedSession::load(&dir);
         let settings = Settings::load();
@@ -426,6 +460,10 @@ impl App {
             image_pending: HashSet::new(),
             page: Page::Home,
             history: vec![],
+            forward: vec![],
+            drag: None,
+            cache: Cache::default(),
+            start_hidden,
             search: String::new(),
             lib_tab: LibTab::Albums,
             now_playing: false,
@@ -438,7 +476,6 @@ impl App {
             last_ended: 0,
             volume: 0.8,
             muted_from: None,
-            seeking: None,
             presence: (None, false),
             presence_at: Instant::now(),
             next_poll: Instant::now() + Duration::from_secs(30),
@@ -478,13 +515,40 @@ impl App {
         self.me.as_ref().map(|m| m.user.id.clone()).unwrap_or_default()
     }
 
-    /// Every playlist you can see (yours, collaborative, the household's).
-    pub fn playlists(&self) -> Vec<PlaylistView> {
-        playlists::all(&self.data, &self.shared, &self.household, &self.me_id())
+    /// Every playlist you can see (yours, collaborative, the household's), as of the last change.
+    pub fn playlists(&self) -> &[PlaylistView] {
+        &self.cache.playlists
     }
 
     pub fn playlist(&self, id: &str) -> Option<PlaylistView> {
-        self.playlists().into_iter().find(|p| p.id == id)
+        self.cache.playlists.iter().find(|p| p.id == id).cloned()
+    }
+
+    /// Work out again what the screens show (after anything that may have changed it).
+    fn refresh_cache(&mut self) {
+        self.cache.playlists = playlists::all(&self.data, &self.shared, &self.household, &self.me_id());
+        let q = self.search.trim().to_string();
+        if !q.is_empty() && self.cache.search.as_ref().map(|s| s.0 != q).unwrap_or(true) {
+            let r = volvix_core::search::search(&self.lib, &[], &q);
+            let ids = |v: Vec<&volvix_core::Album>| v.into_iter().map(|a| a.id.clone()).collect::<Vec<_>>();
+            self.cache.search = Some((q, r.artists, ids(r.albums), r.songs.into_iter().map(|t| t.id.clone()).collect()));
+        }
+        self.cache.top_albums = mixes::top_albums(&self.lib, &self.data, 6).into_iter().map(|a| a.id.clone()).collect();
+        self.cache.picks = mixes::random_albums(&self.lib, &self.me_id(), userdata::now(), 6).into_iter().map(|a| a.id.clone()).collect();
+        let cur = self.status.track.clone();
+        self.cache.current_in_playlist = cur.map(|id| self.cache.playlists.iter().any(|p| p.can_edit() && p.kind != playlists::Kind::Liked && p.tracks.contains(&id))).unwrap_or(false);
+    }
+
+    /// Every message lands here; the cache is refreshed afterwards unless it's one of the frequent
+    /// ones (the clock, a slider, hovering while dragging) that can't change what it holds.
+    fn update(&mut self, msg: Message) -> Task<Message> {
+        let hot = matches!(msg, Message::Tick | Message::Volume(_) | Message::DragOver(_) | Message::CoverLoaded(..) | Message::ImageLoaded(..));
+        let track_before = self.status.track.clone();
+        let t = self.handle(msg);
+        if !hot || self.status.track != track_before {
+            self.refresh_cache();
+        }
+        t
     }
 
     pub fn is_liked(&self, track: &str) -> bool {
@@ -529,6 +593,7 @@ impl App {
 
     fn go(&mut self, page: Page) -> Task<Message> {
         if self.page != page {
+            self.forward.clear();
             self.history.push(std::mem::replace(&mut self.page, page.clone()));
             if self.history.len() > 50 {
                 self.history.remove(0);
@@ -770,7 +835,7 @@ impl App {
 
     /* ---------- the main switchboard ---------- */
 
-    fn update(&mut self, msg: Message) -> Task<Message> {
+    fn handle(&mut self, msg: Message) -> Task<Message> {
         match msg {
             /* ---------- connect and sign in ---------- */
             Message::AddressChanged(s) => self.address = s,
@@ -886,9 +951,35 @@ impl App {
                 if self.now_playing {
                     self.now_playing = false;
                 } else if let Some(p) = self.history.pop() {
-                    self.page = p;
+                    self.forward.push(std::mem::replace(&mut self.page, p));
                 }
                 return self.fetch_covers();
+            }
+            Message::Forward => {
+                if let Some(p) = self.forward.pop() {
+                    self.history.push(std::mem::replace(&mut self.page, p));
+                    self.now_playing = false;
+                }
+                return self.fetch_covers();
+            }
+            Message::DragStart(list, from) => self.drag = Some(Drag { list, from, over: from }),
+            Message::DragOver(i) => {
+                if let Some(d) = &mut self.drag {
+                    d.over = i;
+                }
+            }
+            Message::DragEnd => {
+                if let Some(d) = self.drag.take() {
+                    if d.over != d.from {
+                        return match d.list {
+                            DragList::Queue => {
+                                self.queue.move_item(d.from, d.over);
+                                Task::none()
+                            }
+                            DragList::Playlist(pl) => self.update(Message::MoveInPlaylist(pl, d.from, d.over)),
+                        };
+                    }
+                }
             }
             Message::SearchChanged(s) => {
                 self.search = s.clone();
@@ -945,14 +1036,6 @@ impl App {
                     return self.start_current(true);
                 }
             }
-            Message::PlayNext(id) => {
-                let was_empty = self.queue.is_empty();
-                self.queue.play_next(&id);
-                self.say("Plays next");
-                if was_empty {
-                    return self.start_current(true);
-                }
-            }
             Message::TogglePlay => {
                 if self.status.track.is_none() {
                     return self.start_current(true);
@@ -984,12 +1067,6 @@ impl App {
             }
             Message::ToggleShuffle => self.queue.set_shuffle(!self.queue.shuffle()),
             Message::CycleRepeat => self.queue.set_repeat(self.queue.repeat().cycle()),
-            Message::SeekDrag(v) => self.seeking = Some(v),
-            Message::SeekCommit => {
-                if let Some(v) = self.seeking.take() {
-                    return self.update(Message::SeekTo(v));
-                }
-            }
             Message::SeekTo(v) => {
                 let to = Duration::from_secs_f32(v.max(0.0));
                 self.player.seek(to);
@@ -1369,6 +1446,13 @@ impl App {
                 if let Some(h) = h {
                     self.hwnd = Some(h);
                     self.media = system::Media::new(h);
+                    // keep Windows' own frame (so minimize, maximize, restore and close animate, and
+                    // snapping works) but draw our title bar in its place
+                    system::install_frame(h, TITLE_BAR, TITLE_BUTTONS);
+                }
+                // shown only now, so the standard title bar never flashes
+                if let (Some(id), false) = (self.window, self.start_hidden) {
+                    return Task::batch([window::change_mode(id, window::Mode::Windowed), window::gain_focus(id)]);
                 }
             }
             Message::TitlePress => {
@@ -1401,11 +1485,6 @@ impl App {
             Message::CloseWindow => {
                 if let Some(id) = self.window {
                     return self.update(Message::CloseRequested(id));
-                }
-            }
-            Message::ResizeEdge(hit) => {
-                if let Some(h) = self.hwnd {
-                    system::start_resize(h, hit);
                 }
             }
             Message::CloseRequested(id) => {
@@ -1715,6 +1794,13 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick), window::close_requests().map(Message::CloseRequested)];
+        // dragging a row: letting go anywhere drops it
+        if self.drag.is_some() {
+            subs.push(iced::event::listen_with(|e, _, _| match e {
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => Some(Message::DragEnd),
+                _ => None,
+            }));
+        }
         // Escape closes a dialog or Now Playing; Space plays/pauses when no text box is in use
         // the window was maximized or restored some other way (Win+Up, snapping): keep the button right
         subs.push(window::resize_events().map(|_| Message::CheckMaximized));
@@ -1788,12 +1874,10 @@ fn main() -> iced::Result {
             size: Size::new(1180.0, 800.0),
             min_size: Some(Size::new(760.0, 560.0)),
             icon,
-            visible: !start_hidden,
+            // shown once our own title bar is in place (see Message::Hwnd)
+            visible: false,
             exit_on_close_request: false,
-            // the app draws its own title bar (just minimize, maximize and close)
-            decorations: false,
-            platform_specific: window::settings::PlatformSpecific { undecorated_shadow: true, ..Default::default() },
             ..Default::default()
         })
-        .run_with(move || App::new(cell.borrow_mut().take().expect("started once")))
+        .run_with(move || App::new(cell.borrow_mut().take().expect("started once"), start_hidden))
 }

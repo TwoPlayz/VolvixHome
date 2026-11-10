@@ -3,7 +3,7 @@
 //! are in pages.rs. Each takes the app state and returns what to draw; clicks come back as Messages.
 use std::time::Duration;
 
-use iced::widget::{button, column, container, horizontal_space, mouse_area, opaque, row, scrollable, slider, stack, text, text_input, Column, Row, Space};
+use iced::widget::{button, column, container, horizontal_space, mouse_area, opaque, row, scrollable, stack, text, text_input, Column, Row, Space};
 use iced::{Alignment, Element, Length, Padding};
 use volvix_core::playlists::Kind;
 use volvix_core::{format_duration, search, Album, Repeat, Track};
@@ -22,11 +22,7 @@ pub fn view(app: &App) -> El<'_> {
         Screen::Main => main_screen(app),
     };
     let framed: El = column![title_bar(app), container(body).width(Length::Fill).height(Length::Fill)].into();
-    let mut layers = stack![container(framed).width(Length::Fill).height(Length::Fill).style(ui::frame)];
-    if !app.maximized {
-        layers = layers.push(resize_edges());
-    }
-    layers.into()
+    container(framed).width(Length::Fill).height(Length::Fill).style(ui::frame).into()
 }
 
 /// The app's own title bar: drag to move, double-click to maximize, and the three window buttons.
@@ -51,28 +47,6 @@ fn title_bar(app: &App) -> El<'_> {
     ]
     .height(32)
     .into()
-}
-
-/// Thin strips along the edges that resize the window (it has no Windows frame of its own).
-fn resize_edges<'a>() -> El<'a> {
-    use iced::mouse::Interaction as I;
-    const E: f32 = 5.0;
-    // Win32 hit-test codes
-    const L: usize = 10;
-    const R: usize = 11;
-    const T: usize = 12;
-    const TL: usize = 13;
-    const TR: usize = 14;
-    const B: usize = 15;
-    const BL: usize = 16;
-    const BR: usize = 17;
-    let grip = |w: Length, h: Length, hit: usize, cursor: I| -> El<'a> { mouse_area(Space::new(w, h)).interaction(cursor).on_press(Message::ResizeEdge(hit)).into() };
-    let fill = Length::Fill;
-    let e = Length::Fixed(E);
-    let top = row![grip(e, e, TL, I::ResizingDiagonallyDown), grip(fill, e, T, I::ResizingVertically), grip(e, e, TR, I::ResizingDiagonallyUp)];
-    let middle = row![grip(e, fill, L, I::ResizingHorizontally), Space::new(fill, fill), grip(e, fill, R, I::ResizingHorizontally)].height(fill);
-    let bottom = row![grip(e, e, BL, I::ResizingDiagonallyUp), grip(fill, e, B, I::ResizingVertically), grip(e, e, BR, I::ResizingDiagonallyDown)];
-    column![top, middle, bottom].into()
 }
 
 /// Which album covers the current screen shows (fetched in the background, then kept on disk).
@@ -219,11 +193,34 @@ pub fn playlist_card<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView)
     card(playlist_cover(app, &p.tracks, p.kind == Kind::Liked, &p.name, 164.0), p.name.clone(), sub, Message::Go(Page::Playlist(p.id.clone())))
 }
 
-/// How a song list behaves: plain, or a playlist you can edit (remove / move songs).
+/// How a song list behaves: plain, or a playlist you can edit (drag to reorder; remove songs
+/// unless it's Liked Songs, where the heart does that).
 #[derive(Clone, Copy)]
 pub enum Rows<'a> {
     Plain,
-    Playlist(&'a str),
+    Playlist { id: &'a str, liked: bool },
+}
+
+/// The grip you drag a row by.
+pub fn drag_handle<'a>(list: crate::DragList, index: usize) -> El<'a> {
+    mouse_area(container(ic('\u{E700}', 13).color(ui::TEXT_3)).padding([8, 6]))
+        .interaction(iced::mouse::Interaction::Grab)
+        .on_press(Message::DragStart(list, index))
+        .into()
+}
+
+/// While dragging: the row under the pointer reports itself, and a red line shows where it lands.
+pub fn drop_target<'a>(app: &App, list: &crate::DragList, index: usize, row: El<'a>) -> El<'a> {
+    let Some(d) = app.drag.as_ref().filter(|d| d.list == *list) else { return row };
+    let line = |show: bool| -> El<'a> {
+        container(Space::new(Length::Fill, 2))
+            .style(move |_| container::Style { background: show.then(|| ui::ACCENT.into()), ..Default::default() })
+            .into()
+    };
+    let above = d.over == index && d.over < d.from;
+    let below = d.over == index && d.over > d.from;
+    let faded: El = if d.from == index { container(row).style(|_| container::Style { background: Some(ui::ACTIVE.into()), border: iced::border::rounded(8.0), ..Default::default() }).into() } else { row };
+    mouse_area(column![line(above), faded, line(below)]).on_enter(Message::DragOver(index)).into()
 }
 
 /// A list of songs. Clicking one plays the list from there.
@@ -266,20 +263,24 @@ pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered
             container(lead).width(if numbered { 32.0 } else { 48.0 }).center_x(Length::Fixed(if numbered { 32.0 } else { 48.0 })),
             column![title_line, ui::dim(clip(&sub, 80), 13)].spacing(1).width(Length::Fill),
             small(if liked { icon::HEART_FILL } else { icon::HEART }, liked, Message::ToggleLike(t.id.clone())),
-            small(icon::PLAY_NEXT, false, Message::PlayNext(t.id.clone())),
             small(icon::ADD, false, Message::AddToQueue(t.id.clone())),
             small(icon::PLAYLIST, false, Message::AddToPlaylist(vec![t.id.clone()])),
         ]
         .spacing(4)
         .align_y(Alignment::Center);
-        if let Rows::Playlist(pl) = rows {
-            line = line
-                .push(small(icon::UP, false, Message::MoveInPlaylist(pl.to_string(), i, i.saturating_sub(1))))
-                .push(small(icon::DOWN, false, Message::MoveInPlaylist(pl.to_string(), i, i + 1)))
-                .push(small(icon::DELETE, false, Message::RemoveFromPlaylist(pl.to_string(), i, t.id.clone())));
+        if let Rows::Playlist { id: pl, liked: false } = rows {
+            line = line.push(small(icon::DELETE, false, Message::RemoveFromPlaylist(pl.to_string(), i, t.id.clone())));
         }
         line = line.push(container(ui::dim(format_duration(t.duration), 13)).width(52).align_x(Alignment::End));
-        col = col.push(button(line).width(Length::Fill).padding([6, 12]).style(ui::flat).on_press(Message::PlayTracks(ids.clone(), i, source.to_string())));
+        let song: El = button(line).width(Length::Fill).padding([6, 12]).style(ui::flat).on_press(Message::PlayTracks(ids.clone(), i, source.to_string())).into();
+        match rows {
+            Rows::Playlist { id: pl, .. } => {
+                let list = crate::DragList::Playlist(pl.to_string());
+                let r: El = row![drag_handle(list.clone(), i), song].align_y(Alignment::Center).into();
+                col = col.push(drop_target(app, &list, i, r));
+            }
+            Rows::Plain => col = col.push(song),
+        }
     }
     col.into()
 }
@@ -373,14 +374,31 @@ fn sign_in(app: &App) -> El<'_> {
 
 /* ---------- the main window ---------- */
 
+/// Back and forward, at the top left of the content (as on the website).
+fn history_arrows(app: &App) -> El<'_> {
+    let arrow = |c: char, m: Option<Message>| {
+        let on = m.is_some();
+        button(container(ic(c, 12)).center_x(32).center_y(32)).width(32).height(32).padding(0).on_press_maybe(m).style(move |_, s| button::Style {
+            background: Some(if on && matches!(s, button::Status::Hovered) { ui::SURFACE_3 } else { ui::FRAME }.into()),
+            text_color: if on { ui::TEXT } else { ui::TEXT_3 },
+            border: iced::border::rounded(16.0),
+            ..Default::default()
+        })
+    };
+    let can_back = app.now_playing || !app.history.is_empty();
+    container(row![arrow('\u{E76B}', can_back.then_some(Message::Back)), arrow('\u{E76C}', (!app.forward.is_empty()).then_some(Message::Forward))].spacing(8))
+        .padding(iced::Padding { top: 16.0, bottom: 4.0, left: 24.0, right: 24.0 })
+        .into()
+}
+
 fn main_screen(app: &App) -> El<'_> {
     // Now Playing has its own scrolling panels; every other page scrolls as a whole
     let content: El = if app.now_playing {
-        container(now_playing(app)).padding([24, 28]).width(Length::Fill).height(Length::Fill).into()
+        container(now_playing(app)).padding([8, 28]).width(Length::Fill).height(Length::Fill).into()
     } else {
-        scrollable(container(page(app)).padding([24, 28]).width(Length::Fill)).style(ui::scroller).height(Length::Fill).into()
+        scrollable(container(page(app)).padding([8, 28]).width(Length::Fill)).style(ui::scroller).height(Length::Fill).into()
     };
-    let content = container(content).width(Length::Fill).height(Length::Fill).style(ui::panel);
+    let content = container(column![history_arrows(app), content]).width(Length::Fill).height(Length::Fill).style(ui::panel);
     let mut body = column![];
     if app.offline {
         body = body.push(container(text("Offline: the server can't be reached. Downloaded music still plays.").size(13)).padding([6, 12]).width(Length::Fill).style(ui::error_box));
@@ -551,7 +569,7 @@ fn home(app: &App) -> El<'_> {
     if !recent.is_empty() {
         c = c.push(section("Recently played", album_grid(app, recent, true)));
     }
-    let most = volvix_core::mixes::top_albums(lib, &app.data, 6);
+    let most: Vec<&Album> = app.cache.top_albums.iter().filter_map(|id| lib.album(id)).collect();
     if most.len() >= 2 {
         c = c.push(section("Your most played", album_grid(app, most, true)));
     }
@@ -560,7 +578,7 @@ fn home(app: &App) -> El<'_> {
     if !pls.is_empty() {
         c = c.push(section("Your playlists", Row::with_children(pls).spacing(4).wrap().into()));
     }
-    let picks = volvix_core::mixes::random_albums(lib, &app.me_id(), volvix_core::userdata::now(), 6);
+    let picks: Vec<&Album> = app.cache.picks.iter().filter_map(|id| lib.album(id)).collect();
     if picks.len() >= 3 {
         c = c.push(section("Picked for today", album_grid(app, picks, true)));
     }
@@ -710,7 +728,16 @@ fn search_page(app: &App) -> El<'_> {
     let all = ty == SearchType::All;
     let show = |t: SearchType| all || ty == t;
     let lists = app.playlists();
-    let r = search::search(&app.lib, &[], q);
+    // worked out once per change of the words (see App::refresh_cache), not on every redraw
+    let r = match &app.cache.search {
+        Some((cq, artists, albums, songs)) if cq == q => search::Results {
+            artists: artists.clone(),
+            albums: albums.iter().filter_map(|id| app.lib.album(id)).collect(),
+            songs: songs.iter().take(200).filter_map(|id| app.lib.track(id)).collect(),
+            playlists: vec![],
+        },
+        _ => search::Results::default(),
+    };
     let qn = search::norm(q);
     let found_lists: Vec<&volvix_core::playlists::PlaylistView> = lists.iter().filter(|p| qn.split_whitespace().all(|w| search::norm(&format!("{} {}", p.name, p.description)).contains(w))).collect();
     let mut any = false;
@@ -807,7 +834,9 @@ fn now_playing(app: &App) -> El<'_> {
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center);
-                list = list.push(button(line).width(Length::Fill).padding([5, 8]).style(ui::flat).on_press(Message::JumpQueue(index)));
+                let song: El = button(line).width(Length::Fill).padding([5, 8]).style(ui::flat).on_press(Message::JumpQueue(index)).into();
+                let r: El = row![drag_handle(crate::DragList::Queue, index), song].align_y(Alignment::Center).into();
+                list = list.push(drop_target(app, &crate::DragList::Queue, index, r));
             }
             scrollable(list).style(ui::scroller).height(Length::Fill).into()
         }
@@ -836,7 +865,7 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     let left: El = match track {
         Some(t) => {
             let liked = app.is_liked(&t.id);
-            let in_one = app.playlists().iter().any(|p| p.can_edit() && p.kind != volvix_core::playlists::Kind::Liked && p.tracks.contains(&t.id));
+            let in_one = app.cache.current_in_playlist;
             row![
                 marks::eq(st.playing, 12.0),
                 button(
@@ -879,11 +908,12 @@ fn player_row(app: &App, width: f32) -> El<'_> {
 
     // the library's length (from the file's tags) is right; decoders only estimate for some formats
     let total = track.filter(|t| t.duration > 0).map(|t| Duration::from_secs(t.duration as u64)).or(st.duration).unwrap_or_default().as_secs_f32();
-    let pos = app.seeking.unwrap_or(st.position.as_secs_f32()).min(total.max(0.0));
+    let pos = st.position.as_secs_f32().min(total.max(0.0));
     let time = |s: f32| ui::dim(format_duration(s as u32), 11);
     let progress = row![
         container(time(pos)).width(42).align_x(Alignment::End),
-        slider(0.0..=total.max(1.0), pos, Message::SeekDrag).on_release(Message::SeekCommit).step(0.25_f32).style(ui::slider),
+        // follows the mouse by itself; seeks when you let go
+        El::from(marks::scrub(pos, total.max(1.0), Message::SeekTo)),
         container(if st.loading { ui::dim("…", 11) } else { time(total) }).width(42),
     ]
     .spacing(8)
@@ -891,14 +921,12 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     let center = column![controls, progress].spacing(4).align_x(Alignment::Center).width(Length::Fill).max_width(640);
 
     let vol_icon = if app.volume <= 0.001 { icon::MUTE } else { icon::VOLUME };
-    let lyrics_on = app.now_playing && app.np_tab == NpTab::Lyrics;
     let queue_on = app.now_playing && app.np_tab == NpTab::Queue;
     let right = row![
         horizontal_space(),
-        button(ic(icon::LYRICS, 16)).padding(8).style(ui::icon_btn(lyrics_on)).on_press_maybe(has.then_some(if lyrics_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Lyrics) })),
         button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }),
         button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute),
-        container(slider(0.0..=1.0, app.volume, Message::Volume).step(0.01_f32).style(ui::slider)).width(if narrow { 56 } else { 110 }),
+        container(El::from(marks::scrub(app.volume, 1.0, Message::Volume).on_change(Message::Volume))).width(if narrow { 64 } else { 110 }),
     ]
     .spacing(2)
     .align_y(Alignment::Center)

@@ -48,17 +48,13 @@ pub mod icon {
     pub const DOWNLOAD: char = '\u{E896}';
     pub const DOWNLOADED: char = '\u{E73E}';
     pub const DELETE: char = '\u{E74D}';
-    pub const UP: char = '\u{E70E}';
-    pub const DOWN: char = '\u{E70D}';
     pub const EDIT: char = '\u{E70F}';
     pub const BELL: char = '\u{EA8F}';
     pub const PEOPLE: char = '\u{E716}';
     pub const SETTINGS: char = '\u{E713}';
-    pub const LYRICS: char = '\u{E8BD}';
     pub const GLOBE: char = '\u{E774}';
     pub const PLAYLIST: char = '\u{E8FD}';
     pub const CLOSE: char = '\u{E711}';
-    pub const PLAY_NEXT: char = '\u{E893}';
 }
 
 pub fn icon<'a>(c: char, size: u16) -> iced::widget::Text<'a, Theme> {
@@ -183,25 +179,6 @@ pub fn input(_: &Theme, s: iced::widget::text_input::Status) -> iced::widget::te
         placeholder: TEXT_3,
         value: TEXT,
         selection: Color { a: 0.35, ..ACCENT },
-    }
-}
-
-pub fn slider(_: &Theme, s: iced::widget::slider::Status) -> iced::widget::slider::Style {
-    use iced::widget::slider::{Handle, HandleShape, Rail, Style};
-    let hovered = !matches!(s, iced::widget::slider::Status::Active);
-    Style {
-        rail: Rail {
-            backgrounds: ((if hovered { ACCENT } else { TEXT }).into(), Color { a: 0.2, ..TEXT }.into()),
-            width: 4.0,
-            border: border::rounded(2.0),
-        },
-        handle: Handle {
-            // hidden until hovered (never zero-sized: the software renderer refuses empty shapes)
-            shape: HandleShape::Circle { radius: 6.0 },
-            background: if hovered { TEXT } else { Color::TRANSPARENT }.into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
-        },
     }
 }
 
