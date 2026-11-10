@@ -227,7 +227,8 @@ fn web_build(dir: &std::path::Path) -> u64 {
 /// served from a browser's old copy: the page is re-checked every time and points at fresh addresses.
 async fn index_page(State(st): State<Shared>) -> Response {
     let Ok(html) = std::fs::read_to_string(st.cfg.web_dir.join("index.html")) else { return error(StatusCode::NOT_FOUND, "No app here.") };
-    let b = web_build(&st.cfg.web_dir).to_string();
+    // the release plus the newest file time: a new release or any edited file gives every file a new address
+    let b = format!("{}-{}", env!("CARGO_PKG_VERSION"), web_build(&st.cfg.web_dir));
     let html = html
         .replace("href=\"css/styles.css\"", &format!("href=\"css/styles.css?v={b}\""))
         .replace("src=\"js/config.js\"", &format!("src=\"js/config.js?v={b}\""))
@@ -239,13 +240,23 @@ async fn index_page(State(st): State<Shared>) -> Response {
 /// Basic hardening headers on every response.
 async fn security_headers(req: Request, next: axum::middleware::Next) -> Response {
     let is_api = req.uri().path().starts_with("/api/");
+    // app files asked for with the app's version in the address (js/app.js?v=…, from index.html and boot.js): that
+    // address only ever means this exact file, so the browser keeps it for good. No round trip per file at start-up;
+    // an update changes the version, so the new files are fetched.
+    let versioned = !is_api && req.uri().query().map(|q| q.split('&').any(|p| p.starts_with("v=") && p.len() > 2)).unwrap_or(false)
+        && { let p = req.uri().path(); p.ends_with(".js") || p.ends_with(".css") };
     let mut res = next.run(req).await;
+    let ok = res.status().is_success();
     let h = res.headers_mut();
     h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
     h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
     h.insert("x-frame-options", HeaderValue::from_static("DENY"));
-    // the app's own files are checked with the server every time, so an update shows up straight away
-    if !is_api && !h.contains_key(header::CACHE_CONTROL) { h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache")); }
+    if versioned && ok {
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
+    } else if !is_api && !h.contains_key(header::CACHE_CONTROL) {
+        // the page itself (and anything without a version) is checked with the server every time, so an update shows up
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    }
     res
 }
 

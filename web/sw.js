@@ -1,5 +1,6 @@
 /* Volvix Home — service worker: lets the app open without a connection.
-   - the app files: always the newest from the server; the saved copy is only used when you're offline
+   - the app files: versioned ones (js/app.js?v=…) from the saved copy; the page itself always the newest from the
+    server, the saved copy only when you're offline
    - your library, profile and playlists: the network first, the last copy when you're offline
    - covers: cached as they're seen
    Songs are NOT handled here: downloaded songs live in the page's own cache (downloads.js). */
@@ -24,12 +25,25 @@ self.addEventListener('fetch', function (e) {
   if (p.indexOf('/api/stream/') === 0 || p.indexOf('/api/devices/') === 0 || p.indexOf('/api/party') === 0) return; // live: never cached
   if (FRESH.indexOf(p) !== -1 || p.indexOf('/api/lyrics/') === 0 || p.indexOf('/api/credits/') === 0) {
     e.respondWith(networkFirst(req, DATA));
+  } else if (p.indexOf('/api/cover/') === 0 && /[?&]v=./.test(url.search)) {
+    e.respondWith(cacheFirst(req, DATA)); // a versioned cover never changes: no re-download every time it's shown
   } else if (p.indexOf('/api/cover/') === 0 || p.indexOf('/api/discover/image/') === 0 || p.indexOf('/api/avatar/') === 0) {
     e.respondWith(staleWhileRevalidate(req, DATA));
+  } else if (p.indexOf('/api/') !== 0 && /[?&]v=./.test(url.search) && /\.(js|css)$/.test(p)) {
+    // an app file with the version in its address never changes: the saved copy, no trip to the server
+    e.respondWith(cacheFirst(req, SHELL));
   } else if (p.indexOf('/api/') !== 0) {
     e.respondWith(networkFirst(req, SHELL, req.mode === 'navigate' ? '/' : null));
   }
 });
+
+function cacheFirst(req, name) {
+  return caches.open(name).then(function (c) {
+    return c.match(req).then(function (hit) {
+      return hit || fetch(req).then(function (res) { if (res.ok) c.put(req, res.clone()); return res; });
+    });
+  });
+}
 
 function networkFirst(req, name, fallbackUrl) {
   return fetch(req, { cache: 'no-cache' }).then(function (res) {

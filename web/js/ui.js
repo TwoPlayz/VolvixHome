@@ -233,9 +233,11 @@ window.Spin = window.Spin || {};
     // Only if the picture fails does the generated art show.
     const src = album.cover && S.server ? S.server.coverUrl(album.id, big ? 1200 : 640) : '';
     const seen = src && coverSeen[src];
-    return '<div class="cover cover--' + (look ? 'custom' : (a.variant || 'plain')) + (src && !seen ? ' cover--loading' : '') + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '"' +
+    // cover--real: this album has a picture, so the generated art is never drawn behind it (not even for the moment a
+    // cached picture takes to appear). Only if the picture fails does it fall back to the generated art.
+    return '<div class="cover cover--' + (look ? 'custom' : (a.variant || 'plain')) + (src ? ' cover--real' : '') + (src && !seen ? ' cover--loading' : '') + ' ' + (extraClass || '') + '" style="--c1:' + a.c1 + ';--c2:' + a.c2 + ';--fg:' + a.fg + '"' +
       (look ? ' data-bg="' + S.esc(look.bg) + '" data-font="' + S.esc(look.font) + '"' : '') + '>' + text +
-      (src ? '<img class="cover-img" src="' + src + '" alt=""' + (seen ? '' : ' loading="lazy" decoding="async"') + ' onload="Spin._coverLoaded(this)" onerror="this.parentNode.classList.remove(\'cover--loading\');this.remove()">' : '') +
+      (src ? '<img class="cover-img" src="' + src + '" alt=""' + (seen ? ' decoding="sync"' : ' loading="lazy" decoding="async"') + ' onload="Spin._coverLoaded(this)" onerror="this.parentNode.classList.remove(\'cover--loading\',\'cover--real\');this.remove()">' : '') +
       '</div>';
   };
 

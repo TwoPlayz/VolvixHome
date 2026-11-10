@@ -207,6 +207,8 @@ a:focus-visible:not(.btn):not(.card):not(.list-row):not(.nav-item):not(.playlist
 .cover--empty { background: var(--surface-3); color: var(--text-3); align-items: center; justify-content: center; }
 /* a real cover is on its way: a softly pulsing tile with a small spinner, never the generated art. The spinner waits
    a moment before showing, so covers that load quickly just appear. */
+.cover--real { background: var(--surface-3); }
+.cover--real::before { display: none; }
 .cover--loading { background: var(--surface-3); animation: cover-pulse 1.4s ease-in-out infinite; }
 .cover--loading::before { display: none; }
 .cover--loading::after { content: ""; position: absolute; left: 50%; top: 50%; width: 18%; max-width: 28px; min-width: 14px; aspect-ratio: 1;
@@ -515,9 +517,12 @@ a:focus-visible:not(.btn):not(.card):not(.list-row):not(.nav-item):not(.playlist
 .shelf {
   display: grid; grid-auto-flow: column; grid-auto-columns: 172px; gap: 18px;
   overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity;
-  scrollbar-width: thin;
 }
 .shelf > * { scroll-snap-align: start; }
+/* sideways rows scroll by swipe, trackpad or Shift + wheel, with no scrollbar showing under them */
+.shelf, .artist-row, .products-row, .share-friends, .sl-tracks, .filter-row .chips, .search-filters .chips { scrollbar-width: none; }
+.shelf::-webkit-scrollbar, .artist-row::-webkit-scrollbar, .products-row::-webkit-scrollbar, .share-friends::-webkit-scrollbar,
+.sl-tracks::-webkit-scrollbar, .filter-row .chips::-webkit-scrollbar, .search-filters .chips::-webkit-scrollbar { display: none; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 26px 18px; }
 
 /* cards */

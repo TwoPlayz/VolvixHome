@@ -67,23 +67,48 @@
       '<button class="btn btn-primary btn-block" onclick="location.reload()">Try again</button></div></div>';
   }
 
-  function loadScripts(list, done) {
-    if (!list.length) return done();
-    const s = document.createElement('script');
-    s.src = list[0] + '?v=' + (window.VH_BUILD || (window.VOLVIX_CONFIG && window.VOLVIX_CONFIG.built) || '');
-    s.onload = function () { loadScripts(list.slice(1), done); };
-    s.onerror = function () { failScreen('Part of the app (' + list[0] + ') didn\'t load.'); };
-    document.body.appendChild(s);
+  const BUILD = window.VH_BUILD || (window.VOLVIX_CONFIG && window.VOLVIX_CONFIG.built) || '';
+  const scriptUrl = function (path) { return path + '?v=' + BUILD; };
+
+  /** Start downloading every app file straight away, all at once (while sign-in and the library load), so they're
+   *  ready the moment they're needed. After the first launch they come from the cache (their address has the version). */
+  function preloadScripts() {
+    SCRIPTS.forEach(function (path) {
+      const l = document.createElement('link');
+      l.rel = 'preload'; l.as = 'script'; l.href = scriptUrl(path);
+      document.head.appendChild(l);
+    });
   }
 
+  /** Add all the app files at once: they download side by side, but async=false runs them in this exact order. */
+  function loadScripts(list, done) {
+    if (!list.length) return done();
+    let left = list.length, failed = false;
+    list.forEach(function (path) {
+      const s = document.createElement('script');
+      s.async = false;
+      s.src = scriptUrl(path);
+      s.onload = function () { if (--left === 0 && !failed) done(); };
+      s.onerror = function () { if (failed) return; failed = true; failScreen('Part of the app (' + path + ') didn\'t load.'); };
+      document.body.appendChild(s);
+    });
+  }
+
+  let preloaded = false;
   function start() {
+    if (!preloaded) { preloaded = true; preloadScripts(); }
+    // everything is asked for at once (not "who am I" first, then the rest): one round trip instead of two
+    const soft = function (p, fallback) { return p.catch(function () { return fallback; }); };
+    const rest = [
+      soft(get('/api/library'), null), soft(get('/api/me/data'), null),
+      soft(get('/api/people'), { people: [] }), soft(get('/api/shared'), { playlists: [], invites: [] }),
+      soft(get('/api/household'), { members: [] }), soft(get('/api/notifications'), { items: [], unread: 0 })
+    ];
     get('/api/me').then(function (me) {
-      const soft = function (p, fallback) { return p.catch(function () { return fallback; }); };
-      return Promise.all([
-        get('/api/library'), soft(get('/api/me/data'), null),
-        soft(get('/api/people'), { people: [] }), soft(get('/api/shared'), { playlists: [], invites: [] }),
-        soft(get('/api/household'), { members: [] }), soft(get('/api/notifications'), { items: [], unread: 0 })
-      ]).then(function (r) {
+      return Promise.all(rest).then(function (r) {
+        if (!r[0]) return get('/api/library').then(function (lib) { r[0] = lib; return r; }); // signed in just now: ask again
+        return r;
+      }).then(function (r) {
         window.VH = { user: me.user, lidarr: me.lidarr || {}, transcoding: !!me.transcoding, artistInfo: !!me.artistInfo, catalog: r[0], userdata: r[1],
           people: r[2].people, shared: r[3], household: r[4], notifications: r[5] };
         app.innerHTML = '';
