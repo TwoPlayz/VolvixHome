@@ -3182,3 +3182,10 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 .pl-mark { width: 32px; height: 32px; border-radius: 4px; overflow: hidden; flex: none; }
 .pl-mark .cover, .pl-mark .mosaic { width: 100%; height: 100%; border-radius: 4px; }
 .playlist-link { padding: 4px 10px; }
+/* ---- round 6 ---- */
+/* the account menu's name card is a button */
+.popover-head.clickable { cursor: pointer; border-radius: 8px; margin: 0 0 2px; }
+.popover-head.clickable:hover, .popover-head.clickable:focus-visible { background: var(--hover); outline: none; }
+.popover-item { font-weight: 600; }
+/* the Account / Members / Settings tabs scroll away with the page (they don't stay on screen) */
+.acct-nav { position: static; }

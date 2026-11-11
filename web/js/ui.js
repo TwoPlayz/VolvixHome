@@ -432,9 +432,16 @@ window.Spin = window.Spin || {};
     anchor.setAttribute('aria-expanded', 'true');
 
     const r = anchor.getBoundingClientRect();
+    // matchWidth: the menu is exactly as wide as the button it opens from, and lines up with it
+    if (opts.matchWidth) { el.style.minWidth = '0'; el.style.width = r.width + 'px'; }
     const w = el.offsetWidth, h = el.offsetHeight;
-    let left = Math.min(r.right - w, window.innerWidth - w - 8);
+    let left = opts.matchWidth ? r.left : Math.min(r.right - w, window.innerWidth - w - 8);
     left = Math.max(8, left);
+    // the header card can itself be a button (the account menu's name card opens your profile)
+    if (opts.onHeader) {
+      const head = el.querySelector('.popover-head');
+      if (head) { head.classList.add('clickable'); head.setAttribute('role', 'menuitem'); head.tabIndex = 0; head.addEventListener('click', function () { close(true); opts.onHeader(); }); head.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); close(true); opts.onHeader(); } }); }
+    }
     let top = r.bottom + 6;
     if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
     el.style.left = left + 'px';

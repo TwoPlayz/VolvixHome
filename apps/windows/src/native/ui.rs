@@ -58,6 +58,7 @@ pub mod icon {
     pub const PLAYLIST: char = '\u{E8FD}';
     pub const CLOSE: char = '\u{E711}';
     pub const PERSON: char = '\u{E77B}';
+    pub const HISTORY: char = '\u{E81C}';
     pub const SIGN_OUT: char = '\u{E7E8}';
 }
 

@@ -157,9 +157,10 @@ window.Spin.views = window.Spin.views || {};
   function accountMenu(anchor) {
     const me = S.data.me;
     S.popover(anchor, {
+      matchWidth: anchor.classList.contains('user-chip'),
+      onHeader: function () { S.router.go('/account/profile'); }, // the name card is the Account button
       header: '<div class="menu-user">' + S.avatar(me, 40) + '<div><div class="menu-name">' + S.esc(me.name) + '</div><div class="menu-sub">' + (me.admin ? 'Admin' : 'Member') + '</div></div></div>',
       items: [
-        { label: 'Account', icon: 'user', onClick: function () { S.router.go('/account/profile'); } },
         S.data.can('members') ? { label: 'Members', icon: 'family', onClick: function () { S.router.go('/account/members'); } } : null,
         { label: 'Settings', icon: 'settings', onClick: function () { S.router.go('/account/settings'); } },
         { label: 'Rewind', icon: 'history', onClick: function () { S.router.go('/rewind'); } },

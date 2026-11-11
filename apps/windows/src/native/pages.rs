@@ -566,6 +566,199 @@ fn switch<'a>(on: bool, f: fn(bool) -> Message) -> El<'a> {
     toggler(on).on_toggle(f).size(24).style(ui::switch_style).into()
 }
 
+/// What a member can be allowed to do: key, title, explanation (the website's list).
+pub const PERMISSIONS: [(&str, &str, &str); 6] = [
+    ("request", "Request music", "Ask Lidarr to download music that isn't on the server yet."),
+    ("rescan", "Check for new music", "Look in the music folder for added or removed songs right now."),
+    ("parties", "Start listening parties", "Host a party and invite the household."),
+    ("members", "Manage members", "Add people, change what they may do, set passwords and remove them."),
+    ("settings", "Server settings", "Change the music folder and the Lidarr connection."),
+    ("share", "Create share links", "Make a link to an album or playlist that anyone with the link can play for a few days."),
+];
+
+/// A row with a button: the button sits right after the text, not pushed to the far edge.
+fn action_row<'a>(title: &'a str, sub: &'a str, control: El<'a>) -> El<'a> {
+    container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).max_width(520), control].spacing(24).align_y(Alignment::Center)).padding([10, 4]).into()
+}
+
+/* ---------- Rewind: your year in music ---------- */
+
+fn year_of(secs: u64) -> i32 {
+    // days since 1970 → calendar year
+    let z = (secs / 86400) as i64 + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let m = (5 * doy + 2) / 153;
+    let month = if m < 10 { m + 3 } else { m - 9 };
+    (yoe + era * 400 + if month <= 2 { 1 } else { 0 }) as i32
+}
+
+fn rewind_years(app: &App) -> Vec<i32> {
+    let mut years: Vec<i32> = app.data.rest.get("stats").and_then(|s| s.get("years")).and_then(|y| y.as_object()).map(|m| m.keys().filter_map(|k| k.parse().ok()).collect()).unwrap_or_default();
+    years.sort();
+    years
+}
+
+/// The year to show: the one picked, or the latest year that has ended.
+pub fn rewind_year(app: &App) -> Option<i32> {
+    let this = year_of(volvix_core::userdata::now());
+    let done: Vec<i32> = rewind_years(app).into_iter().filter(|y| *y < this).collect();
+    app.rewind_year.filter(|y| done.contains(y)).or(done.last().copied())
+}
+
+/// The songs played in a year, most played first.
+pub fn rewind_songs(app: &App, year: i32) -> Vec<(&volvix_core::Track, u64)> {
+    let plays = app.data.rest.get("stats").and_then(|s| s.get("years")).and_then(|y| y.get(year.to_string())).and_then(|d| d.get("plays")).and_then(|p| p.as_object());
+    let mut songs: Vec<(&volvix_core::Track, u64)> = plays.map(|m| m.iter().filter_map(|(id, n)| Some((app.lib.track(id)?, n.as_u64()?))).collect()).unwrap_or_default();
+    songs.sort_by(|a, b| b.1.cmp(&a.1));
+    songs
+}
+
+pub fn rewind(app: &App) -> El<'_> {
+    let this = year_of(volvix_core::userdata::now());
+    let Some(y) = rewind_year(app) else {
+        let have = app.data.rest.get("stats").and_then(|s| s.get("years")).and_then(|y| y.get(this.to_string())).and_then(|d| d.get("plays")).and_then(|p| p.as_object()).map(|p| p.len());
+        return column![
+            ui::title("Rewind", 32),
+            ui::title(format!("Your {this} Rewind opens on January 1, {}", this + 1), 20),
+            ui::dim(
+                match have {
+                    Some(n) => format!("It's building as you listen: {n} songs so far."),
+                    None => "Play some music and it starts building.".to_string(),
+                },
+                14
+            ),
+        ]
+        .spacing(10)
+        .into();
+    };
+    let songs = rewind_songs(app, y);
+    let plays: u64 = songs.iter().map(|s| s.1).sum();
+    let minutes = app.data.rest.get("stats").and_then(|s| s.get("years")).and_then(|d| d.get(y.to_string())).and_then(|d| d.get("sec")).and_then(|v| v.as_f64()).map(|s| (s / 60.0).round() as u64).unwrap_or(0);
+    if plays == 0 {
+        return column![ui::title(format!("Rewind {y}"), 32), ui::dim("Nothing was recorded that year.", 14)].spacing(10).into();
+    }
+    let mut artists: std::collections::HashMap<&str, u64> = Default::default();
+    let mut albums: std::collections::HashMap<&str, u64> = Default::default();
+    for (t, n) in &songs {
+        *artists.entry(t.artist.as_str()).or_default() += n;
+        *albums.entry(t.album_id.as_str()).or_default() += n;
+    }
+    fn rank<'k>(m: std::collections::HashMap<&'k str, u64>) -> Vec<(&'k str, u64)> {
+        let mut v: Vec<(&str, u64)> = m.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        v
+    }
+    let (artists, albums) = (rank(artists), rank(albums));
+    let stat = |n: String, label: &'static str| -> El<'static> { column![text(n).size(30).font(ui::FONT_BOLD), ui::dim(label, 13)].spacing(2).into() };
+    let hero = column![
+        text(y.to_string()).size(56).font(ui::FONT_BOLD).color(ui::ACCENT),
+        ui::title("Your year in music", 28),
+        row![stat(minutes.to_string(), "minutes listened"), stat(plays.to_string(), "plays"), stat(songs.len().to_string(), "different songs")].spacing(40),
+    ]
+    .spacing(8);
+
+    let top_ids: Vec<String> = songs.iter().take(5).map(|(t, _)| t.id.clone()).collect();
+    let mut rows = Column::new().spacing(6);
+    for (i, (t, n)) in songs.iter().take(5).enumerate() {
+        rows = rows.push(
+            row![
+                container(text((i + 1).to_string()).size(15).color(ui::TEXT_2)).width(24),
+                cover_of(app, app.lib.album_of(t), 44.0),
+                column![text(clip(&t.title, 40)).size(15), ui::dim(clip(&t.artist, 40), 12)].spacing(2).width(Length::Fill),
+                ui::dim(format!("{n} plays"), 13),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        );
+    }
+    let top_songs = column![
+        row![ui::title("Top songs", 22), horizontal_space(), button(row![ic(icon::PLAY, 13), text("Play them").size(13)].spacing(8).align_y(Alignment::Center)).padding([7, 16]).style(ui::secondary).on_press(Message::PlayTracks(top_ids, 0, format!("Your {y} Rewind")))].align_y(Alignment::Center),
+        rows,
+    ]
+    .spacing(12);
+
+    let mut chips = Row::new().spacing(8);
+    for (i, (name, n)) in artists.iter().take(5).enumerate() {
+        chips = chips.push(button(text(format!("{}  {}  ·  {n} plays", i + 1, clip(name, 22))).size(13)).padding([8, 14]).style(ui::chip(false)).on_press(Message::Go(Page::Artist(name.to_string()))));
+    }
+    let top_artists = column![ui::title("Top artists", 22), scrollable(chips).direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().width(4).scroller_width(4))).style(ui::scroller)].spacing(12);
+
+    let mut page = column![hero, top_songs, top_artists].spacing(28);
+    if let Some(a) = albums.first().and_then(|(id, _)| app.lib.album(id)) {
+        page = page.push(column![ui::title("Top album", 22), card(cover_of(app, Some(a), 164.0), a.title.clone(), a.artist.clone(), Message::Go(Page::Album(a.id.clone())))].spacing(12));
+    }
+    let done: Vec<i32> = rewind_years(app).into_iter().filter(|v| *v < this && *v != y).collect();
+    if !done.is_empty() {
+        let mut other = Row::new().spacing(8).align_y(Alignment::Center);
+        other = other.push(ui::dim("Other years:", 13));
+        for v in done {
+            other = other.push(button(text(v.to_string()).size(13)).padding([6, 12]).style(ui::chip(false)).on_press(Message::RewindYear(v)));
+        }
+        page = page.push(other);
+    }
+    page.into()
+}
+
+/* ---------- Manage a member (admins) ---------- */
+
+fn manage_dialog<'a>(app: &'a App, id: &'a str, password: &'a str, error: &'a Option<String>, confirm_remove: bool) -> El<'a> {
+    let Some(m) = app.members.iter().find(|m| m.id == id) else { return ui::dim("That member isn't here any more.", 14).into() };
+    let me = app.me.as_ref().map(|u| u.user.clone()).unwrap_or_default();
+    let have = |p: &str| me.admin || me.perms.iter().any(|x| x == p);
+    let switch_row = |title: &'a str, sub: String, on: bool, key: String, enabled: bool| -> El<'a> {
+        let t = toggler(on).size(22).style(ui::switch_style);
+        let t = if enabled { t.on_toggle(move |_| Message::ManageToggle(key.clone())) } else { t };
+        container(row![column![text(title).size(14), ui::dim(sub, 12)].spacing(2).width(Length::Fill), t].spacing(12).align_y(Alignment::Center)).padding([6, 0]).into()
+    };
+    let mut c = column![
+        ui::title(format!("Manage {}", m.name), 22),
+        row![ui::avatar::<Message>(&m.name, 48.0), column![text(m.name.clone()).size(15).font(ui::FONT_BOLD), ui::dim(m.role(), 12)].spacing(2)].spacing(12).align_y(Alignment::Center),
+        switch_row("Turn off explicit music", "Songs marked explicit stay listed but are skipped for them.".into(), m.hide_explicit, "hideExplicit".into(), true),
+        text(format!("What {} can do", m.name)).size(13).font(ui::FONT_BOLD),
+    ]
+    .spacing(8);
+    for (key, title, about) in PERMISSIONS {
+        let ok = have(key);
+        let sub = if ok { about.to_string() } else { format!("{about} (you don't have this one, so you can't give it)") };
+        c = c.push(switch_row(title, sub, m.perms.iter().any(|p| p == key), key.to_string(), ok));
+    }
+    c = c.push(
+        row![
+            button(text("Everything (admin)").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe(me.admin.then_some(Message::ManagePreset(true))),
+            button(text("Basics only").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManagePreset(false)),
+        ]
+        .spacing(8),
+    );
+    c = c.push(field_dialog("New password", password));
+    c = c.push(
+        row![
+            button(text("Set new password").size(13)).padding([8, 16]).style(ui::secondary).on_press_maybe((!password.is_empty()).then_some(Message::ManagePassword)),
+            ui::dim("They're signed out everywhere and use this password next time.", 12),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+    );
+    if let Some(e) = error {
+        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+    }
+    c = c.push(
+        row![
+            button(text(if confirm_remove { format!("Really remove {}? Click again", m.name) } else { format!("Remove {}", m.name) }).size(13).color(ui::ACCENT)).padding([8, 16]).style(ui::secondary).on_press(Message::ManageRemove),
+            horizontal_space(),
+            button(text("Done").size(14)).padding([8, 18]).style(ui::primary).on_press(Message::DialogCancel),
+        ]
+        .align_y(Alignment::Center),
+    );
+    scrollable(c.padding(iced::Padding { right: 14.0, ..Default::default() })).style(ui::scroller).height(Length::Fixed(520.0)).into()
+}
+
+fn field_dialog<'a>(label: &'a str, value: &'a str) -> El<'a> {
+    column![text(label).size(13).font(ui::FONT_BOLD), text_input("At least 8 characters", value).on_input(|s| Message::DialogText(0, s)).secure(true).padding(10).size(15).style(ui::input)].spacing(6).into()
+}
+
 /* ---------- Account: Profile, Members, Settings (three tabs, like the website) ---------- */
 
 pub fn account(app: &App) -> El<'_> {
@@ -627,18 +820,23 @@ fn profile(app: &App) -> El<'_> {
         button(text("Change password").size(14)).padding([10, 22]).style(ui::primary).on_press_maybe((!app.pw_current.is_empty() && !app.pw_new.is_empty()).then_some(Message::SavePassword)),
     ]
     .spacing(14);
-    let sign_out = setting_row("Sign out on this device", "Your playlists and settings stay on the server.", button(text("Sign out").size(13)).padding([8, 16]).style(ui::secondary).on_press(Message::SignOut).into());
+    let sign_out = action_row("Sign out on this device", "Your playlists and settings stay on the server.", button(text("Sign out").size(13)).padding([8, 16]).style(ui::secondary).on_press(Message::SignOut).into());
     column![section("You", you.into()), section("Password", password.into()), section("Sign out", sign_out)].spacing(28).into()
 }
 
 fn members(app: &App) -> El<'_> {
-    let me = app.me.as_ref().map(|m| m.user.id.clone()).unwrap_or_default();
+    let mine = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
+    let me = mine.id.clone();
+    // you can manage someone unless they're an admin or hold more permissions than you (the server checks too)
+    let can_manage = |m: &volvix_core::members::Member| mine.admin || (mine.perms.iter().any(|p| p == "members") && !m.admin && m.perms.iter().all(|p| mine.perms.contains(p)));
     let mut list = Column::new().spacing(10);
     for m in &app.members {
         let you = if m.id == me { " (you)" } else { "" };
-        list = list.push(
-            row![ui::avatar::<Message>(&m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2)].spacing(12).align_y(Alignment::Center),
-        );
+        let mut line = row![ui::avatar::<Message>(&m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2).width(Length::Fixed(300.0))].spacing(12).align_y(Alignment::Center);
+        if m.id != me && can_manage(m) {
+            line = line.push(button(text("Manage").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManageMember(m.id.clone())));
+        }
+        list = list.push(line);
     }
     let first = column![
         ui::title("Members of this server", 22),
@@ -710,7 +908,7 @@ fn settings(app: &App) -> El<'_> {
                     "Off: downloads wait while Windows says this connection is metered (a mobile hotspot, or one you marked as metered), so a big album can't use up a data plan.",
                     switch(app.settings.download_metered, Message::SetDownloadMetered)
                 ),
-                setting_row(
+                action_row(
                     Box::leak(format!("{} songs on this computer", app.downloaded.len()).into_boxed_str()),
                     Box::leak(format!("{} used. Albums and playlists you download play without the server.", human_size(app.downloads.size())).into_boxed_str()),
                     button(text("Remove all").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe((!app.saved.is_empty() || !app.downloaded.is_empty()).then_some(Message::RemoveAllDownloads)).into()
@@ -724,13 +922,13 @@ fn settings(app: &App) -> El<'_> {
                 setting_row("Start with Windows", "Open in the tray when you sign in to Windows.", switch(app.settings.start_with_windows, Message::SetStartWithWindows)),
                 setting_row("Close to the system tray", "The close button hides the window and the music keeps playing.", switch(app.settings.close_to_tray, Message::SetCloseToTray)),
                 setting_row("Update automatically", "Look for a new version every few hours.", switch(app.settings.auto_update, Message::SetAutoUpdate)),
-                setting_row("Updates", Box::leak(update_line.into_boxed_str()), button(text("Check now").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::CheckUpdate).into()),
+                action_row("Updates", Box::leak(update_line.into_boxed_str()), button(text("Check now").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::CheckUpdate).into()),
             ]
             .into()
         ),
         section(
             "Server",
-            column![setting_row("Connected to", Box::leak(server_line.into_boxed_str()), button(text("Switch server").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::SwitchServer).into())].into()
+            column![action_row("Connected to", Box::leak(server_line.into_boxed_str()), button(text("Switch server").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::SwitchServer).into())].into()
         ),
     ]
     .spacing(24)
@@ -816,6 +1014,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             c.push(buttons("Save", !name.trim().is_empty())).into()
         }
         Dialog::PlayOn => play_on(app),
+        Dialog::Manage { id, password, error, confirm_remove } => manage_dialog(app, id, password, error, *confirm_remove),
         Dialog::AddCast { host, error, busy } => {
             let mut c = column![
                 ui::title("Add a TV or speaker", 22),

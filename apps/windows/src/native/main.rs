@@ -89,6 +89,8 @@ pub enum Page {
     Profile,
     Members,
     Settings,
+    /// your year in music (opens once the year has ended)
+    Rewind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -181,6 +183,8 @@ pub enum Dialog {
     AddCast { host: String, error: Option<String>, busy: bool },
     PartyStart { invite: Vec<String> },
     PartyInvite { invite: Vec<String> },
+    /// an admin's controls for one member: explicit songs, what they may do, a new password, remove
+    Manage { id: String, password: String, error: Option<String>, confirm_remove: bool },
 }
 
 /// Playing on a TV or speaker: the app keeps the queue and the clock but stays silent, and tells the TV
@@ -346,6 +350,17 @@ pub enum Message {
     SavePassword,
     AddMember,
     MembersLoaded(Result<Vec<volvix_core::members::Member>, Error>),
+    RewindYear(i32),
+    /// the Manage window: open it for a member, switch one of its options, set a password, remove the member
+    ManageMember(String),
+    /// "hideExplicit" or one permission (request, rescan, parties, members, settings, share)
+    ManageToggle(String),
+    /// all permissions (true) or the basics only (false)
+    ManagePreset(bool),
+    MemberEdited(Result<volvix_core::members::Member, Error>),
+    ManagePassword,
+    ManageRemove,
+    ManageDone(Result<(), Error>, &'static str),
     MemberAdded(Result<(), Error>),
     CheckUpdate,
     ChangePassword,
@@ -475,6 +490,7 @@ pub struct App {
     pub new_member_name: String,
     pub new_member_pw: String,
     pub member_error: Option<String>,
+    pub rewind_year: Option<i32>,
 }
 
 fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl std::future::Future<Output = T> {
@@ -582,6 +598,7 @@ impl App {
             new_member_name: String::new(),
             new_member_pw: String::new(),
             member_error: None,
+            rewind_year: None,
         };
         app.apply_volume();
         let mut tasks = vec![window::get_oldest().map(Message::WindowReady)];
@@ -1523,6 +1540,7 @@ impl App {
                 (Some(Dialog::AddCast { host, .. }), 0) => *host = s,
                 (Some(Dialog::Password { current, .. }), 0) => *current = s,
                 (Some(Dialog::Password { new, .. }), 1) => *new = s,
+                (Some(Dialog::Manage { password, .. }), 0) => *password = s,
                 _ => {}
             },
             Message::DialogFlag(field, v) => match (&mut self.dialog, field) {
@@ -1755,6 +1773,83 @@ impl App {
                     self.members = list;
                 }
             }
+            Message::RewindYear(y) => self.rewind_year = Some(y),
+            Message::ManageMember(id) => self.dialog = Some(Dialog::Manage { id, password: String::new(), error: None, confirm_remove: false }),
+            Message::ManageToggle(key) => {
+                let (Some(c), Some(Dialog::Manage { id, .. })) = (self.client.clone(), self.dialog.clone()) else { return Task::none() };
+                let Some(m) = self.members.iter().find(|m| m.id == id).cloned() else { return Task::none() };
+                let body = if key == "hideExplicit" {
+                    json!({ "hideExplicit": !m.hide_explicit })
+                } else {
+                    let mut perms = m.perms.clone();
+                    if perms.contains(&key) {
+                        perms.retain(|p| *p != key);
+                    } else {
+                        perms.push(key);
+                    }
+                    json!({ "perms": perms })
+                };
+                return Task::perform(blocking(move || c.edit_member(&id, body)), Message::MemberEdited);
+            }
+            Message::ManagePreset(all) => {
+                let (Some(c), Some(Dialog::Manage { id, .. })) = (self.client.clone(), self.dialog.clone()) else { return Task::none() };
+                let perms: Vec<&str> = if all { pages::PERMISSIONS.iter().map(|p| p.0).collect() } else { vec!["request", "parties"] };
+                return Task::perform(blocking(move || c.edit_member(&id, json!({ "perms": perms }))), Message::MemberEdited);
+            }
+            Message::MemberEdited(r) => match r {
+                Ok(u) => {
+                    if let Some(slot) = self.members.iter_mut().find(|m| m.id == u.id) {
+                        *slot = u;
+                    }
+                    if let Some(Dialog::Manage { error, .. }) = &mut self.dialog {
+                        *error = None;
+                    }
+                }
+                Err(e) => {
+                    if let Some(Dialog::Manage { error, .. }) = &mut self.dialog {
+                        *error = Some(e.to_string());
+                    }
+                }
+            },
+            Message::ManagePassword => {
+                let (Some(c), Some(Dialog::Manage { id, password, .. })) = (self.client.clone(), self.dialog.clone()) else { return Task::none() };
+                if password.is_empty() {
+                    return Task::none();
+                }
+                return Task::perform(blocking(move || c.set_member_password(&id, &password)), |r| Message::ManageDone(r, "password"));
+            }
+            Message::ManageRemove => {
+                let (Some(c), Some(Dialog::Manage { id, confirm_remove, .. })) = (self.client.clone(), self.dialog.clone()) else { return Task::none() };
+                if !confirm_remove {
+                    if let Some(Dialog::Manage { confirm_remove, .. }) = &mut self.dialog {
+                        *confirm_remove = true; // asks once more
+                    }
+                    return Task::none();
+                }
+                return Task::perform(blocking(move || c.remove_member(&id)), |r| Message::ManageDone(r, "removed"));
+            }
+            Message::ManageDone(r, what) => match r {
+                Ok(()) => {
+                    if what == "removed" {
+                        self.dialog = None;
+                        self.say("Member removed");
+                        if let Some(c) = self.client.clone() {
+                            return Task::perform(blocking(move || c.members()), Message::MembersLoaded);
+                        }
+                    } else {
+                        if let Some(Dialog::Manage { password, error, .. }) = &mut self.dialog {
+                            password.clear();
+                            *error = None;
+                        }
+                        self.say("New password set");
+                    }
+                }
+                Err(e) => {
+                    if let Some(Dialog::Manage { error, .. }) = &mut self.dialog {
+                        *error = Some(e.to_string());
+                    }
+                }
+            },
             Message::MemberAdded(r) => match r {
                 Ok(()) => {
                     self.new_member_name.clear();
@@ -1912,7 +2007,7 @@ impl App {
                 }
                 self.edit(vec![Edit::DeletePlaylist(id)])
             }
-            Dialog::AddTo { .. } | Dialog::PlayOn => Task::none(),
+            Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } => Task::none(),
             Dialog::AddCast { host, busy, .. } => {
                 let Some(c) = self.client.clone() else { return Task::none() };
                 if busy || host.trim().is_empty() {

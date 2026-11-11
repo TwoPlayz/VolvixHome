@@ -117,7 +117,14 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                     ids.extend(r.artists.iter().take(6).filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone()));
                 }
             }
-            Page::GetMusic | Page::Notifications | Page::Profile | Page::Members | Page::Settings => {}
+            Page::Notifications | Page::Profile | Page::Members | Page::Settings => {}
+            Page::GetMusic => {}
+            Page::Rewind => {
+                // the top songs' covers
+                if let Some(y) = pages::rewind_year(app) {
+                    ids.extend(pages::rewind_songs(app, y).iter().take(5).map(|(t, _)| t.album_id.clone()));
+                }
+            }
         }
     }
     let mut seen = std::collections::HashSet::new();
@@ -499,8 +506,13 @@ fn account_menu(app: &App) -> El<'_> {
     if may_members {
         card = card.push(item(icon::PEOPLE, "Members", Message::Go(Page::Members)));
     }
-    card = card.push(item(icon::SETTINGS, "Settings", Message::Go(Page::Settings))).push(container(line()).padding([4, 6])).push(item(icon::SIGN_OUT, "Sign out", Message::SignOut));
-    opaque(container(card).width(240).padding(6).style(ui::dialog)).into()
+    card = card
+        .push(item(icon::SETTINGS, "Settings", Message::Go(Page::Settings)))
+        .push(item(icon::HISTORY, "Rewind", Message::Go(Page::Rewind)))
+        .push(container(line()).padding([4, 6]))
+        .push(item(icon::SIGN_OUT, "Sign out", Message::SignOut));
+    // as wide as the button it opens from (the sidebar is 240 wide with 8 of padding each side)
+    opaque(container(card).width(224).padding(6).style(ui::dialog)).into()
 }
 
 fn bell(app: &App) -> El<'_> {
@@ -525,6 +537,7 @@ fn page(app: &App) -> El<'_> {
         Page::Household => pages::household(app),
         Page::Notifications => pages::notifications(app),
         Page::Profile | Page::Members | Page::Settings => pages::account(app),
+        Page::Rewind => pages::rewind(app),
     }
 }
 
