@@ -3,7 +3,8 @@
 #  - iPhone: the IPA is attached to the release and listed in apps/ios/source.json, an update feed for AltStore / SideStore.
 # To release: push a tag, e.g.  git tag v0.2.0 && git push origin v0.2.0
 # The app compares its own version with the newest release and downloads volvix-home.exe, checking it against
-# volvix-home.exe.sha256 before installing.
+# volvix-home.exe.sha256 before installing. The release carries both Windows apps: volvix-home.exe (web view) and
+# volvix-home-native.exe (the native app), each with its own .sha256; each updates itself from its own file.
 name: Release
 
 on:
@@ -24,17 +25,21 @@ jobs:
           $v = '${{ github.ref_name }}'.TrimStart('v')
           (Get-Content apps/windows/Cargo.toml -Raw) -replace '(?m)^version = ".*"', "version = `"$v`"" | Set-Content apps/windows/Cargo.toml
       - name: Build
-        run: cargo build --release --manifest-path apps/windows/Cargo.toml
+        run: cargo build --release --features native --manifest-path apps/windows/Cargo.toml
       - name: Checksum
         shell: pwsh
         run: |
           Copy-Item apps/windows/target/release/volvix-home.exe volvix-home.exe
           (Get-FileHash volvix-home.exe -Algorithm SHA256).Hash.ToLower() | Set-Content -NoNewline volvix-home.exe.sha256
+          Copy-Item apps/windows/target/release/volvix-home-native.exe volvix-home-native.exe
+          (Get-FileHash volvix-home-native.exe -Algorithm SHA256).Hash.ToLower() | Set-Content -NoNewline volvix-home-native.exe.sha256
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             volvix-home.exe
             volvix-home.exe.sha256
+            volvix-home-native.exe
+            volvix-home-native.exe.sha256
           generate_release_notes: true
 
   # the iPhone app: an unsigned .ipa (AltStore / SideStore sign it with your Apple ID when they install it)

@@ -1,5 +1,5 @@
 # Builds the Volvix Home apps. Download the artifacts from the finished run.
-#   Volvix-Home-Windows   volvix-home.exe   the desktop app
+#   Volvix-Home-Windows   volvix-home.exe and volvix-home-native.exe   the desktop apps (web view, and native)
 #   Volvix-Home-iOS       VolvixHome.ipa    the iPhone app (unsigned; sideload with LiveContainer, etc.)
 # Both just connect to your server by address; nothing from the server is bundled in.
 name: Apps
@@ -16,11 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: cargo build --release --manifest-path apps/windows/Cargo.toml
+        run: cargo build --release --features native --manifest-path apps/windows/Cargo.toml
       - uses: actions/upload-artifact@v4
         with:
           name: Volvix-Home-Windows
-          path: apps/windows/target/release/volvix-home.exe
+          path: |
+            apps/windows/target/release/volvix-home.exe
+            apps/windows/target/release/volvix-home-native.exe
 
   ios:
     runs-on: macos-latest
