@@ -563,7 +563,7 @@ fn setting_row<'a>(title: &'a str, sub: &'a str, control: El<'a>) -> El<'a> {
 }
 
 fn switch<'a>(on: bool, f: fn(bool) -> Message) -> El<'a> {
-    toggler(on).on_toggle(f).size(22).into()
+    toggler(on).on_toggle(f).size(24).style(ui::switch_style).into()
 }
 
 pub fn settings(app: &App) -> El<'_> {
@@ -595,11 +595,27 @@ pub fn settings(app: &App) -> El<'_> {
             .into()
         ),
         section(
+            "Privacy",
+            column![
+                setting_row("Share what I'm listening to", "Others in your household see your current song on the Household page.", switch(app.setting_bool("shareActivity", true), Message::SetShare)),
+                setting_row("Private session", "Stops sharing, and keeps what you play out of Recently played, until you turn it off.", switch(app.setting_bool("privateSession", false), Message::SetPrivate)),
+            ]
+            .into()
+        ),
+        section(
             "Playback",
             column![
-                setting_row("Volume leveling", "Songs play at an even loudness, from their ReplayGain tags. Albums played in order keep their own loud and quiet songs.", switch(leveling, Message::SetLeveling)),
-                setting_row("Share what I'm listening to", "The household sees what you're playing.", switch(app.setting_bool("shareActivity", true), Message::SetShare)),
-                setting_row("Private session", "Nothing you play counts toward your stats, mixes or Recently played.", switch(app.setting_bool("privateSession", false), Message::SetPrivate)),
+                setting_row("Volume leveling", "Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren't changed.", switch(leveling, Message::SetLeveling)),
+                setting_row(
+                    "Sleep timer",
+                    match app.sleep_choice.as_str() {
+                        "song" => "Pauses when this song ends.",
+                        "0" => "Pause the music after a while, so you can fall asleep to it.",
+                        _ => "Pauses when the time is up.",
+                    },
+                    ui::seg(&[("0", "Off"), ("15", "15 min"), ("30", "30 min"), ("60", "1 hour"), ("song", "End of song")], &app.sleep_choice, Message::SetSleep)
+                ),
+                setting_row("Resume where I left off", "Reopening Volvix shows the last song and spot, paused.", switch(app.setting_bool("resumeLast", true), Message::SetResume)),
             ]
             .into()
         ),

@@ -333,6 +333,8 @@ pub enum Message {
     SetCloseToTray(bool),
     SetAutoUpdate(bool),
     SetDownloadMetered(bool),
+    SetResume(bool),
+    SetSleep(String),
     CheckUpdate,
     ChangePassword,
     RenameMe,
@@ -442,6 +444,13 @@ pub struct App {
     update_tx: Sender<update::State>,
     update_rx: Receiver<update::State>,
     next_update_check: Instant,
+    /// the sleep timer: pause at this time, or when the song ends
+    pub sleep_choice: String,
+    sleep_until: Option<Instant>,
+    sleep_song: bool,
+    /// where the last session stopped has been put back (once per start)
+    resumed: bool,
+    resume_saved_at: Instant,
 }
 
 fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl std::future::Future<Output = T> {
@@ -535,6 +544,11 @@ impl App {
             update_tx,
             update_rx,
             next_update_check: Instant::now() + Duration::from_secs(20),
+            sleep_choice: "0".into(),
+            sleep_until: None,
+            sleep_song: false,
+            resumed: false,
+            resume_saved_at: Instant::now(),
         };
         app.apply_volume();
         let mut tasks = vec![window::get_oldest().map(Message::WindowReady)];
@@ -1664,6 +1678,17 @@ impl App {
                     t.set_checks(None, None, Some(v));
                 }
             }
+            Message::SetResume(v) => return self.edit(vec![Edit::Setting("resumeLast".into(), json!(v))]),
+            Message::SetSleep(choice) => {
+                self.sleep_song = choice == "song";
+                self.sleep_until = choice.parse::<u64>().ok().filter(|m| *m > 0).map(|m| Instant::now() + Duration::from_secs(m * 60));
+                self.say(match choice.as_str() {
+                    "0" => "Sleep timer off".to_string(),
+                    "song" => "Will pause when this song ends".to_string(),
+                    m => format!("Will pause in {m} minutes"),
+                });
+                self.sleep_choice = choice;
+            }
             Message::SetDownloadMetered(v) => {
                 self.settings.set("downloadMetered", v);
                 return self.pump_downloads(); // allowing it starts anything that was waiting
@@ -1936,9 +1961,21 @@ impl App {
                 }
             }
         }
-        if ended && self.queue.next(true).is_some() {
+        // the sleep timer: at the time, or when this song ends (then the next song waits, paused)
+        if self.sleep_until.map(|t| Instant::now() >= t).unwrap_or(false) {
+            self.sleep_until = None;
+            self.sleep_choice = "0".into();
+            self.player.pause();
+            self.say("Sleep timer: paused");
+        }
+        if ended && self.sleep_song {
+            self.sleep_song = false;
+            self.sleep_choice = "0".into();
+            self.say("Sleep timer: paused");
+        } else if ended && self.queue.next(true).is_some() {
             tasks.push(self.start_current(true));
         }
+        tasks.push(self.resume_last());
         // keep the sung line in view
         if self.now_playing && self.np_tab == NpTab::Lyrics {
             let line = self
@@ -2065,6 +2102,48 @@ impl App {
             self.update_state = Some(s);
         }
         Task::batch(tasks)
+    }
+
+    /// "Resume where I left off": the last queue, song and spot come back, paused. Saved here, every few seconds
+    /// while something is loaded; put back once, when the library has arrived.
+    fn resume_last(&mut self) -> Task<Message> {
+        if self.screen != Screen::Main {
+            return Task::none();
+        }
+        let file = self.dir.join("resume.json");
+        if self.resumed {
+            if self.status.track.is_some() && self.resume_saved_at.elapsed() >= Duration::from_secs(5) {
+                self.resume_saved_at = Instant::now();
+                let body = json!({ "ids": self.queue.items(), "index": self.queue.position().unwrap_or(0), "pos": self.status.position.as_millis() as u64 });
+                let _ = std::fs::write(&file, body.to_string());
+            }
+            return Task::none();
+        }
+        if self.status.track.is_some() || !self.setting_bool("resumeLast", true) || self.resume_saved_at.elapsed() > Duration::from_secs(40) {
+            self.resumed = true;
+            return Task::none();
+        }
+        let Some(saved) = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else {
+            self.resumed = true;
+            return Task::none();
+        };
+        let ids: Vec<String> = saved["ids"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+        let index = saved["index"].as_u64().unwrap_or(0) as usize;
+        let pos = Duration::from_millis(saved["pos"].as_u64().unwrap_or(0));
+        if ids.is_empty() {
+            self.resumed = true;
+            return Task::none();
+        }
+        // not yet: the library hasn't loaded this song (it keeps trying for a little while)
+        if ids.get(index).map(|id| self.lib.track(id).is_none()).unwrap_or(true) {
+            return Task::none();
+        }
+        self.resumed = true;
+        self.queue.play(ids, index, "resume");
+        let t = self.start_current(false);
+        self.player.seek(pos);
+        self.status.position = pos;
+        t
     }
 
     fn check_update(&self) {

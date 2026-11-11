@@ -219,6 +219,41 @@ pub fn secondary(_: &Theme, s: button::Status) -> button::Style {
         ..Default::default()
     }
 }
+/// The website's segmented control: a few choices in one pill, the chosen one raised.
+pub fn seg<'a>(options: &[(&'a str, &'a str)], selected: &str, f: impl Fn(String) -> crate::Message + 'a) -> Element<'a, crate::Message> {
+    let mut r = iced::widget::Row::new().spacing(2).align_y(iced::Alignment::Center);
+    for (value, label) in options {
+        let on = *value == selected;
+        r = r.push(
+            button(text(*label).size(13).font(FONT_BOLD))
+                .padding([6, 12])
+                .style(move |_: &Theme, s: button::Status| button::Style {
+                    background: if on { Some(SURFACE.into()) } else if matches!(s, button::Status::Hovered) { Some(HOVER.into()) } else { None },
+                    text_color: if on || matches!(s, button::Status::Hovered) { TEXT } else { TEXT_2 },
+                    border: border::rounded(8.0),
+                    shadow: if on { Shadow { color: Color { a: 0.35, ..Color::BLACK }, offset: Vector::new(0.0, 1.0), blur_radius: 2.0 } } else { Shadow::default() },
+                    ..Default::default()
+                })
+                .on_press(f(value.to_string())),
+        );
+    }
+    container(r).padding(3).style(|_: &Theme| container::Style { background: Some(SURFACE_3.into()), border: border::rounded(10.0), ..Default::default() }).into()
+}
+
+/// The website's switch: red when on, a white knob.
+pub fn switch_style(_: &Theme, s: iced::widget::toggler::Status) -> iced::widget::toggler::Style {
+    use iced::widget::toggler::Status;
+    let on = matches!(s, Status::Active { is_toggled: true } | Status::Hovered { is_toggled: true });
+    iced::widget::toggler::Style {
+        background: if on { ACCENT } else { rgb(0x4A, 0x4A, 0x52) },
+        background_border_width: 0.0,
+        background_border_color: Color::TRANSPARENT,
+        foreground: Color::WHITE,
+        foreground_border_width: 0.0,
+        foreground_border_color: Color::TRANSPARENT,
+    }
+}
+
 /// Library tabs ("Albums", "Artists").
 pub fn chip(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, s| button::Style {
