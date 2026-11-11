@@ -543,6 +543,70 @@ async fn get_avatar(State(st): State<Shared>, headers: HeaderMap, Path(id): Path
     }
 }
 
+/* ---------------- playlist pictures: a picture someone chose for their own playlist ---------------- */
+
+fn playlist_cover_path(st: &AppState, owner: &str, playlist: &str) -> PathBuf {
+    st.cfg.data_dir.join("playlist-covers").join(owner).join(playlist)
+}
+
+fn safe_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 80 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// The picture for one of your playlists (the app shrinks it to a square first; over 1 MB is refused). Answers with the
+/// picture's version, which the app saves in the playlist so everyone's copy asks for the new one.
+async fn put_playlist_cover(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    if !safe_id(&id) {
+        return error(StatusCode::BAD_REQUEST, "Bad playlist.");
+    }
+    let b = &body[..];
+    let is_image = b.starts_with(&[0xFF, 0xD8]) || b.starts_with(&[0x89, b'P', b'N', b'G']) || (b.starts_with(b"RIFF") && b.len() > 12 && &b[8..12] == b"WEBP");
+    if !is_image {
+        return error(StatusCode::BAD_REQUEST, "That isn't a picture (use a JPEG, PNG or WebP).");
+    }
+    if b.len() > 1_000_000 {
+        return error(StatusCode::PAYLOAD_TOO_LARGE, "That picture is too big.");
+    }
+    let path = playlist_cover_path(&st, &user.id, &id);
+    if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+    if std::fs::write(&path, b).is_err() {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't save the picture.");
+    }
+    Json(json!({ "cover": auth::now() })).into_response()
+}
+
+async fn delete_playlist_cover(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    if !safe_id(&id) {
+        return error(StatusCode::BAD_REQUEST, "Bad playlist.");
+    }
+    let _ = std::fs::remove_file(playlist_cover_path(&st, &user.id, &id));
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn get_playlist_cover(State(st): State<Shared>, headers: HeaderMap, Path((owner, id)): Path<(String, String)>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) {
+        return r;
+    }
+    if !safe_id(&owner) || !safe_id(&id) {
+        return error(StatusCode::BAD_REQUEST, "Bad id.");
+    }
+    match std::fs::read(playlist_cover_path(&st, &owner, &id)) {
+        Ok(b) => {
+            let kind = if b.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else if b.starts_with(b"RIFF") { "image/webp" } else { "image/jpeg" };
+            ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")], b).into_response()
+        }
+        Err(_) => error(StatusCode::NOT_FOUND, "No picture."),
+    }
+}
+
 /* ---------------- per-user app data (playlists, settings, resume point) ---------------- */
 
 async fn get_data(State(st): State<Shared>, headers: HeaderMap) -> Response {
@@ -2263,6 +2327,8 @@ async fn main() {
         .route("/api/users/{id}/password", post(reset_password))
         .route("/api/me/avatar", axum::routing::put(put_avatar).delete(delete_avatar))
         .route("/api/avatar/{id}", get(get_avatar))
+        .route("/api/playlists/{id}/cover", axum::routing::put(put_playlist_cover).delete(delete_playlist_cover))
+        .route("/api/playlist-cover/{owner}/{id}", get(get_playlist_cover))
         .route("/api/library", get(get_library))
         .route("/api/library/rescan", post(rescan))
         .route("/api/library/folder", get(library_folder).put(set_library_folder))

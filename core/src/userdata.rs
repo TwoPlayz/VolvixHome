@@ -36,6 +36,8 @@ pub enum Edit {
     Setting(String, Value),
     /// the website's theme: "system", "dark" or "light"
     Theme(String),
+    /// the picture chosen for one of your playlists (0 removes it)
+    PlaylistCover { id: String, version: u64 },
 }
 
 /// One of the website's settings, or `default` when unset.
@@ -239,6 +241,15 @@ pub fn apply(d: &mut UserData, e: &Edit) {
         }
         Edit::Theme(t) => {
             d.rest.insert("theme".into(), json!(t));
+        }
+        Edit::PlaylistCover { id, version } => {
+            if let Some(p) = d.playlists.iter_mut().find(|p| p.id == *id) {
+                if *version == 0 {
+                    p.rest.remove("cover");
+                } else {
+                    p.rest.insert("cover".into(), json!(version));
+                }
+            }
         }
     }
 }

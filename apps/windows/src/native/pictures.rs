@@ -1,14 +1,19 @@
-//! Profile pictures: picked from a file, shaped into the 256 px square JPEG the server keeps (the website does the
-//! same), and shown round everywhere.
+//! Pictures: picked from a file, shaped into the square JPEG the server keeps (the website does the same), and shown
+//! round (profile pictures) or square (playlists).
 use std::path::Path;
 
-/// A picture file as the square JPEG to send: the middle of the picture, 256 px.
+/// A picture file as the square JPEG to send for a profile picture: the middle of the picture, 256 px.
 pub fn prepare(path: &Path) -> Result<Vec<u8>, String> {
+    prepare_square(path, 256)
+}
+
+/// The same at any size (a playlist's picture is 512 px).
+pub fn prepare_square(path: &Path, size: u32) -> Result<Vec<u8>, String> {
     let img = ::image::open(path).map_err(|e| format!("Couldn't read that picture ({e})."))?;
-    let square = img.resize_to_fill(256, 256, ::image::imageops::FilterType::Lanczos3).to_rgb8();
+    let square = img.resize_to_fill(size, size, ::image::imageops::FilterType::Lanczos3).to_rgb8();
     let mut out = Vec::new();
     ::image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90)
-        .encode(square.as_raw(), 256, 256, ::image::ColorType::Rgb8)
+        .encode(square.as_raw(), size, size, ::image::ColorType::Rgb8)
         .map_err(|e| format!("Couldn't prepare that picture ({e})."))?;
     if out.len() > 900_000 {
         return Err("That picture is too big.".into());

@@ -80,6 +80,8 @@ pub mod icon {
     pub const PERSON: char = '\u{E77B}';
     pub const HISTORY: char = '\u{E81C}';
     pub const LINK: char = '\u{E71B}';
+    pub const MORE: char = '\u{E712}';
+    pub const PICTURE: char = '\u{E91B}';
     pub const BACK: char = '\u{E72B}';
     pub const SIGN_OUT: char = '\u{E7E8}';
 }
@@ -389,23 +391,45 @@ pub fn scroller(_: &Theme, s: iced::widget::scrollable::Status) -> iced::widget:
 
 /// An album cover at `size` px: the real picture, or a drawn stand-in (no art, or still loading).
 pub fn cover<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, size: f32) -> Element<'a, M> {
-    match handle {
-        Some(h) => image(h.clone()).width(size).height(size).content_fit(iced::ContentFit::Cover).into(),
-        None => {
-            let tint = tint_for(title);
-            let mark = match title.chars().find(|c| c.is_alphanumeric()) {
-                Some(c) => text(c.to_uppercase().collect::<String>()).font(FONT_BOLD),
-                None => text('\u{E8D6}'.to_string()).font(ICONS), // a note, when there's no title
-            };
-            container(mark.size(size * 0.38).color(Color { a: 0.85, ..rgb(0xF5, 0xF5, 0xF7) }))
-                .width(size)
-                .height(size)
-                .center_x(size)
-                .center_y(size)
-                .style(move |_| container::Style { background: Some(tint.into()), border: border::rounded(6.0), ..Default::default() })
+    cover_box(handle, title, size, size, 6.0)
+}
+
+/// Art with no picture is a tinted tile with its name on it (the same colour per name as the website). Big tiles
+/// print the whole name; tiny ones (a list row) just the first letter. `w` × `h`: a collage uses parts of a square.
+pub fn cover_box<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, w: f32, h: f32, radius: f32) -> Element<'a, M> {
+    if let Some(handle) = handle {
+        return image(handle.clone()).width(w).height(h).content_fit(iced::ContentFit::Cover).into();
+    }
+    let tint = tint_for(title);
+    let ink = Color { a: 0.92, ..rgb(0xF5, 0xF5, 0xF7) };
+    let name = title.trim();
+    let letter = name.chars().find(|c| c.is_alphanumeric());
+    let side = w.min(h);
+    let body: Element<'a, M> = match letter {
+        None => text('\u{E8D6}'.to_string()).font(ICONS).size(side * 0.38).color(ink).into(), // a note, when there's no title
+        Some(c) if side <= 76.0 => text(c.to_uppercase().collect::<String>()).font(FONT_BOLD).size(side * 0.4).color(ink).into(),
+        Some(_) => {
+            // the website's sizes: shorter names are set bigger
+            let n = name.chars().count();
+            let pct = if n <= 10 { 0.17 } else if n <= 22 { 0.13 } else if n <= 40 { 0.105 } else { 0.085 };
+            text(name.to_string())
+                .font(FONT_BOLD)
+                .size(side * pct)
+                .color(ink)
+                .align_x(iced::alignment::Horizontal::Center)
+                .width(Length::Fixed(w * 0.82))
+                .wrapping(text::Wrapping::WordOrGlyph)
                 .into()
         }
-    }
+    };
+    container(body)
+        .width(w)
+        .height(h)
+        .center_x(w)
+        .center_y(h)
+        .clip(true)
+        .style(move |_| container::Style { background: Some(tint.into()), border: border::rounded(radius), ..Default::default() })
+        .into()
 }
 
 /// A steady colour per album, so drawn covers are told apart.

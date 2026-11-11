@@ -75,8 +75,40 @@ window.Spin = window.Spin || {};
     try { fetch('/api/me/data', { method: 'PUT', keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) }); } catch (e) { /* ignore */ }
   });
 
+  /* ---------- sync: pick up what another device (the Windows app, another browser) changed ---------- */
+  // Your playlists, recently played, settings and theme are one copy on the server. Every few seconds, and when you come
+  // back to the page, ask for it; if it changed somewhere else and nothing here is waiting to be saved, show it.
+  const syncSig = function (s) { return JSON.stringify([s.playlists, s.recent, s.followed, s.followedArtists, s.settings, s.theme]); };
+  function pull() {
+    if (pushTimer || pushing || document.hidden) return;
+    fetch('/api/me/data', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (remote) {
+        if (!remote || typeof remote !== 'object' || pushTimer || pushing) return;
+        if ((remote.savedAt || 0) <= (state.savedAt || 0)) return;
+        const next = merge(remote);
+        const changed = syncSig(next) !== syncSig(state);
+        state = next;
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+        if (!changed) return; // only play counts moved: nothing to redraw
+        S.applyTheme();
+        subscribers.forEach(function (sub) { sub(state); });
+        try {
+          if (S.app && S.app.refreshSidebar) S.app.refreshSidebar();
+          if (S.app && S.app.refresh) S.app.refresh();
+          if (S.app && S.app.refreshChrome) S.app.refreshChrome();
+        } catch (e) { /* app not up yet */ }
+      })
+      .catch(function () { /* offline: try again later */ });
+  }
+  setInterval(pull, 6000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) pull(); });
+  window.addEventListener('focus', pull);
+
   S.store = {
     get state() { return state; },
+    /** Ask the server for changes made elsewhere right now (it also runs by itself every few seconds). */
+    pull: pull,
     isPreview: false,
     update: function (fn) {
       fn(state);

@@ -245,18 +245,26 @@ window.Spin = window.Spin || {};
       try { localStorage.setItem('vh_covers_seen', JSON.stringify(Object.keys(coverSeen).filter(function (k) { return k.indexOf('v=') !== -1; }).slice(-3000))); } catch (e) { /* full or private */ }
     }, 1000);
   };
+  /** Art for something with no picture: a tinted tile with its name on it (the same colour for the same name in the
+   *  Windows app). Big tiles show the whole name, tiny ones (a list row) just the first letter. */
+  S.nameTile = function (name, extraClass) {
+    name = String(name || '').trim();
+    const ch = Array.from(name).find(function (c) { return /[\p{L}\p{N}]/u.test(c); });
+    if (!name || !ch) return '<div class="cover cover--tile ' + (extraClass || '') + '" style="--tint:' + S.tintFor(name) + '">' + S.icon('music', 22) + '</div>';
+    const n = Array.from(name).length;
+    const size = n <= 10 ? 's' : n <= 22 ? 'm' : n <= 40 ? 'l' : 'xl';
+    return '<div class="cover cover--tile ' + (extraClass || '') + '" style="--tint:' + S.tintFor(name) + '">' +
+      '<span class="cover-name cn-' + size + '">' + S.esc(name) + '</span><span class="cover-letter">' + S.esc(ch.toUpperCase()) + '</span></div>';
+  };
+
   /** big = for large art (album page, Now Playing): a 1200 px copy instead of 640 px. */
   S.cover = function (album, extraClass, big) {
     if (!album) return '<div class="cover cover--empty ' + (extraClass || '') + '">' + S.icon('music', 22) + '</div>';
     const a = album.art || {};
     // no cover file: the album's name is printed on generated art (in the background and font someone chose, if they did)
     const look = !album.cover && album.look ? album.look : null;
-    // no cover and no chosen look: a tinted tile with the first letter, exactly like the Windows app
-    if (!album.cover && !look) {
-      const ch = Array.from(album.title || '').find(function (c) { return /[\p{L}\p{N}]/u.test(c); });
-      return '<div class="cover cover--tile ' + (extraClass || '') + '" style="--tint:' + S.tintFor(album.title || '') + '">' +
-        (ch ? '<span class="cover-letter">' + S.esc(ch.toUpperCase()) + '</span>' : S.icon('music', 22)) + '</div>';
-    }
+    // no cover and no chosen look: a tinted tile with the album's name (just its first letter when the tile is tiny)
+    if (!album.cover && !look) return S.nameTile(album.title || '', extraClass);
     const text = !album.cover ? '<span class="cover-title">' + S.esc(album.title) + '</span><span class="cover-artist">' + S.esc(album.artist) + '</span>' : '';
     // has a cover file: a plain tile while it loads, so the generated art doesn't flash first; it fades in once decoded.
     // Only if the picture fails does the generated art show.
@@ -297,12 +305,19 @@ window.Spin = window.Spin || {};
     if (playlist && playlist.liked) {
       return '<div class="cover cover--liked ' + (extraClass || '') + '" style="--tint:' + S.tintFor('liked') + '" aria-hidden="true">' + S.icon('heartFill', 40) + '</div>';
     }
+    // a picture chosen for it (kept on the server)
+    if (playlist && playlist.cover && !playlist.shared) {
+      const owner = playlist.owner === 'u_me' ? (S.data.me && S.data.me.serverId) : playlist.owner;
+      return '<div class="cover cover--pic ' + (extraClass || '') + '"><img class="cover-img" src="/api/playlist-cover/' + encodeURIComponent(owner) + '/' + encodeURIComponent(playlist.id) + '?v=' + playlist.cover + '" alt=""></div>';
+    }
     const albums = [];
     (playlist.tracks || []).forEach(function (entry) {
       const t = S.data.track(entry.id || entry);
       if (t && albums.indexOf(t.albumId) === -1) albums.push(t.albumId);
     });
-    return S.collage(wideScreen.matches ? albums.slice(0, 1) : albums, extraClass);
+    // nothing in it yet: a tile with the playlist's name; otherwise a collage of the albums its songs come from
+    if (!albums.length) return S.nameTile(playlist.name || '', extraClass);
+    return S.collage(albums.slice(0, 4), extraClass);
   };
   // crossing the phone width: redraw the page so playlist covers switch between the two looks
   if (wideScreen.addEventListener) wideScreen.addEventListener('change', function () { if (S.app && S.app.refresh) S.app.refresh(); });

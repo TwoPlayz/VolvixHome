@@ -63,6 +63,23 @@ impl Client {
         Ok(())
     }
 
+    /// The picture for one of your playlists (a JPEG, a 512 px square). Answers with its new version.
+    pub fn set_playlist_cover(&self, playlist: &str, jpeg: &[u8]) -> Result<u64> {
+        let res = self.request("PUT", &format!("/api/playlists/{}/cover", enc(playlist))).set("Content-Type", "image/jpeg").send_bytes(jpeg)?;
+        let v: Value = res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))?;
+        Ok(v["cover"].as_u64().unwrap_or(1))
+    }
+
+    pub fn remove_playlist_cover(&self, playlist: &str) -> Result<()> {
+        self.request("DELETE", &format!("/api/playlists/{}/cover", enc(playlist))).call()?;
+        Ok(())
+    }
+
+    /// A playlist's chosen picture (`owner` is the server id of whoever made the playlist).
+    pub fn playlist_cover_bytes(&self, owner: &str, playlist: &str, version: u64) -> Result<Vec<u8>> {
+        self.image_bytes(&format!("/api/playlist-cover/{}/{}?v={version}", enc(owner), enc(playlist)))
+    }
+
     /// Someone's picture as the server has it (`version` keeps a changed picture from coming from a cache).
     pub fn avatar_bytes(&self, id: &str, version: u64) -> Result<Vec<u8>> {
         self.image_bytes(&format!("/api/avatar/{}?v={version}", enc(id)))

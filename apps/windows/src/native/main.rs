@@ -117,12 +117,33 @@ pub enum DragList {
     Playlist(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Drag {
     pub list: DragList,
     pub from: usize,
     pub over: usize,
+    /// what letting go on the same row means (a click: play it)
+    pub click: Option<Box<Message>>,
 }
+
+/// What a pop-up menu (the more button) is for.
+#[derive(Debug, Clone)]
+pub enum MenuKind {
+    /// a song: `in_playlist` = (the playlist, its place in it) when it can be taken out
+    Track { id: String, in_playlist: Option<(String, usize)> },
+    Playlist(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct PopMenu {
+    pub kind: MenuKind,
+    /// where the pointer was when it opened (window pixels)
+    pub at: (f32, f32),
+}
+
+/// The pointer and the window size, kept by a listener that costs nothing per move (it never sends a message).
+static POINTER: std::sync::Mutex<(f32, f32)> = std::sync::Mutex::new((0.0, 0.0));
+static WINDOW_SIZE: std::sync::Mutex<(f32, f32)> = std::sync::Mutex::new((1200.0, 800.0));
 
 /// Things the screens show that are worth working out once per change, not on every redraw
 /// (a redraw happens for every tick of the clock and every mouse move).
@@ -248,7 +269,27 @@ pub enum Message {
     AddToQueue(String),
     Forward,
     /// drag to reorder: picked up a row, moved over another, let go anywhere
-    DragStart(DragList, usize),
+    DragStart(DragList, usize, Option<Box<Message>>),
+    /// the pop-up menu: open for a song or playlist, pick something from it (closes it), close it
+    PopMenuOpen(MenuKind),
+    PopMenuDo(Box<Message>),
+    PopMenuClose,
+    /// the row under the pointer (lit up, and shows its grip)
+    RowHover(Option<usize>),
+    PlayNext(String),
+    RowLeave(usize),
+    /// add every song of a playlist to the queue
+    QueueMany(Vec<String>),
+    /// a playlist's own picture: pick a file, it was saved on the server, remove it; and one arriving from the server
+    PickPlaylistPicture(String),
+    PlaylistPictureChosen(String, Option<std::path::PathBuf>),
+    PlaylistPictureSaved(String, Result<u64, String>),
+    RemovePlaylistPicture(String),
+    PlaylistPictureRemoved(String, Result<(), Error>),
+    PlaylistCoverLoaded(String, u64, Option<Vec<u8>>),
+    /// the playlist page's Add songs box
+    AddSongQuery(String),
+    AddSongTo(String, String),
     DragOver(usize),
     DragEnd,
     TogglePlay,
@@ -293,6 +334,8 @@ pub enum Message {
     RemoveFromPlaylist(String, usize, String),
     MoveInPlaylist(String, usize, usize),
     Saved(Result<UserData, Error>),
+    /// your data as the server has it now (asked for every few seconds, to pick up changes made on the website or another device)
+    DataPulled(Result<Option<UserData>, Error>),
     SharedLoaded(Result<SharedList, Error>),
     SharedOp(String, Value),
     SharedDone(Result<SharedOpResult, Error>),
@@ -484,6 +527,12 @@ pub struct App {
     pub history: Vec<Page>,
     pub forward: Vec<Page>,
     pub drag: Option<Drag>,
+    /// pictures chosen for playlists, by (playlist, version); and the ones being fetched
+    pl_covers: HashMap<(String, u64), image::Handle>,
+    pl_cover_pending: HashSet<(String, u64)>,
+    pub pop_menu: Option<PopMenu>,
+    pub hover_row: Option<usize>,
+    pub add_q: String,
     pub cache: Cache,
     start_hidden: bool,
     pub search: String,
@@ -525,6 +574,7 @@ pub struct App {
     resumed: bool,
     resume_saved_at: Instant,
     last_advanced: u64,
+    next_pull: Instant,
     /// the song whose successor has been opened ahead of time (crossfade)
     preload_for: Option<String>,
     pub account_menu: bool,
@@ -615,6 +665,11 @@ impl App {
             history: vec![],
             forward: vec![],
             drag: None,
+            pl_covers: HashMap::new(),
+            pl_cover_pending: HashSet::new(),
+            pop_menu: None,
+            hover_row: None,
+            add_q: String::new(),
             cache: Cache::default(),
             start_hidden,
             search: String::new(),
@@ -652,6 +707,7 @@ impl App {
             resumed: false,
             resume_saved_at: Instant::now(),
             last_advanced: 0,
+            next_pull: Instant::now() + Duration::from_secs(6),
             preload_for: None,
             account_menu: false,
             profile_name: None,
@@ -750,7 +806,7 @@ impl App {
         if self.account_menu && matches!(msg, Message::Go(_) | Message::SignOut) {
             self.account_menu = false; // a choice in the account menu closes it
         }
-        let hot = matches!(msg, Message::Tick | Message::Volume(_) | Message::DragOver(_) | Message::CoverLoaded(..) | Message::ImageLoaded(..));
+        let hot = matches!(msg, Message::Tick | Message::Volume(_) | Message::DragOver(_) | Message::RowHover(_) | Message::CoverLoaded(..) | Message::ImageLoaded(..));
         let track_before = self.status.track.clone();
         let t = self.handle(msg);
         if !hot || self.status.track != track_before {
@@ -1093,6 +1149,30 @@ impl App {
         self.avatars.get(&(id.to_string(), version))
     }
 
+    /// The picture someone chose for a playlist, once it has been fetched.
+    pub fn playlist_picture(&self, id: &str, version: u64) -> Option<&image::Handle> {
+        if version == 0 {
+            return None;
+        }
+        self.pl_covers.get(&(id.to_string(), version))
+    }
+
+    /// Fetch the chosen pictures of your playlists that aren't here yet.
+    fn fetch_playlist_covers(&mut self) -> Vec<Task<Message>> {
+        let Some(c) = self.client.clone().filter(|_| !self.offline) else { return vec![] };
+        let owner = self.me.as_ref().map(|m| m.user.id.clone()).unwrap_or_default();
+        let mut tasks = vec![];
+        let list: Vec<(String, u64)> = self.playlists().iter().map(|p| (p.id.clone(), p.cover)).collect();
+        for key in list {
+            if key.1 == 0 || self.pl_covers.contains_key(&key) || !self.pl_cover_pending.insert(key.clone()) {
+                continue;
+            }
+            let (c, owner) = (c.clone(), owner.clone());
+            tasks.push(Task::perform(blocking(move || c.playlist_cover_bytes(&owner, &key.0, key.1).ok().map(|b| (key, b))), |r| match r { Some(((id, v), b)) => Message::PlaylistCoverLoaded(id, v, Some(b)), None => Message::PlaylistCoverLoaded(String::new(), 0, None) }));
+        }
+        tasks
+    }
+
     /// Fetch the pictures of you and the household members that aren't here yet.
     fn fetch_avatars(&mut self) -> Vec<Task<Message>> {
         let Some(c) = self.client.clone().filter(|_| !self.offline) else { return vec![] };
@@ -1379,7 +1459,83 @@ impl App {
                 }
                 return self.fetch_covers();
             }
-            Message::DragStart(list, from) => self.drag = Some(Drag { list, from, over: from }),
+            Message::DragStart(list, from, click) => self.drag = Some(Drag { list, from, over: from, click }),
+            Message::PopMenuOpen(kind) => {
+                let at = POINTER.lock().map(|p| *p).unwrap_or((0.0, 0.0));
+                self.pop_menu = Some(PopMenu { kind, at });
+            }
+            Message::PopMenuClose => self.pop_menu = None,
+            Message::PopMenuDo(m) => {
+                self.pop_menu = None;
+                return self.update(*m);
+            }
+            Message::RowHover(h) => self.hover_row = h,
+            Message::RowLeave(i) => {
+                if self.hover_row == Some(i) {
+                    self.hover_row = None;
+                }
+            }
+            Message::QueueMany(ids) => {
+                let n = ids.len();
+                for id in ids {
+                    self.queue.add(&id);
+                }
+                self.say(format!("Added {n} song{} to the queue", if n == 1 { "" } else { "s" }));
+            }
+            Message::PickPlaylistPicture(id) => {
+                return Task::perform(
+                    blocking(|| rfd::FileDialog::new().set_title("Choose a picture").add_filter("Pictures", &["jpg", "jpeg", "png", "webp"]).pick_file()),
+                    move |p| Message::PlaylistPictureChosen(id.clone(), p),
+                );
+            }
+            Message::PlaylistPictureChosen(id, Some(path)) => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                self.say("Saving the picture…");
+                return Task::perform(
+                    blocking(move || {
+                        let r = pictures::prepare_square(&path, 512).and_then(|jpeg| c.set_playlist_cover(&id, &jpeg).map_err(|e| e.to_string()));
+                        (id, r)
+                    }),
+                    |(id, r)| Message::PlaylistPictureSaved(id, r),
+                );
+            }
+            Message::PlaylistPictureChosen(_, None) => {}
+            Message::PlaylistPictureSaved(id, r) => match r {
+                Ok(v) => {
+                    self.say("Picture updated");
+                    return self.edit(vec![Edit::PlaylistCover { id, version: v }]);
+                }
+                Err(e) => self.say(e),
+            },
+            Message::RemovePlaylistPicture(id) => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(
+                    blocking(move || {
+                        let r = c.remove_playlist_cover(&id);
+                        (id, r)
+                    }),
+                    |(id, r)| Message::PlaylistPictureRemoved(id, r),
+                );
+            }
+            Message::PlaylistPictureRemoved(id, r) => match r {
+                Ok(()) => {
+                    self.say("Picture removed");
+                    return self.edit(vec![Edit::PlaylistCover { id, version: 0 }]);
+                }
+                Err(e) => self.say(e.to_string()),
+            },
+            Message::PlaylistCoverLoaded(id, v, bytes) => {
+                self.pl_cover_pending.remove(&(id.clone(), v));
+                if let Some(b) = bytes {
+                    self.pl_covers.insert((id, v), image::Handle::from_bytes(b));
+                }
+            }
+            Message::PlayNext(id) => {
+                self.queue.play_next(&id);
+                self.say("Playing next");
+            }
+            Message::AddSongQuery(s) => self.add_q = s,
+            Message::AddSongTo(pl, id) => return self.add_to_playlist(&pl, vec![id]),
             Message::DragOver(i) => {
                 if let Some(d) = &mut self.drag {
                     d.over = i;
@@ -1387,7 +1543,12 @@ impl App {
             }
             Message::DragEnd => {
                 if let Some(d) = self.drag.take() {
-                    if d.over != d.from {
+                    if d.over == d.from {
+                        // let go on the row it was picked up on: that was a click
+                        if let Some(m) = d.click {
+                            return self.update(*m);
+                        }
+                    } else {
                         return match d.list {
                             DragList::Queue => {
                                 self.queue.move_item(d.from, d.over);
@@ -1702,6 +1863,19 @@ impl App {
                 }
                 return self.edit(vec![Edit::Move { id: pl, from, to }]);
             }
+            Message::DataPulled(r) => {
+                if let Ok(Some(remote)) = r {
+                    // not while something of ours is waiting to be saved: ours goes first, then this comes back around
+                    if self.pending.is_empty() && self.in_flight.is_empty() {
+                        let sig = |d: &UserData| serde_json::to_string(&(&d.playlists, &d.recent, d.rest.get("settings"), d.rest.get("theme"), d.rest.get("followed"))).unwrap_or_default();
+                        if sig(&remote) != sig(&self.data) {
+                            self.data = remote;
+                            self.refresh_mixes();
+                            return self.fetch_covers();
+                        }
+                    }
+                }
+            }
             Message::Saved(r) => {
                 let done = std::mem::take(&mut self.in_flight);
                 match r {
@@ -1781,6 +1955,7 @@ impl App {
                 _ => {}
             },
             Message::DialogCancel => {
+                self.pop_menu = None;
                 self.dialog = None;
                 self.account_menu = false;
             }
@@ -2586,6 +2761,7 @@ impl App {
         }
         self.crossfade_prepare();
         tasks.extend(self.fetch_avatars());
+        tasks.extend(self.fetch_playlist_covers());
         self.player.set_eq(self.eq_now()); // follows a change made on the website too
         let dt = self.last_tick.elapsed().as_secs_f64().min(2.0);
         self.last_tick = Instant::now();
@@ -2642,6 +2818,13 @@ impl App {
                     let y = (i as f32 * LYRIC_LINE - 160.0).max(0.0);
                     tasks.push(scrollable::scroll_to(lyrics_scroller(), scrollable::AbsoluteOffset { x: 0.0, y }));
                 }
+            }
+        }
+        // pick up what was changed elsewhere (the website, another computer): playlists, likes, recently played, settings
+        if Instant::now() >= self.next_pull && self.screen == Screen::Main && !self.offline && self.pending.is_empty() && self.in_flight.is_empty() {
+            self.next_pull = Instant::now() + Duration::from_secs(6);
+            if let Some(c) = self.client.clone() {
+                tasks.push(Task::perform(blocking(move || c.user_data()), Message::DataPulled));
             }
         }
         // a failed save: try again
@@ -2824,6 +3007,23 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick), window::close_requests().map(Message::CloseRequested)];
+        // where the pointer is and how big the window is, for pop-up menus (never sends a message)
+        subs.push(iced::event::listen_with(|e, _, _| {
+            match e {
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    if let Ok(mut p) = POINTER.lock() {
+                        *p = (position.x, position.y);
+                    }
+                }
+                iced::Event::Window(window::Event::Resized(size)) => {
+                    if let Ok(mut w) = WINDOW_SIZE.lock() {
+                        *w = (size.width, size.height);
+                    }
+                }
+                _ => {}
+            }
+            None
+        }));
         // dragging a row: letting go anywhere drops it
         if self.drag.is_some() {
             subs.push(iced::event::listen_with(|e, _, _| match e {

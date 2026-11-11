@@ -26,6 +26,8 @@ pub struct PlaylistView {
     /// server ids of the people who can edit (collaborative only)
     pub collaborators: Vec<String>,
     pub invited: Vec<String>,
+    /// version of the picture someone chose for it (0 = none: it shows its songs' albums)
+    pub cover: u64,
 }
 
 impl PlaylistView {
@@ -52,6 +54,7 @@ fn own(p: &Playlist) -> PlaylistView {
         tracks: p.track_ids(),
         collaborators: vec![],
         invited: vec![],
+        cover: p.rest.get("cover").and_then(|v| v.as_u64()).unwrap_or(0),
     }
 }
 
@@ -65,6 +68,7 @@ fn shared(p: &SharedPlaylist, me: &str, kind: Option<Kind>) -> PlaylistView {
         tracks: p.tracks.iter().map(|t| t.id.clone()).collect(),
         collaborators: p.collaborators.clone(),
         invited: p.invited.clone(),
+        cover: 0,
     }
 }
 

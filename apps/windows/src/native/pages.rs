@@ -7,7 +7,7 @@ use volvix_core::playlists::Kind;
 use volvix_core::{FoundItem, Track};
 
 use crate::ui::{self, icon, icon as ic};
-use crate::views::{card, clip, cover_of, download_button, header_buttons, playlist_card, playlist_cover, round_icon, section, track_list, El, Rows};
+use crate::views::{card, clip, cover_of, download_button, header_buttons, playlist_art, playlist_card, playlist_cover, round_icon, section, track_list, El, Rows};
 use crate::{lyrics_scroller, App, Dialog, Message, Page};
 
 /* ---------- playlists and mixes ---------- */
@@ -30,21 +30,65 @@ pub fn playlist_page<'a>(app: &'a App, id: &str) -> El<'a> {
     info = info.push(ui::dim(format!("{} song{} · {} min", tracks.len(), if tracks.len() == 1 { "" } else { "s" }, mins), 14));
     let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
     let mut extra = vec![download_button(app, "playlist", id, &ids)];
+    // like the website: download and one ⋯ button that has the rest (edit, picture, queue, delete)
     if p.can_manage() {
-        extra.push(round_icon(icon::EDIT, false, "Edit details", Some(Message::EditPlaylist(p.id.clone()))));
-        extra.push(round_icon(icon::DELETE, false, "Delete playlist", Some(Message::DeletePlaylist(p.id.clone()))));
+        extra.push(round_icon(icon::MORE, false, "More", Some(Message::PopMenuOpen(crate::MenuKind::Playlist(p.id.clone())))));
     }
     if let Kind::Shared { mine: false } = p.kind {
         extra.push(round_icon(icon::CLOSE, false, "Leave this playlist", Some(Message::SharedOp(p.id.clone(), serde_json::json!({ "op": "leave" })))));
     }
     info = info.push(ui::gap(10)).push(header_buttons(Message::PlayTracks(ids.clone(), 0, p.name.clone()), Message::ShuffleTracks(ids, p.name.clone()), extra));
-    let head = row![playlist_cover(app, &p.tracks, p.kind == Kind::Liked, &p.name, 220.0), info].spacing(28).align_y(Alignment::End);
+    let head = row![playlist_art(app, &p, 220.0), info].spacing(28).align_y(Alignment::End);
     let body: El = if tracks.is_empty() {
         ui::dim(if p.kind == Kind::Liked { "Songs you like (the heart) show up here." } else { "No songs yet. Use the playlist button on any song to add it here." }, 15).into()
     } else {
         track_list(app, &tracks, &p.name, false, true, if p.can_edit() { Rows::Playlist { id, liked: p.kind == Kind::Liked } } else { Rows::Plain })
     };
-    column![head, body].spacing(28).into()
+    let mut page = column![head, body].spacing(28);
+    if p.can_edit() {
+        page = page.push(add_songs(app, &p));
+    }
+    page.into()
+}
+
+/// The playlist page's "Add songs": a search box, and songs to add with one click (suggestions while the box is empty).
+fn add_songs<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView) -> El<'a> {
+    let q = app.add_q.trim().to_string();
+    let found: Vec<&Track> = if q.is_empty() {
+        app.lib.tracks().iter().filter(|t| !p.tracks.contains(&t.id)).take(6).collect()
+    } else {
+        volvix_core::search::search(&app.lib, &app.data.playlists, &q).songs.into_iter().filter(|t| !p.tracks.contains(&t.id)).take(8).collect()
+    };
+    let mut list = Column::new().spacing(2);
+    if q.is_empty() {
+        list = list.push(ui::dim("Recommended from your library", 13));
+    } else if found.is_empty() {
+        list = list.push(ui::dim(format!("Nothing found for {q}"), 13));
+    }
+    for t in found {
+        let album = app.lib.album_of(t);
+        list = list.push(
+            container(
+                row![
+                    cover_of(app, album, 40.0),
+                    column![text(clip(&t.title, 50)).size(15), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
+                    ui::dim(clip(album.map(|a| a.title.as_str()).unwrap_or(""), 30), 13),
+                    button(text("Add").size(13)).padding([6, 16]).style(ui::secondary).on_press(Message::AddSongTo(p.id.clone(), t.id.clone())),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            )
+            .padding([4, 8]),
+        );
+    }
+    column![
+        ui::gap(8),
+        ui::title(if p.tracks.is_empty() { "Let's find something for your playlist" } else { "Add songs" }, 22),
+        text_input("Search for songs to add", &app.add_q).on_input(Message::AddSongQuery).padding(12).size(15).style(ui::input).width(Length::Fill),
+        list,
+    ]
+    .spacing(12)
+    .into()
 }
 
 pub fn mix_card(m: &Mix) -> El<'_> {
@@ -1220,7 +1264,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             for p in app.playlists().into_iter().filter(|p| p.can_edit()) {
                 let all_in = tracks.iter().all(|t| p.tracks.contains(t));
                 let sub = format!("{}{} songs", if p.is_shared() { "Collaborative · " } else { "" }, p.tracks.len());
-                let mut r = row![playlist_cover(app, &p.tracks, p.kind == Kind::Liked, &p.name, 44.0), column![text(clip(&p.name, 40)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
+                let mut r = row![playlist_art(app, &p, 44.0), column![text(clip(&p.name, 40)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
                 if all_in {
                     r = r.push(ui::dim("Added", 12));
                 }

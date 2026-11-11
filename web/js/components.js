@@ -445,10 +445,6 @@ window.Spin = window.Spin || {};
     items.push({ label: 'Add to playlist', icon: 'music', onClick: function () { S.pl.addToDialog([trackId]); } });
     if (plId) {
       const index = parseInt(row.dataset.plIndex, 10);
-      const count = S.pl.get(plId).tracks.length;
-      // keyboard / screen reader friendly alternative to dragging
-      if (index > 0) items.push({ label: 'Move up', icon: 'arrowUp', onClick: function () { S.pl.move(plId, index, index - 1); refocusMenu(index - 1); } });
-      if (index < count - 1) items.push({ label: 'Move down', icon: 'arrowDown', onClick: function () { S.pl.move(plId, index, index + 1); refocusMenu(index + 1); } });
       items.push({ label: 'Remove from this playlist', icon: 'x', onClick: function () {
         const entry = S.pl.removeAt(plId, index);
         undoToast('Removed "' + t.title + '"', function () { S.pl.insertAt(plId, index, entry); });

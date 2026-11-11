@@ -3196,3 +3196,21 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 /* the Profile / Members / Settings tabs stay on screen while the page scrolls */
 .acct-nav { position: sticky; top: 16px; }
 @media (max-width: 760px) { .acct-nav { position: static; } }
+/* ---- round 8: art without a picture shows its name; Liked heart stays centred at any size ---- */
+.cover--tile { container-type: inline-size; }
+.cover--tile .cover-letter { display: none; }
+.cover--tile .cover-name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; overflow-wrap: anywhere;
+  text-align: center; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; padding: 0 9cqw; color: var(--tile-ink, #F5F5F7); opacity: .92;
+}
+.cover--tile .cn-s { font-size: 17cqw; }
+.cover--tile .cn-m { font-size: 13cqw; }
+.cover--tile .cn-l { font-size: 10.5cqw; }
+.cover--tile .cn-xl { font-size: 8.5cqw; }
+@container (max-width: 76px) {
+  .cover--tile .cover-name { display: none; }
+  .cover--tile .cover-letter { display: block; font-size: 40cqw; }
+}
+.cover.cover--liked .icon { width: 40cqw !important; height: 40cqw !important; }
+.cover.cover--liked .icon.glyph { font-size: 36cqw !important; }/* the base .cover pushes its content to the bottom-right (for generated art): centred art must not */
+.cover.cover--liked, .cover.cover--tile { justify-content: center; align-content: center; padding: 0; }

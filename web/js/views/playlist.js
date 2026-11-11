@@ -146,6 +146,10 @@ Spin.views = Spin.views || {};
           const items = [];
           if (isOwner && !pl.liked) {
             items.push({ label: 'Edit details', icon: 'settings', onClick: function () { S.pl.editDialog(pl.id); } });
+            if (!pl.shared) {
+              items.push({ label: 'Change picture', icon: 'disc', onClick: function () { S.pl.chooseCover(pl.id); } });
+              if (pl.cover) items.push({ label: 'Remove picture', icon: 'x', onClick: function () { S.pl.clearCover(pl.id); } });
+            }
             items.push({ label: pl.shared ? 'Who can edit' : 'Make collaborative', icon: 'users', onClick: function () { S.pl.inviteDialog(pl.id); } });
             if (pl.shared) items.push({ label: 'Stop sharing', icon: 'x', onClick: function () { S.pl.toggleCollaborative(pl.id); } });
           }
