@@ -2494,7 +2494,7 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .list-row .gm-art { width: 44px; height: 44px; }
 .set-actions { display: flex; gap: 8px; }
 .hook-url { margin: 0 16px 14px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 12px; overflow-x: auto; white-space: nowrap; }
-.set-form select.input { appearance: auto; }
+.set-form select.input { appearance: none; -webkit-appearance: none; } /* one arrow only: the drawn one */
 @media (max-width: 760px) { .gm-grid { grid-template-columns: minmax(0, 1fr); } }
 .search-none { margin: 20px 0 4px; color: var(--text-2); }
 

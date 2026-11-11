@@ -332,6 +332,7 @@ pub enum Message {
     SetStartWithWindows(bool),
     SetCloseToTray(bool),
     SetAutoUpdate(bool),
+    SetDownloadMetered(bool),
     CheckUpdate,
     ChangePassword,
     RenameMe,
@@ -889,6 +890,10 @@ impl App {
 
     fn pump_downloads(&mut self) -> Task<Message> {
         if self.dl_active.is_some() || self.offline {
+            return Task::none();
+        }
+        // on a metered connection the queue waits (Settings → Downloads); it carries on by itself afterwards
+        if !self.settings.download_metered && !self.dl_queue.is_empty() && system::on_metered_connection() {
             return Task::none();
         }
         let Some(c) = self.client.clone() else { return Task::none() };
@@ -1659,6 +1664,10 @@ impl App {
                     t.set_checks(None, None, Some(v));
                 }
             }
+            Message::SetDownloadMetered(v) => {
+                self.settings.set("downloadMetered", v);
+                return self.pump_downloads(); // allowing it starts anything that was waiting
+            }
             Message::CheckUpdate => self.check_update(),
             Message::ChangePassword => self.dialog = Some(Dialog::Password { current: String::new(), new: String::new(), error: None, busy: false }),
             Message::RenameMe => self.dialog = Some(Dialog::Rename { name: self.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default(), error: None }),
@@ -2033,6 +2042,10 @@ impl App {
             }
         }
         self.show_in_windows();
+        // downloads that were waiting for an unmetered connection
+        if self.dl_active.is_none() && !self.dl_queue.is_empty() {
+            tasks.push(self.pump_downloads());
+        }
         // updates
         if self.settings.auto_update && Instant::now() >= self.next_update_check {
             self.next_update_check = Instant::now() + Duration::from_secs(6 * 3600);

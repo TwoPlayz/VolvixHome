@@ -5841,6 +5841,7 @@ dependencies = [
  "tray-icon",
  "ureq",
  "volvix-core",
+ "windows 0.62.2",
  "winreg 0.52.0",
  "winres",
  "wry",

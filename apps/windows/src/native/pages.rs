@@ -605,11 +605,18 @@ pub fn settings(app: &App) -> El<'_> {
         ),
         section(
             "Downloads",
-            column![setting_row(
-                Box::leak(format!("{} songs on this computer", app.downloaded.len()).into_boxed_str()),
-                Box::leak(format!("{} used. Albums and playlists you download play without the server.", human_size(app.downloads.size())).into_boxed_str()),
-                button(text("Remove all").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe((!app.saved.is_empty() || !app.downloaded.is_empty()).then_some(Message::RemoveAllDownloads)).into()
-            )]
+            column![
+                setting_row(
+                    "Download on a metered connection",
+                    "Off: downloads wait while Windows says this connection is metered (a mobile hotspot, or one you marked as metered), so a big album can't use up a data plan.",
+                    switch(app.settings.download_metered, Message::SetDownloadMetered)
+                ),
+                setting_row(
+                    Box::leak(format!("{} songs on this computer", app.downloaded.len()).into_boxed_str()),
+                    Box::leak(format!("{} used. Albums and playlists you download play without the server.", human_size(app.downloads.size())).into_boxed_str()),
+                    button(text("Remove all").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe((!app.saved.is_empty() || !app.downloaded.is_empty()).then_some(Message::RemoveAllDownloads)).into()
+                ),
+            ]
             .into()
         ),
         section(
@@ -626,7 +633,6 @@ pub fn settings(app: &App) -> El<'_> {
             "Server",
             column![setting_row("Connected to", Box::leak(server_line.into_boxed_str()), button(text("Switch server").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::SwitchServer).into())].into()
         ),
-        ui::dim("Volvix Home for Windows, native preview. Built with iced.", 12),
     ]
     .spacing(24)
     .max_width(820);

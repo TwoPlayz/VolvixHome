@@ -200,6 +200,27 @@ pub struct Tray {
     quit: MenuItem,
 }
 
+/// Is the connection in use one Windows calls metered (a mobile hotspot, or one set as "metered connection")?
+/// Asked at most every 30 seconds; if Windows can't say, it counts as not metered.
+pub fn on_metered_connection() -> bool {
+    static LAST: std::sync::Mutex<Option<(Instant, bool)>> = std::sync::Mutex::new(None);
+    fn ask() -> Option<bool> {
+        use windows::Networking::Connectivity::{NetworkCostType, NetworkInformation};
+        let cost = NetworkInformation::GetInternetConnectionProfile().ok()?.GetConnectionCost().ok()?;
+        let kind = cost.NetworkCostType().ok()?;
+        Some(kind == NetworkCostType::Fixed || kind == NetworkCostType::Variable || cost.OverDataLimit().unwrap_or(false))
+    }
+    let Ok(mut last) = LAST.lock() else { return false };
+    if let Some((at, v)) = *last {
+        if at.elapsed() < Duration::from_secs(30) {
+            return v;
+        }
+    }
+    let v = ask().unwrap_or(false);
+    *last = Some((Instant::now(), v));
+    v
+}
+
 /// Let Windows draw this program's pop-up menus (the tray menu) in the system's light or dark theme.
 /// (uxtheme has no public call for it: ordinal 135 is SetPreferredAppMode, 136 flushes the menu theme cache.)
 fn follow_system_menu_theme() {

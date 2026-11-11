@@ -13,6 +13,8 @@ pub struct Settings {
     pub start_with_windows: bool,
     pub close_to_tray: bool,
     pub auto_update: bool,
+    /// download songs even on a metered connection (off: they wait for an ordinary one)
+    pub download_metered: bool,
     /// the first-run default for "start with Windows" has been applied (so turning it off sticks)
     autostart_seen: bool,
 }
@@ -32,6 +34,7 @@ impl Settings {
             start_with_windows: flag("startWithWindows", true),
             close_to_tray: flag("closeToTray", true),
             auto_update: flag("autoUpdate", true),
+            download_metered: flag("downloadMetered", false),
             autostart_seen: flag("autostartSeen", false),
         }
     }
@@ -39,7 +42,7 @@ impl Settings {
     fn save(&self) {
         let body = json!({
             "server": self.server, "startWithWindows": self.start_with_windows, "closeToTray": self.close_to_tray,
-            "autoUpdate": self.auto_update, "autostartSeen": self.autostart_seen
+            "autoUpdate": self.auto_update, "downloadMetered": self.download_metered, "autostartSeen": self.autostart_seen
         });
         let _ = std::fs::write(path(), serde_json::to_string_pretty(&body).unwrap_or_default());
     }
@@ -58,6 +61,7 @@ impl Settings {
             "startWithWindows" => { self.start_with_windows = value; self.autostart_seen = true; self.apply_autostart(); }
             "closeToTray" => self.close_to_tray = value,
             "autoUpdate" => self.auto_update = value,
+            "downloadMetered" => self.download_metered = value,
             _ => return,
         }
         self.save();
