@@ -105,6 +105,16 @@ impl Client {
         Ok(())
     }
 
+    /// The Lidarr connection as the server has it: `{ configured, error, settings{..}, lidarr{ version, rootFolders, qualityProfiles, metadataProfiles } }`.
+    pub fn lidarr_settings(&self) -> Result<Value> {
+        self.get_json("/api/lidarr")
+    }
+
+    /// Save the Lidarr connection (an empty `url` disconnects). Answers with the same shape as [`Client::lidarr_settings`].
+    pub fn save_lidarr(&self, body: Value) -> Result<Value> {
+        json_of(self.request("PUT", "/api/lidarr").send_json(body)?)
+    }
+
     pub fn shares(&self) -> Result<Vec<Share>> {
         let v = json_of(self.request("GET", "/api/shares").call()?)?;
         Ok(serde_json::from_value(v["shares"].clone()).unwrap_or_default())

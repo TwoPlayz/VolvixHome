@@ -404,6 +404,9 @@ fn main_screen(app: &App) -> El<'_> {
     // Now Playing has its own scrolling panels; every other page scrolls as a whole
     let content: El = if app.now_playing {
         container(now_playing(app)).padding([8, 28]).width(Length::Fill).height(Length::Fill).into()
+    } else if matches!(app.page, Page::Profile | Page::Members | Page::Settings) {
+        // the Account page keeps its tabs on screen: only the part next to them scrolls
+        container(page(app)).padding([8, 28]).width(Length::Fill).height(Length::Fill).into()
     } else {
         scrollable(container(page(app)).padding([8, 28]).width(Length::Fill)).style(ui::scroller).height(Length::Fill).into()
     };
@@ -476,7 +479,9 @@ fn sidebar(app: &App) -> El<'_> {
     let playlists = column![container(head).padding(Padding { top: 0.0, bottom: 0.0, left: 14.0, right: 4.0 }), scrollable(list).style(ui::scroller).height(Length::Fill)].spacing(2);
 
     let who = app.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default();
-    let bottom = button(row![ic(icon::SETTINGS, 16), column![text(clip(&who, 22)).size(13), ui::dim("Settings and account", 11)]].spacing(12).align_y(Alignment::Center))
+    // your picture (or letter), not a gear: the button is your account; 52 tall like the website's
+    let (me_id, me_av) = app.me.as_ref().map(|m| (m.user.id.clone(), m.user.avatar)).unwrap_or_default();
+    let bottom = button(row![ui::avatar_pic(app.avatar_handle(&me_id, me_av), &who, 36.0), column![text(clip(&who, 22)).size(13).font(ui::FONT_BOLD), ui::dim("Settings and account", 11)].spacing(1)].spacing(12).align_y(Alignment::Center))
         .width(Length::Fill)
         .padding([8, 14])
         .style(ui::nav(is(&Page::Settings) || is(&Page::Profile) || is(&Page::Members)))

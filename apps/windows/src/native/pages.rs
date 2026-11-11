@@ -781,7 +781,19 @@ pub fn account(app: &App) -> El<'_> {
         1 => members(app),
         _ => settings(app),
     };
-    column![ui::title(if tab == 2 { "Settings" } else { "Account" }, 32), row![container(tabs).width(210), container(body).width(Length::Fill).max_width(660)].spacing(32)].spacing(16).into()
+    // the title and the tabs stay; the content next to them scrolls
+    column![
+        ui::title(if tab == 2 { "Settings" } else { "Account" }, 32),
+        row![
+            container(tabs).width(210),
+            scrollable(container(body).width(Length::Fill).max_width(660).padding(iced::Padding { right: 14.0, ..Default::default() })).style(ui::scroller).width(Length::Fill).height(Length::Fill),
+        ]
+        .spacing(32)
+        .height(Length::Fill),
+    ]
+    .spacing(16)
+    .height(Length::Fill)
+    .into()
 }
 
 /// A labelled text box, like the website's form fields.
@@ -861,7 +873,7 @@ fn members(app: &App) -> El<'_> {
 }
 
 fn settings(app: &App) -> El<'_> {
-    let leveling = app.setting_str("leveling", "off") != "off";
+    let leveling = app.setting_str("leveling", "off");
     let transcoding = app.me.as_ref().map(|m| m.transcoding).unwrap_or(false);
     let server = app.client.as_ref().map(|c| c.base().to_string()).unwrap_or_default();
     let server_line = match &app.server_status {
@@ -907,7 +919,7 @@ fn settings(app: &App) -> El<'_> {
         playback = playback.push(setting_row("Streaming quality", "Smaller files need ffmpeg on the server (the Docker image includes it). Right now songs stream in original quality.", nothing()));
     }
     playback = playback
-        .push(setting_row("Volume leveling", "Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren't changed.", switch(leveling, Message::SetLeveling)))
+        .push(setting_row("Volume leveling", "Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren't changed.", ui::seg(&[("off", "Off"), ("track", "Song"), ("album", "Album")], &leveling, Message::SetLeveling)))
         .push(setting_row(
             "Sleep timer",
             match app.sleep_choice.as_str() {
@@ -936,6 +948,11 @@ fn settings(app: &App) -> El<'_> {
     ];
 
     let mut downloads = Column::new().push(setting_row(
+        "Only play downloads",
+        "Use only the songs saved on this computer. Everything else is skipped. Turn it on when you want to save data.",
+        switch(app.setting_bool("offlineOnly", false), Message::SetOfflineOnly),
+    ));
+    downloads = downloads.push(setting_row(
         "Download on a metered connection",
         "Off: downloads wait while Windows says this connection is metered (a mobile hotspot, or one you marked as metered), so a big album can't use up a data plan.",
         switch(app.settings.download_metered, Message::SetDownloadMetered),
@@ -1005,8 +1022,72 @@ fn settings(app: &App) -> El<'_> {
         page = page.push(column![ui::title("Share links", 22), ui::dim("Open links, newest first. Cancelling one stops it working straight away.", 13), container(shares).padding([6, 0])].spacing(6));
     }
     page = page.push(section("Downloads", downloads.into())).push(section("Library", library.into()));
-    page = page.push(section("Server", column![action_row("Connected to", server_line, btn("Switch server", Some(Message::SwitchServer)))].into()));
+    if app.can("settings") {
+        page = page.push(lidarr_section(app));
+    }
+    let version = app.server_status.as_ref().map(|s| format!("Version {}", s.version)).unwrap_or_default();
+    let host = server.trim_start_matches("https://").trim_start_matches("http://").to_string();
+    let _ = server_line;
+    page = page.push(section(
+        "About",
+        column![setting_row("Volvix Home", version, iced::widget::Space::new(0, 0).into()), action_row("Server", host, btn("Switch server", Some(Message::SwitchServer)))].into(),
+    ));
     page.max_width(820).into()
+}
+
+/// A labelled drop-down (Lidarr's folder and profiles).
+fn select<'a>(label: &'a str, options: Vec<String>, selected: Option<String>, which: u8, hint: Option<&'a str>) -> El<'a> {
+    // like a drop-down on the website: nothing chosen yet shows the first one
+    let selected = selected.filter(|s| options.contains(s)).or_else(|| options.first().cloned());
+    let mut c = column![
+        text(label).size(13).font(ui::FONT_BOLD),
+        iced::widget::pick_list(options, selected, move |n: String| Message::LidarrPick(which, n)).padding([11, 12]).text_size(15).width(Length::Fill).style(ui::pick_style).menu_style(ui::pick_menu),
+    ]
+    .spacing(6);
+    if let Some(h) = hint {
+        c = c.push(ui::dim(h, 12).color(ui::TEXT_3()));
+    }
+    container(c).max_width(428).into()
+}
+
+/// Lidarr (admins): the address and key, where music is saved, and the quality and metadata profiles.
+fn lidarr_section(app: &App) -> El<'_> {
+    let Some(v) = &app.lidarr else { return section("Lidarr", ui::dim("Loading…", 13).into()) };
+    let (s, l) = (&v["settings"], &v["lidarr"]);
+    let configured = v["configured"].as_bool().unwrap_or(false);
+    let url: &str = app.lidarr_url.as_deref().or(s["url"].as_str()).unwrap_or("");
+    let status: El = if configured {
+        match v["error"].as_str() {
+            Some(e) => container(text(e.to_string()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box).into(),
+            None => row![ic(icon::DOWNLOADED, 14), text(format!("Connected to Lidarr {}", l["version"].as_str().unwrap_or(""))).size(14)].spacing(8).align_y(Alignment::Center).into(),
+        }
+    } else {
+        ui::dim("Connect Lidarr to search for music you don't have and add it to this server automatically. Lidarr finds and downloads it with the sources you set up there.", 13).into()
+    };
+    let key_hint = if s["apiKeySet"].as_bool().unwrap_or(false) { "Saved (leave empty to keep it)" } else { "Lidarr → Settings → General → API Key" };
+    let mut c = column![status, field("Lidarr address", url, 5, false, Some("For example http://lidarr:8686"), None), field("API key", app.lidarr_key.as_str(), 6, true, Some(key_hint), Some(Message::LidarrSave))].spacing(14);
+    if !l.is_null() {
+        let names = |k: &str| -> Vec<String> { l[k].as_array().map(|a| a.iter().filter_map(|p| p["name"].as_str().map(String::from)).collect()).unwrap_or_default() };
+        let name_of = |k: &str, id: &serde_json::Value| -> Option<String> { l[k].as_array()?.iter().find(|p| p["id"] == *id)?["name"].as_str().map(String::from) };
+        let roots: Vec<String> = l["rootFolders"].as_array().map(|a| a.iter().filter_map(|r| r["path"].as_str().map(String::from)).collect()).unwrap_or_default();
+        c = c
+            .push(select("Add music to", roots, app.lidarr_root.clone().or(s["rootFolder"].as_str().map(String::from)), 0, Some("Lidarr saves downloads here, and Volvix reads your music folder (Settings → Library). They have to be the same place.")))
+            .push(select("Quality profile", names("qualityProfiles"), app.lidarr_quality.clone().or(name_of("qualityProfiles", &s["qualityProfileId"])), 1, None))
+            .push(select("Metadata profile", names("metadataProfiles"), app.lidarr_meta.clone().or(name_of("metadataProfiles", &s["metadataProfileId"])), 2, None))
+            .push(ui::dim("Who may ask for music is set per member (Members → Manage → Request music).", 12));
+    }
+    if let Some(e) = &app.lidarr_error {
+        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+    }
+    let mut actions = Row::new().spacing(10).push(button(text(if configured { "Save" } else { "Connect" }).size(14)).padding([10, 22]).style(ui::primary).on_press(Message::LidarrSave));
+    if configured {
+        actions = actions.push(button(text("Disconnect").size(14)).padding([10, 18]).style(ui::flat).on_press(Message::LidarrOff));
+    }
+    c = c.push(actions);
+    if configured {
+        c = c.push(ui::dim("New downloads appear on their own: Volvix Home watches the music folder, so nothing needs to be set up in Lidarr.", 12));
+    }
+    column![ui::title("Lidarr", 22), ui::dim("Get music you don't have yet.", 13), container(c).padding([6, 4])].spacing(6).into()
 }
 
 /// The equalizer's controls: preset, preamp, reset, and ten band sliders (32 Hz on the left, 16 kHz on the right).

@@ -328,7 +328,7 @@ pub enum Message {
     RemoveAllDownloads,
 
     /* settings */
-    SetLeveling(bool),
+    SetLeveling(String),
     CreditsLoaded(String, Result<Vec<Credit>, Error>),
 
     /* the window's own title bar */
@@ -367,6 +367,7 @@ pub enum Message {
     EqReset,
     SetStreamQuality(String),
     SetDownloadQuality(String),
+    SetOfflineOnly(bool),
     SetDataSaver(bool),
     /// a text box on the Profile or Members tab: 0 your name, 1 current password, 2 new password, 3 member name, 4 member password
     ProfileField(u8, String),
@@ -375,6 +376,12 @@ pub enum Message {
     AddMember,
     MembersLoaded(Result<Vec<volvix_core::members::Member>, Error>),
     RewindYear(i32),
+    LidarrLoaded(Result<serde_json::Value, Error>),
+    /// the Lidarr form: 0 = root folder, 1 = quality profile, 2 = metadata profile (a name picked from the list)
+    LidarrPick(u8, String),
+    LidarrSave,
+    LidarrOff,
+    LidarrSaved(Result<serde_json::Value, Error>),
     FolderLoaded(Result<volvix_core::admin::LibraryFolder, Error>),
     SharesLoaded(Result<Vec<volvix_core::admin::Share>, Error>),
     Rescan,
@@ -535,6 +542,14 @@ pub struct App {
     /// profile pictures by (person, version), cut round; and the ones being fetched
     avatars: HashMap<(String, u64), image::Handle>,
     avatar_pending: HashSet<(String, u64)>,
+    /// Settings → Lidarr: what the server says, and what is being typed / picked
+    pub lidarr: Option<serde_json::Value>,
+    pub lidarr_url: Option<String>,
+    pub lidarr_key: String,
+    pub lidarr_root: Option<String>,
+    pub lidarr_quality: Option<String>,
+    pub lidarr_meta: Option<String>,
+    pub lidarr_error: Option<String>,
     pub folder: Option<volvix_core::admin::LibraryFolder>,
     pub shares: Option<Vec<volvix_core::admin::Share>>,
 }
@@ -649,6 +664,13 @@ impl App {
             rewind_year: None,
             avatars: HashMap::new(),
             avatar_pending: HashSet::new(),
+            lidarr: None,
+            lidarr_url: None,
+            lidarr_key: String::new(),
+            lidarr_root: None,
+            lidarr_quality: None,
+            lidarr_meta: None,
+            lidarr_error: None,
             folder: None,
             shares: None,
         };
@@ -801,6 +823,8 @@ impl App {
                     let (c2, c3) = (c.clone(), c.clone());
                     tasks.push(Task::perform(blocking(move || c3.shares()), Message::SharesLoaded));
                     if self.can("settings") {
+                        let c4 = c2.clone();
+                        tasks.push(Task::perform(blocking(move || c4.lidarr_settings()), Message::LidarrLoaded));
                         tasks.push(Task::perform(blocking(move || c2.library_folder()), Message::FolderLoaded));
                     }
                     tasks.push(Task::perform(blocking(move || c.status()), Message::ServerStatus));
@@ -953,7 +977,26 @@ impl App {
     }
 
     fn start_current(&mut self, play: bool) -> Task<Message> {
-        let (Some(c), Some(id)) = (self.client.clone(), self.queue.current().map(String::from)) else { return Task::none() };
+        let (Some(c), Some(mut id)) = (self.client.clone(), self.queue.current().map(String::from)) else { return Task::none() };
+        // "Only play downloads": skip ahead to a song that is saved on this computer
+        if self.setting_bool("offlineOnly", false) && !self.downloads.has(&id) {
+            let mut found = false;
+            for _ in 0..self.queue.len() {
+                match self.queue.next(true).map(String::from) {
+                    Some(n) if self.downloads.has(&n) => {
+                        id = n;
+                        found = true;
+                        break;
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+            if !found {
+                self.say("Only downloaded songs play. Turn that off in Settings → Downloads.");
+                return Task::none();
+            }
+        }
         let local = self.downloads.path(&id).filter(|p| p.exists());
         if self.offline && local.is_none() {
             self.say("That song isn't downloaded, and the server can't be reached.");
@@ -1190,12 +1233,13 @@ impl App {
     /// The volume-leveling gain for a song: album gain while an album plays in order (keeps its
     /// loud and quiet songs as made), song gain otherwise. 1.0 with leveling off.
     fn gain_for(&self, track: &str) -> f32 {
-        if self.setting_str("leveling", "off") == "off" {
+        let mode = self.setting_str("leveling", "off");
+        if mode == "off" {
             return 1.0;
         }
         let Some(t) = self.lib.track(track) else { return 1.0 };
-        let album_in_order = !self.queue.shuffle() && self.queue.len() > 1 && self.queue.items().iter().all(|id| self.lib.track(id).map(|x| x.album_id == t.album_id).unwrap_or(false));
-        audio::replay_gain(t.replay_gain.as_ref(), if album_in_order { "album" } else { "track" })
+        // "track" = by song, "album" = by album, as in the website
+        audio::replay_gain(t.replay_gain.as_ref(), &mode)
     }
 
     pub fn dl_queue_len(&self) -> usize {
@@ -1902,9 +1946,9 @@ impl App {
             }
 
             /* ---------- settings ---------- */
-            Message::SetLeveling(on) => {
-                // the website keeps off | track | album; "track" when on (the app picks album gain itself while an album plays in order)
-                let t = self.edit(vec![Edit::Setting("leveling".into(), json!(if on { "track" } else { "off" }))]);
+            Message::SetLeveling(mode) => {
+                // the website keeps off | track | album
+                let t = self.edit(vec![Edit::Setting("leveling".into(), json!(mode))]);
                 let g = self.status.track.clone().map(|id| self.gain_for(&id)).unwrap_or(1.0);
                 self.player.set_gain(g);
                 return t;
@@ -1933,6 +1977,8 @@ impl App {
                 0 => self.profile_name = Some(s),
                 1 => self.pw_current = s,
                 2 => self.pw_new = s,
+                5 => self.lidarr_url = Some(s),
+                6 => self.lidarr_key = s,
                 3 => self.new_member_name = s,
                 _ => self.new_member_pw = s,
             },
@@ -1962,6 +2008,58 @@ impl App {
                 }
             }
             Message::RewindYear(y) => self.rewind_year = Some(y),
+            Message::LidarrLoaded(r) => {
+                if let Ok(v) = r {
+                    self.lidarr = Some(v);
+                }
+            }
+            Message::LidarrPick(which, name) => match which {
+                0 => self.lidarr_root = Some(name),
+                1 => self.lidarr_quality = Some(name),
+                _ => self.lidarr_meta = Some(name),
+            },
+            Message::LidarrSave => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                let s = self.lidarr.as_ref().map(|l| l["settings"].clone()).unwrap_or_default();
+                let l = self.lidarr.as_ref().map(|l| l["lidarr"].clone()).unwrap_or_default();
+                // a name picked from a list → its id (profiles) or path (folder); not touched → what the server has
+                let id_of = |list: &serde_json::Value, name: &Option<String>, current: &serde_json::Value| -> i64 {
+                    let entries = list.as_array().cloned().unwrap_or_default();
+                    name.as_ref()
+                        .and_then(|n| entries.iter().find(|p| p["name"].as_str() == Some(n.as_str()))?["id"].as_i64())
+                        .or_else(|| current.as_i64().filter(|id| entries.iter().any(|p| p["id"].as_i64() == Some(*id))))
+                        .or_else(|| entries.first()?["id"].as_i64()) // nothing chosen: the first one, as the drop-down shows
+                        .unwrap_or(0)
+                };
+                let first_root = l["rootFolders"].as_array().and_then(|a| a.first()).and_then(|r| r["path"].as_str()).map(String::from);
+                let body = json!({
+                    "url": self.lidarr_url.clone().or_else(|| s["url"].as_str().map(String::from)).unwrap_or_default(),
+                    "apiKey": self.lidarr_key,
+                    "rootFolder": self.lidarr_root.clone().or_else(|| s["rootFolder"].as_str().filter(|p| !p.is_empty()).map(String::from)).or(first_root).unwrap_or_default(),
+                    "qualityProfileId": id_of(&l["qualityProfiles"], &self.lidarr_quality, &s["qualityProfileId"]),
+                    "metadataProfileId": id_of(&l["metadataProfiles"], &self.lidarr_meta, &s["metadataProfileId"]),
+                });
+                self.lidarr_error = None;
+                return Task::perform(blocking(move || c.save_lidarr(body)), Message::LidarrSaved);
+            }
+            Message::LidarrOff => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(blocking(move || c.save_lidarr(json!({ "url": "" }))), |r| Message::LidarrSaved(r));
+            }
+            Message::LidarrSaved(r) => match r {
+                Ok(v) => {
+                    let first = !self.lidarr.as_ref().map(|l| l["configured"].as_bool().unwrap_or(false)).unwrap_or(false);
+                    let on = v["configured"].as_bool().unwrap_or(false);
+                    self.say(if !on { "Lidarr disconnected" } else if first { "Lidarr connected" } else { "Saved" });
+                    self.lidarr = Some(v);
+                    self.lidarr_url = None;
+                    self.lidarr_key.clear();
+                    self.lidarr_root = None;
+                    self.lidarr_quality = None;
+                    self.lidarr_meta = None;
+                }
+                Err(e) => self.lidarr_error = Some(e.to_string()),
+            },
             Message::FolderLoaded(r) => self.folder = r.ok(),
             Message::SharesLoaded(r) => self.shares = Some(r.unwrap_or_default()),
             Message::Rescan => {
@@ -2208,6 +2306,7 @@ impl App {
                 self.settings.set_text("downloadQuality", &q);
                 self.say("New downloads use this quality");
             }
+            Message::SetOfflineOnly(v) => return self.edit(vec![Edit::Setting("offlineOnly".into(), json!(v))]),
             Message::SetDataSaver(v) => self.settings.set("dataSaver", v),
             Message::SetResume(v) => return self.edit(vec![Edit::Setting("resumeLast".into(), json!(v))]),
             Message::SetSleep(choice) => {

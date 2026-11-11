@@ -18,7 +18,8 @@ window.Spin.views = window.Spin.views || {};
   // bottom of the sidebar (computers only): settings and account, like the Windows app
   const userChipHtml = function () {
     const me = S.data.me;
-    return S.icon('gear', 18) + '<span class="user-chip-text"><span class="user-chip-name">' + S.esc(me.name) + '</span><span class="user-chip-plan">Settings and account</span></span>';
+    // your picture (or your letter), not a gear: the button is your account
+    return S.avatar(me, 36) + '<span class="user-chip-text"><span class="user-chip-name">' + S.esc(me.name) + '</span><span class="user-chip-plan">Settings and account</span></span>';
   };
 
   let shellMounted = false;

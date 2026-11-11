@@ -3189,3 +3189,10 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 .popover-item { font-weight: 600; }
 /* the Account / Members / Settings tabs scroll away with the page (they don't stay on screen) */
 .acct-nav { position: static; }
+/* ---- round 7 ---- */
+/* the sidebar button is your account: picture + name, 52 px tall, the same in the Windows app */
+.user-chip { gap: 12px; padding: 8px 14px; min-height: 52px; }
+.user-chip > .avatar { flex: none; }
+/* the Profile / Members / Settings tabs stay on screen while the page scrolls */
+.acct-nav { position: sticky; top: 16px; }
+@media (max-width: 760px) { .acct-nav { position: static; } }
