@@ -372,18 +372,23 @@ pub fn since_start() -> f32 {
 }
 
 /// Someone's profile picture (already cut round), or the letter stand-in while there is none.
-pub fn avatar_pic<'a, M: 'a>(handle: Option<&image::Handle>, name: &str, size: f32) -> Element<'a, M> {
+pub fn avatar_pic<'a, M: 'a>(handle: Option<&image::Handle>, id: &str, name: &str, size: f32) -> Element<'a, M> {
     match handle {
         Some(h) => image(h.clone()).width(size).height(size).into(),
-        None => avatar(name, size),
+        None => avatar_key(id, name, size),
     }
 }
 
 /// A round picture stand-in: the first letter of a name on one of the website's avatar colours.
 pub fn avatar<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
+    avatar_key(name, name, size)
+}
+
+/// Same colour and letters as the website: the colour comes from the person's id (or name), the letters from the first two words of the name.
+pub fn avatar_key<'a, M: 'a>(key: &str, name: &str, size: f32) -> Element<'a, M> {
     const COLORS: [(u8, u8, u8); 8] = [(0x5E, 0x54, 0x8E), (0x33, 0x5C, 0x67), (0x9E, 0x2A, 0x2B), (0xBC, 0x6C, 0x25), (0x3D, 0x5A, 0x80), (0x6B, 0x4F, 0x3A), (0x4A, 0x6C, 0x2F), (0x7A, 0x40, 0x69)];
-    let (r, g, b) = COLORS[name.bytes().map(|b| b as usize).sum::<usize>() % COLORS.len()];
-    let initial: String = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    let (r, g, b) = COLORS[(key.chars().fold(0u32, |h, c| h.wrapping_mul(31).wrapping_add(c as u32)) as usize) % COLORS.len()];
+    let initial: String = name.split_whitespace().filter_map(|p| p.chars().next()).take(2).collect::<String>().to_uppercase();
     container(text(initial).size(size * 0.4).font(FONT_BOLD))
         .width(size)
         .height(size)
@@ -523,7 +528,7 @@ pub fn cover_box<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, w: f32,
     let letter = name.chars().find(|c| c.is_alphanumeric());
     let side = w.min(h);
     let body: Element<'a, M> = match letter {
-        None => text('\u{E8D6}'.to_string()).font(ICONS).size(side * 0.38).color(ink).into(), // a note, when there's no title
+        None => wi("music", if side >= 100.0 { side * 0.38 } else { 22.0 }, ink), // the website's note, when there's no title
         Some(c) if side <= 76.0 => text(c.to_uppercase().collect::<String>()).font(FONT_BOLD).size(side * 0.4).color(ink).into(),
         Some(_) => {
             // the website's sizes: shorter names are set bigger

@@ -382,7 +382,7 @@ window.Spin = window.Spin || {};
           }).join('') + '</div>'
         : '<p class="modal-text">No one else is in your household yet. An admin can add people under Account → People.</p>',
       actions: [
-        pl.shared ? { label: 'Stop sharing', kind: 'ghost danger-text', onClick: function (close) { close(); S.pl.toggleCollaborative(id); } } : null,
+        pl.shared && (collab.length || invited.length) ? { label: 'Stop sharing', kind: 'danger danger-left', onClick: function (close) { close(); S.pl.toggleCollaborative(id); } } : null,
         { label: 'Cancel', kind: 'secondary' },
         people.length ? { label: 'Save', kind: 'primary', onClick: function (close) {
           const chosen = S.$$('input[type=checkbox]:checked', m.el).map(function (c) { return c.value; });

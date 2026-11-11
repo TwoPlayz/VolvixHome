@@ -285,10 +285,22 @@ pub fn get_more(app: &App) -> Option<El<'_>> {
 /// Requests: what people asked Lidarr for, and where it is.
 pub fn requests(app: &App) -> El<'_> {
     let f = &app.find;
-    let mut c = column![ui::title("Requests", 32), ui::dim("Music asked for through Get more music (in Search). It shows up in your library when Lidarr has downloaded it.", 15)].spacing(16);
-    if f.requests.is_empty() {
-        return c.push(ui::dim("No requests yet. Search for something you don't have, then Get it.", 15)).into();
+    if !f.configured {
+        let (about, action): (&str, Option<El>) = if app.can("settings") {
+            ("Connect Lidarr in Settings to search for music you don't have and add it automatically.", Some(ui::btn("Connect Lidarr", ui::Btn::Primary).on_press(Message::Go(Page::Settings)).into()))
+        } else {
+            ("Ask whoever runs this server to connect Lidarr.", None)
+        };
+        return column![ui::title("Requests", 32), crate::views::empty_state("download", "Lidarr isn't connected", about, action)].into();
     }
+    let mut c = column![ui::title("Requests", 32), ui::dim("Music Lidarr is getting for you. It appears in your library as soon as it's imported.", 15)].spacing(16);
+    if f.requests.is_empty() {
+        return c
+            .push(ui::title("Requested", 22))
+            .push(crate::views::empty_state("search", "Nothing requested yet", "Search for an artist or album. Anything not in your library can be requested from there.", Some(ui::btn("Search", ui::Btn::Primary).on_press(Message::Go(Page::Search)).into())))
+            .into();
+    }
+    c = c.push(ui::title("Requested", 22));
     let me = app.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default();
     for r in &f.requests {
         let here = !(r.on_server.is_null() || r.on_server == serde_json::Value::Bool(false));
@@ -303,14 +315,23 @@ pub fn requests(app: &App) -> El<'_> {
             Some(h) => image(h.clone()).width(48).height(48).content_fit(iced::ContentFit::Cover).into(),
             None => ui::cover(None, &r.title, 48.0),
         };
+        let artist_req = r.kind == "artist";
+        let who = if r.by == me { "you".to_string() } else { r.by.clone() };
+        let name = if artist_req { format!("Everything by {}", r.artist) } else { r.title.clone() };
+        let sub = format!("{}Requested by {who} · {}", if artist_req { String::new() } else { format!("{} · ", r.artist) }, ago(r.at));
         let mut line = row![
             art,
-            column![text(clip(&format!("{} · {}", r.title, r.artist), 60)).size(15), ui::dim(format!("{} · asked by {} · {}", if r.kind == "artist" { "Artist" } else { "Album" }, r.by, state), 12)].spacing(2).width(Length::Fill)
+            column![text(clip(&name, 60)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)
         ]
         .spacing(14)
         .align_y(Alignment::Center);
-        if !here && r.by == me {
-            line = line.push(button(text("Cancel").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::CancelRequest(r.foreign_id.clone())));
+        if here {
+            line = line.push(ui::btn_icon("check", "In your library", ui::Btn::Secondary, false));
+        } else {
+            line = line.push(ui::dim(state.clone(), 13));
+            if r.by == me {
+                line = line.push(ui::btn_sm("Cancel", ui::Btn::Ghost).on_press(Message::CancelRequest(r.foreign_id.clone())));
+            }
         }
         c = c.push(container(line).padding([6, 12]));
     }
@@ -498,7 +519,7 @@ pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
 /* ---------- household and notifications ---------- */
 
 pub fn household(app: &App) -> El<'_> {
-    let mut c = column![ui::title("Household", 32), ui::dim("What everyone's listening to, and the playlists they share.", 15)].spacing(16);
+    let mut c = column![ui::title("Household", 32), ui::dim("What everyone is listening to, and the playlists they've made public.", 15)].spacing(16);
     if !app.invites.is_empty() {
         let rows: Vec<El> = app
             .invites
@@ -522,39 +543,59 @@ pub fn household(app: &App) -> El<'_> {
     if app.household.members.is_empty() {
         return c.push(ui::dim("No one else is in your household yet. An admin can add people on the website (Account → People).", 15)).into();
     }
-    for m in &app.household.members {
-        let now: El = match &m.now {
+    // listening now first, then the most recently active (like the website)
+    let mut members: Vec<&_> = app.household.members.iter().collect();
+    members.sort_by_key(|m| (std::cmp::Reverse(m.now.as_ref().and_then(|n| n["listening"].as_bool()).unwrap_or(false)), std::cmp::Reverse(m.now.as_ref().and_then(|n| n["at"].as_u64()).unwrap_or(0)), m.name.clone()));
+    let mut cards: Vec<El> = vec![];
+    for m in &members {
+        let (live, line, play): (bool, El, Option<String>) = match &m.now {
+            None => (false, ui::dim("Nothing shared yet", 13).into(), None),
             Some(n) => {
                 let title = n["title"].as_str().unwrap_or("").to_string();
                 let artist = n["artist"].as_str().unwrap_or("").to_string();
                 let live = n["listening"].as_bool().unwrap_or(false);
-                let album = n["albumId"].as_str().and_then(|a| app.lib.album(a));
-                let id = n["id"].as_str().unwrap_or("").to_string();
-                button(
-                    row![cover_of(app, album, 48.0), column![ui::dim(if live { "Listening now" } else { "Last played" }, 12), text(clip(&format!("{title} · {artist}"), 60)).size(15)].spacing(2)]
-                        .spacing(12)
-                        .align_y(Alignment::Center),
-                )
-                .padding(6)
-                .style(ui::flat)
-                .on_press_maybe((!id.is_empty()).then(|| Message::PlayTracks(vec![id], 0, format!("{}'s pick", m.name))))
-                .into()
+                let id = n["id"].as_str().or(n["trackId"].as_str()).unwrap_or("").to_string();
+                let lead: El = if live { crate::marks::eq(true, 12.0) } else { ui::dim(format!("Last played {}", n["at"].as_u64().map(ago).unwrap_or_default()), 13).into() };
+                let song = text(clip(&format!("{title} Â· {artist}"), 40)).size(13).color(ui::TEXT()).wrapping(text::Wrapping::None);
+                (live, row![lead, song].spacing(8).align_y(Alignment::Center).into(), (!id.is_empty()).then_some(id))
             }
-            None => ui::dim("Not listening right now", 13).into(),
         };
-        let mut block = column![row![ic(icon::PEOPLE, 18), ui::title(m.name.clone(), 22)].spacing(10).align_y(Alignment::Center), now].spacing(10);
-        if !m.playlists.is_empty() {
-            let cards: Vec<El> = m
-                .playlists
-                .iter()
-                .map(|p| {
-                    let ids: Vec<String> = p.tracks.iter().map(|t| t.id.clone()).collect();
-                    card(playlist_cover(app, &ids, false, &p.name, 164.0), p.name.clone(), format!("{} songs", ids.len()), Message::Go(Page::Playlist(p.id.clone())))
-                })
-                .collect();
-            block = block.push(Row::with_children(cards).spacing(4).wrap());
+        let mut r = row![ui::avatar_key::<Message>(&m.id, &m.name, 44.0), column![text(m.name.clone()).size(15).font(ui::FONT_BOLD), line].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
+        if let Some(id) = play {
+            r = r.push(ui::tip(button(ui::wi("play", 18.0, ui::TEXT())).padding(8).style(ui::secondary).on_press(Message::PlayTracks(vec![id], 0, format!("{}'s pick", m.name))), "Play this song"));
         }
-        c = c.push(container(block).padding([4, 0]));
+        cards.push(
+            container(r)
+                .padding(12)
+                .width(Length::Fixed(430.0))
+                .style(move |_: &iced::Theme| container::Style {
+                    background: Some(ui::SURFACE_2().into()),
+                    border: iced::Border { color: if live { ui::ACCENT() } else { ui::BORDER() }, width: 1.0, radius: 12.0.into() },
+                    ..Default::default()
+                })
+                .into(),
+        );
+    }
+    c = c.push(column![ui::title("Listening", 22), Row::with_children(cards).spacing(10).wrap()].spacing(12));
+    let mut any_lists = false;
+    for m in &members {
+        if m.playlists.is_empty() {
+            continue;
+        }
+        any_lists = true;
+        let first = m.name.split(' ').next().unwrap_or("").to_string();
+        let tiles: Vec<El> = m
+            .playlists
+            .iter()
+            .map(|p| {
+                let ids: Vec<String> = p.tracks.iter().map(|t| t.id.clone()).collect();
+                card(playlist_cover(app, &ids, false, &p.name, 164.0), p.name.clone(), format!("{} songs", ids.len()), Message::Go(Page::Playlist(p.id.clone())))
+            })
+            .collect();
+        c = c.push(column![ui::title(format!("{first}'s playlists"), 22), Row::with_children(tiles).spacing(4).wrap()].spacing(12));
+    }
+    if !any_lists {
+        c = c.push(row![ui::wi("lock", 12.0, ui::TEXT_2()), ui::dim("Nobody has made a playlist public yet. In a playlist's Edit details, turn on \"Visible to the household\".", 13)].spacing(6).align_y(Alignment::Center));
     }
     c.into()
 }
@@ -705,23 +746,23 @@ pub fn rewind(app: &App) -> El<'_> {
         let have = app.data.rest.get("stats").and_then(|s| s.get("years")).and_then(|y| y.get(this.to_string())).and_then(|d| d.get("plays")).and_then(|p| p.as_object()).map(|p| p.len());
         return column![
             ui::title("Rewind", 32),
-            ui::title(format!("Your {this} Rewind opens on January 1, {}", this + 1), 20),
-            ui::dim(
+            crate::views::empty_state(
+                "history",
+                format!("Your {this} Rewind opens on January 1, {}", this + 1),
                 match have {
                     Some(n) => format!("It's building as you listen: {n} songs so far."),
                     None => "Play some music and it starts building.".to_string(),
                 },
-                14
+                None
             ),
         ]
-        .spacing(10)
         .into();
     };
     let songs = rewind_songs(app, y);
     let plays: u64 = songs.iter().map(|s| s.1).sum();
     let minutes = app.data.rest.get("stats").and_then(|s| s.get("years")).and_then(|d| d.get(y.to_string())).and_then(|d| d.get("sec")).and_then(|v| v.as_f64()).map(|s| (s / 60.0).round() as u64).unwrap_or(0);
     if plays == 0 {
-        return column![ui::title(format!("Rewind {y}"), 32), ui::dim("Nothing was recorded that year.", 14)].spacing(10).into();
+        return column![ui::title(format!("Rewind {y}"), 32), crate::views::empty_state("history", format!("No plays in {y}"), "Nothing was recorded that year.", None)].into();
     }
     let mut artists: std::collections::HashMap<&str, u64> = Default::default();
     let mut albums: std::collections::HashMap<&str, u64> = Default::default();
@@ -798,7 +839,7 @@ fn manage_dialog<'a>(app: &'a App, id: &'a str, password: &'a str, error: &'a Op
     };
     let mut c = column![
         ui::title(format!("Manage {}", m.name), 22),
-        row![ui::avatar::<Message>(&m.name, 48.0), column![text(m.name.clone()).size(15).font(ui::FONT_BOLD), ui::dim(m.role(), 12)].spacing(2)].spacing(12).align_y(Alignment::Center),
+        row![ui::avatar_key::<Message>(&m.id, &m.name, 48.0), column![text(m.name.clone()).size(15).font(ui::FONT_BOLD), ui::dim(m.role(), 12)].spacing(2)].spacing(12).align_y(Alignment::Center),
         switch_row("Turn off explicit music", "Songs marked explicit stay listed but are skipped for them.".into(), m.hide_explicit, "hideExplicit".into(), true),
         text(format!("What {} can do", m.name)).size(13).font(ui::FONT_BOLD),
     ]
@@ -902,7 +943,7 @@ fn profile(app: &App) -> El<'_> {
         field("Your name", name, 0, false, Some("This is also what you sign in with, on every device."), Some(Message::SaveName)),
         button(text("Save name").size(14)).padding([10, 22]).style(ui::primary).on_press(Message::SaveName),
         row![
-            ui::avatar_pic::<Message>(app.avatar_handle(&user.id, user.avatar), &user.name, 56.0),
+            ui::avatar_pic::<Message>(app.avatar_handle(&user.id, user.avatar), "u_me", &user.name, 56.0),
             column![text(user.name.clone()).size(15), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(2).width(Length::Fill),
             button(row![ic(icon::PERSON, 13), text("Change picture").size(13)].spacing(8).align_y(Alignment::Center)).padding([7, 16]).style(ui::secondary).on_press(Message::PickPicture),
             button(text("Remove").size(13)).padding([7, 14]).style(ui::flat).on_press_maybe((user.avatar > 0).then_some(Message::RemovePicture)),
@@ -930,7 +971,7 @@ fn members(app: &App) -> El<'_> {
     let mut list = Column::new().spacing(10);
     for m in &app.members {
         let you = if m.id == me { " (you)" } else { "" };
-        let mut line = row![ui::avatar_pic::<Message>(app.avatar_handle(&m.id, m.avatar), &m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2).width(Length::Fixed(300.0))].spacing(12).align_y(Alignment::Center);
+        let mut line = row![ui::avatar_pic::<Message>(app.avatar_handle(&m.id, m.avatar), &m.id, &m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2).width(Length::Fixed(300.0))].spacing(12).align_y(Alignment::Center);
         if m.id != me && can_manage(m) {
             line = line.push(button(text("Manage").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManageMember(m.id.clone())));
         }
@@ -1385,16 +1426,17 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                     let on = picked.contains(&uid);
                     let u2 = uid.clone();
                     c = c.push(
-                        row![ui::avatar::<Message>(&uname, 40.0), column![text(uname.clone()).size(15), ui::dim(state, 13)].spacing(1).width(Length::Fill), checkbox("", on).size(18).on_toggle(move |v| Message::PartyPick(u2.clone(), v))]
+                        row![ui::avatar_key::<Message>(&uid, &uname, 40.0), column![text(uname.clone()).size(15), ui::dim(state, 13)].spacing(1).width(Length::Fill), checkbox("", on).size(18).on_toggle(move |v| Message::PartyPick(u2.clone(), v))]
                             .spacing(12)
                             .align_y(Alignment::Center),
                     );
                 }
                 let shared = p.as_ref().map(|p| p.is_shared()).unwrap_or(false);
                 let mut foot = Row::new().spacing(10).align_y(Alignment::Center);
-                if shared {
-                    // one place for all of it: taking everyone off again is here too
-                    foot = foot.push(ui::tip(button(text("Stop sharing").size(14).color(ui::ACCENT())).padding([10.9, 4.0]).style(ui::link).on_press(Message::Unshare(id.clone())), "It becomes just yours again. Everyone you invited loses access."));
+                let anyone = p.as_ref().map(|p| !p.collaborators.is_empty() || !p.invited.is_empty()).unwrap_or(false);
+                if shared && anyone {
+                    // one place for all of it: taking everyone off again is here too (only when someone is on it)
+                    foot = foot.push(ui::tip(ui::btn("Stop sharing", ui::Btn::Danger).on_press(Message::Unshare(id.clone())), "It becomes just yours again. Everyone you invited loses access."));
                 }
                 foot = foot.push(horizontal_space()).push(ui::btn("Cancel", ui::Btn::Secondary).on_press(Message::DialogCancel)).push(ui::btn("Save", ui::Btn::Primary).on_press(Message::DialogOk));
                 c.push(foot).into()

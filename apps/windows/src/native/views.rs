@@ -769,7 +769,7 @@ fn sidebar(app: &App) -> El<'_> {
     let who = app.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default();
     // your picture (or letter), not a gear: the button is your account; 52 tall like the website's
     let (me_id, me_av) = app.me.as_ref().map(|m| (m.user.id.clone(), m.user.avatar)).unwrap_or_default();
-    let bottom = button(row![ui::avatar_pic(app.avatar_handle(&me_id, me_av), &who, 36.0), column![text(clip(&who, 22)).size(13).font(ui::FONT_BOLD), ui::dim("Settings and account", 11)].spacing(1)].spacing(12).align_y(Alignment::Center))
+    let bottom = button(row![ui::avatar_pic(app.avatar_handle(&me_id, me_av), "u_me", &who, 36.0), column![text(clip(&who, 22)).size(13).font(ui::FONT_BOLD), ui::dim("Settings and account", 11)].spacing(1)].spacing(12).align_y(Alignment::Center))
         .width(Length::Fill)
         .padding([8, 14])
         .style(ui::nav(is(&Page::Settings) || is(&Page::Profile) || is(&Page::Members)))
@@ -782,7 +782,7 @@ fn account_menu(app: &App) -> El<'_> {
     let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
     // the name card is the "Account" button: it opens your profile
     let head = button(
-        row![ui::avatar_pic(app.avatar_handle(&user.id, user.avatar), &user.name, 40.0), column![text(clip(&user.name, 22)).size(15).font(ui::FONT_BOLD), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(1)]
+        row![ui::avatar_pic(app.avatar_handle(&user.id, user.avatar), "u_me", &user.name, 40.0), column![text(clip(&user.name, 22)).size(15).font(ui::FONT_BOLD), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(1)]
             .spacing(12)
             .align_y(Alignment::Center),
     )
@@ -1307,7 +1307,8 @@ fn titled<'a>(title: &'static str, body: El<'a>, more: Option<SearchType>) -> El
 /* ---------- Now Playing and the player bar ---------- */
 
 /// The website's "nothing here" block: an icon in a grey circle, a heading, a line of text and maybe a button.
-pub fn empty_state<'a>(icon_name: &str, title: &'a str, about: &'a str, action: Option<El<'a>>) -> El<'a> {
+pub fn empty_state<'a>(icon_name: &str, title: impl Into<String>, about: impl Into<String>, action: Option<El<'a>>) -> El<'a> {
+    let (title, about): (String, String) = (title.into(), about.into());
     let mut c = column![
         container(ui::wi(icon_name, 28.0, ui::TEXT_2())).width(64).height(64).center_x(64).center_y(64).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(32.0), ..Default::default() }),
         ui::gap(16),
@@ -1490,7 +1491,7 @@ fn player_row(app: &App, width: f32) -> El<'_> {
             .align_y(Alignment::Center)
             .into()
         }
-        None => row![ui::cover::<Message>(None, "", 56.0), ui::dim("Nothing playing", 13)].spacing(12).align_y(Alignment::Center).into(),
+        None => row![ui::cover::<Message>(None, "", 56.0), text("Nothing playing").size(15).color(ui::TEXT())].spacing(12).align_y(Alignment::Center).into(),
     };
 
     let has = track.is_some() || !app.queue.is_empty();

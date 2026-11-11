@@ -2001,7 +2001,8 @@ impl App {
                 Err(e) => self.say(e.to_string()),
             },
             Message::Next => {
-                if self.queue.next(false).is_some() {
+                if self.queue.next(false).is_some() || self.queue.current().is_some() {
+                    // on the last song, Next starts it over
                     return self.start_current(true);
                 }
             }

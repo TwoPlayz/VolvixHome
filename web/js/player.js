@@ -374,8 +374,10 @@ window.Spin = window.Spin || {};
     if (r.index < 0) {
       // end of queue
       if (auto) { clearPlayer(); return; } // nothing left: the player goes away
-      st.playing = false; stopTimer(); audio.pause(); setPos(0);
-      S.toast('End of queue');
+      // last song: skipping just starts it over
+      xfadeDone = null;
+      load(current(), 0);
+      st.playing = true; startAudio(); startTimer();
       render();
       return;
     }

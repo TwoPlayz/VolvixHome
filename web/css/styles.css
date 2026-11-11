@@ -1320,8 +1320,7 @@ select.input {
 .manage-controls { border: 1px solid var(--border); border-radius: 12px; padding: 0 14px; margin: 14px 0 10px; }
 .manage-row { cursor: pointer; }
 .modal-manage .modal-actions { flex-wrap: wrap; }
-.btn.danger-text { color: var(--accent); margin-right: auto; padding-left: 0; }
-.btn.danger-text:hover { text-decoration: underline; background: none; }
+.btn.danger-left { margin-right: auto; }
 .fam-row.pending .set-text strong { color: var(--text-2); }
 .fam-slot { cursor: pointer; border-radius: 10px; }
 .fam-slot:hover .fam-empty { border-color: var(--text-2); color: var(--text); }
