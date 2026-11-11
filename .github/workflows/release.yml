@@ -18,7 +18,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Version from the tag
         shell: pwsh
         run: |
@@ -33,7 +33,7 @@ jobs:
           (Get-FileHash volvix-home.exe -Algorithm SHA256).Hash.ToLower() | Set-Content -NoNewline volvix-home.exe.sha256
           Copy-Item apps/windows/target/release/volvix-home-native.exe volvix-home-native.exe
           (Get-FileHash volvix-home-native.exe -Algorithm SHA256).Hash.ToLower() | Set-Content -NoNewline volvix-home-native.exe.sha256
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             volvix-home.exe
@@ -49,7 +49,7 @@ jobs:
     outputs:
       size: ${{ steps.pack.outputs.size }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Version from the tag
         run: |
           V='${{ github.ref_name }}'; V="${V#v}"
@@ -73,7 +73,7 @@ jobs:
           mkdir Payload && cp -R VolvixHome.app Payload/
           zip -qry "$GITHUB_WORKSPACE/VolvixHome.ipa" Payload
           echo "size=$(stat -f%z "$GITHUB_WORKSPACE/VolvixHome.ipa")" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: VolvixHome.ipa
 
@@ -82,7 +82,7 @@ jobs:
     needs: ios
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
       - name: Add this version to the feed
