@@ -202,8 +202,11 @@ window.Spin.views = window.Spin.views || {};
     splashDone = true;
     const el = document.getElementById('splash');
     if (!el) return;
-    el.classList.add('splash-out');
-    setTimeout(function () { el.remove(); }, 450);
+    const hold = /[?&]splash\b/.test(location.search) ? 5000 : 0; // ?splash keeps it up for 5 s, to look at it
+    setTimeout(function () {
+      el.classList.add('splash-out');
+      setTimeout(function () { el.remove(); }, 450);
+    }, hold);
   }
 
   S.app = {

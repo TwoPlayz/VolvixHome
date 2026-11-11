@@ -3156,3 +3156,10 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 /* every round button lights up its whole area on hover */
 .ctrl:not(.ctrl-play), .icon-btn, .row-more, .row-add, .row-like, .np-more, .np-add { transition: background .12s, color .12s; }
 .ctrl:not(.ctrl-play):hover, .icon-btn:hover, .row-more:hover, .row-add:hover, .row-like:hover, .np-more:hover, .np-add:hover { background: var(--hover); color: var(--text); }
+/* round 4 */
+/* the playing song's names never underline in the player card */
+.player-now a, .player-now .link-plain, .player-now a:hover, .player-now .link-plain:hover, .player-title a:hover { text-decoration: none !important; }
+/* the play / pause button: the triangle / bars are solid holes in the white button, exactly in the middle */
+.ctrl-play { display: grid; place-items: center; padding: 0; }
+.ctrl-play .icon { display: block; margin: 0; fill: currentColor; stroke: none; }
+.ctrl-play .icon * { fill: currentColor; stroke: none; }

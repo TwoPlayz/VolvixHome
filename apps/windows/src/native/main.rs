@@ -243,6 +243,9 @@ pub enum Message {
     TogglePlay,
     /* the cast button: TVs, speakers and listening parties */
     PlayOn,
+    /// the pointer rests on / leaves a button that has a hover hint
+    HintOn(String),
+    HintOff,
     CastDevices(Result<Vec<CastDevice>, Error>),
     CastStart(usize),
     CastStop,
@@ -1168,6 +1171,8 @@ impl App {
                     return Task::batch([Task::perform(blocking(move || c.cast_devices()), Message::CastDevices), Task::perform(blocking(move || c2.party_current()), Message::PartyLoaded)]);
                 }
             }
+            Message::HintOn(l) => ui::hint_on(l),
+            Message::HintOff => ui::hint_off(),
             Message::CastDevices(r) => {
                 if let Ok(list) = r {
                     self.cast_devices = list;

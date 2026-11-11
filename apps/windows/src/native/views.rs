@@ -308,7 +308,7 @@ pub fn round_icon<'a>(c: char, on: bool, tip: &'a str, m: Option<Message>) -> El
         }
         st
     });
-    iced::widget::tooltip(b.on_press_maybe(m), container(text(tip).size(12)).padding([4, 8]).style(ui::dialog), iced::widget::tooltip::Position::Bottom).into()
+    ui::tip(b.on_press_maybe(m), tip)
 }
 
 /// Download button for an album or playlist header.

@@ -145,19 +145,39 @@ pub fn cast_icon<'a, M: 'a>(size: f32, color: Color) -> Element<'a, M> {
 }
 
 /// A small hint that appears over a button after a moment (what the website shows as a title).
-pub fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, label: impl ToString) -> Element<'a, M> {
-    iced::widget::tooltip(
-        content,
-        container(text(label.to_string()).size(12)).padding([4, 8]).style(|_: &Theme| container::Style {
+/// It appears only once the pointer has rested on the button for a moment (iced shows tooltips at once, so the
+/// app tracks the pointer itself: `hint_on` / `hint_off` are called from the hover messages).
+pub fn tip<'a>(content: impl Into<Element<'a, crate::Message>>, label: impl ToString) -> Element<'a, crate::Message> {
+    let label = label.to_string();
+    let ready = HINT.lock().map(|h| h.as_ref().map(|(l, at)| *l == label && at.elapsed() >= HINT_DELAY).unwrap_or(false)).unwrap_or(false);
+    let shown: Element<'a, crate::Message> = if ready {
+        container(text(label.clone()).size(12)).padding([4, 8]).style(|_: &Theme| container::Style {
             background: Some(SURFACE_3.into()),
             border: Border { radius: 6.0.into(), width: 1.0, color: BORDER },
             text_color: Some(TEXT),
             ..Default::default()
-        }),
-        iced::widget::tooltip::Position::Top,
-    )
-    .gap(6)
-    .into()
+        })
+        .into()
+    } else {
+        Space::new(0, 0).into() // nothing to show yet (the tree keeps the same shape, so the button isn't disturbed)
+    };
+    let watched = iced::widget::mouse_area(content).on_enter(crate::Message::HintOn(label)).on_exit(crate::Message::HintOff);
+    iced::widget::tooltip(watched, shown, iced::widget::tooltip::Position::Top).gap(8).into()
+}
+
+const HINT_DELAY: std::time::Duration = std::time::Duration::from_millis(700);
+static HINT: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+pub fn hint_on(label: String) {
+    if let Ok(mut h) = HINT.lock() {
+        *h = Some((label, std::time::Instant::now()));
+    }
+}
+
+pub fn hint_off() {
+    if let Ok(mut h) = HINT.lock() {
+        *h = None;
+    }
 }
 /// The big round play button.
 pub fn round_play(_: &Theme, s: button::Status) -> button::Style {

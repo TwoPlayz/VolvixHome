@@ -23,7 +23,9 @@
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function hideSplash() {
     const el = document.getElementById('splash');
-    if (el) { el.classList.add('splash-out'); setTimeout(function () { el.remove(); }, 450); }
+    // open the site with ?splash to keep the splash up for 5 seconds, to look at it
+    const hold = /[?&]splash\b/.test(location.search) ? 5000 : 0;
+    if (el) setTimeout(function () { el.classList.add('splash-out'); setTimeout(function () { el.remove(); }, 450); }, hold);
   }
 
   const LOGO = '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#E5484D"/><circle cx="16" cy="16" r="9.5" fill="none" stroke="#000" stroke-opacity=".22"/><circle cx="16" cy="16" r="3.5" fill="#111"/></svg>';

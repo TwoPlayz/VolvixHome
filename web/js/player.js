@@ -509,7 +509,20 @@ window.Spin = window.Spin || {};
     const like = S.$('[data-p="like"]');
     if (like) { like.hidden = !t; like.dataset.like = t ? t.id : ''; }
     const bars = S.$('[data-p="eq"]');
-    if (bars) { bars.classList.toggle('on', !!t); bars.classList.toggle('paused', !(st.playing && t)); }
+    if (bars) {
+      const pause = !(st.playing && t), was = bars.classList.contains('paused');
+      const is = bars.querySelectorAll('i');
+      if (pause && !was && bars.classList.contains('on')) {
+        // sink from wherever each bar is to the bottom, smoothly (a CSS class alone would make them jump)
+        const hs = Array.prototype.map.call(is, function (i) { return i.getBoundingClientRect().height; });
+        is.forEach(function (i, k) { i.style.animation = 'none'; i.style.transition = 'none'; i.style.height = hs[k] + 'px'; });
+        void bars.offsetHeight;
+        is.forEach(function (i) { i.style.transition = 'height .5s cubic-bezier(.2,.7,.3,1)'; i.style.height = '25%'; });
+      } else if (!pause && was) {
+        is.forEach(function (i) { i.style.animation = ''; i.style.transition = ''; i.style.height = ''; });
+      }
+      bars.classList.toggle('on', !!t); bars.classList.toggle('paused', pause);
+    }
     const more = S.$('[data-p="more"]');
     if (more) more.hidden = !t;
     const add = S.$('[data-p="add"]');

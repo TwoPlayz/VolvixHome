@@ -99,7 +99,8 @@ window.Spin = window.Spin || {};
     ticket: '<path d="M4 6h16a1 1 0 0 1 1 1v3a2 2 0 0 0 0 4v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a2 2 0 0 0 0-4V7a1 1 0 0 1 1-1z"/><path d="M14.5 6.5v2M14.5 11v2M14.5 15.5v2"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     minus: '<path d="M5 12h14"/>',
-    play: '<path ' + F + ' d="M7 4.6v14.8a1 1 0 0 0 1.5.86l12.3-7.4a1 1 0 0 0 0-1.72L8.5 3.74A1 1 0 0 0 7 4.6z"/>',
+    // the triangle is shifted left so it sits in the middle of a round button (a triangle's box centre isn't its visual centre)
+    play: '<path ' + F + ' transform="translate(-1.6 0)" d="M7 4.6v14.8a1 1 0 0 0 1.5.86l12.3-7.4a1 1 0 0 0 0-1.72L8.5 3.74A1 1 0 0 0 7 4.6z"/>',
     pause: '<rect ' + F + ' x="6" y="4" width="4" height="16" rx="1"/><rect ' + F + ' x="14" y="4" width="4" height="16" rx="1"/>',
     prev: '<path ' + F + ' d="M19 5.2v13.6a.8.8 0 0 1-1.25.66L8 12.66a.8.8 0 0 1 0-1.32l9.75-6.8A.8.8 0 0 1 19 5.2z"/><path d="M5.5 5v14"/>',
     next: '<path ' + F + ' d="M5 5.2v13.6a.8.8 0 0 0 1.25.66L16 12.66a.8.8 0 0 0 0-1.32L6.25 4.54A.8.8 0 0 0 5 5.2z"/><path d="M18.5 5v14"/>',
@@ -163,7 +164,7 @@ window.Spin = window.Spin || {};
   /* On Windows the buttons use the same icon font as the Windows app (Segoe Fluent Icons), so both look alike.
    * Elsewhere (Mac, phones, Linux) the drawn icons above are used. The cast icon ('devices') stays drawn. */
   const GLYPHS = {
-    play: 'E768', pause: 'E769', prev: 'E892', next: 'E893', shuffle: 'E8B1', repeat: 'E8EE', volume: 'E767',
+    prev: 'E892', next: 'E893', shuffle: 'E8B1', repeat: 'E8EE', volume: 'E767',
     home: 'E80F', search: 'E721', library: 'E8F1', queue: 'E90B', plus: 'E710', heart: 'EB51', heartFill: 'EB52',
     download: 'E896', check: 'E73E', bell: 'EA8F', users: 'E716', party: 'E716', partyFill: 'E716', family: 'E716',
     gear: 'E713', list: 'E8FD', x: 'E711', more: 'E712'

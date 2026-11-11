@@ -19,6 +19,9 @@ fn start() -> Instant {
     *T.get_or_init(Instant::now)
 }
 
+/// Seconds the bars take to sink after a pause.
+const SETTLE: f32 = 0.5;
+
 /// What the bars remember between frames: where they were, and when they were paused.
 struct Settle {
     last: Cell<[f32; 3]>,
@@ -81,9 +84,9 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for EqBars {
                 f
             } else {
                 // paused: ease down to the lowest level, like the bars dropping when the music stops
-                let k = ((t - st.paused_at.get().unwrap_or(t)) / 0.35).clamp(0.0, 1.0);
+                let k = ((t - st.paused_at.get().unwrap_or(t)) / SETTLE).clamp(0.0, 1.0);
                 let from = st.last.get()[i];
-                from + (0.25 - from) * (1.0 - (1.0 - k) * (1.0 - k))
+                from + (0.25 - from) * (1.0 - (1.0 - k).powi(3))
             };
             let h = (b.height * f).max(1.0);
             renderer.fill_quad(
@@ -99,7 +102,15 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for EqBars {
 
     fn on_event(&mut self, tree: &mut Tree, event: Event, _layout: Layout<'_>, _cursor: mouse::Cursor, _r: &R, _c: &mut dyn Clipboard, shell: &mut Shell<'_, M>, _viewport: &Rectangle) -> Status {
         // keep drawing while playing, and for the moment the bars take to sink after a pause
-        let settling = tree.state.downcast_ref::<Settle>().paused_at.get().map(|p| start().elapsed().as_secs_f32() - p < 0.4).unwrap_or(false);
+        let now = start().elapsed().as_secs_f32();
+        let st = tree.state.downcast_ref::<Settle>();
+        // note the moment of pausing here (not only when drawing), so the sinking starts at once and keeps getting frames
+        if self.playing {
+            st.paused_at.set(None);
+        } else if st.paused_at.get().is_none() {
+            st.paused_at.set(Some(now));
+        }
+        let settling = st.paused_at.get().map(|p| now - p < SETTLE).unwrap_or(false);
         if self.playing || settling {
             if let Event::Window(window::Event::RedrawRequested(_)) = event {
                 shell.request_redraw(RedrawRequest::NextFrame);
