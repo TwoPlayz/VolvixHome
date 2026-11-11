@@ -294,6 +294,43 @@ pub fn requests(app: &App) -> El<'_> {
         return column![ui::title("Requests", 32), crate::views::empty_state("download", "Lidarr isn't connected", about, action)].into();
     }
     let mut c = column![ui::title("Requests", 32), ui::dim("Music Lidarr is getting for you. It appears in your library as soon as it's imported.", 15)].spacing(16);
+    // what Lidarr is downloading right now
+    c = c.push(ui::title("Downloading", 22));
+    let items: Vec<serde_json::Value> = f.queue.as_ref().and_then(|q| q["items"].as_array().cloned()).unwrap_or_default();
+    if let Some(e) = f.queue.as_ref().and_then(|q| q["error"].as_str()) {
+        c = c.push(container(text(e).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+    } else if items.is_empty() {
+        c = c.push(ui::dim("Nothing downloading right now.", 13));
+    }
+    for d in items {
+        let title = d["title"].as_str().unwrap_or("").to_string();
+        let artist = d["artist"].as_str().unwrap_or("").to_string();
+        let state = d["state"].as_str().unwrap_or("").to_string();
+        let pct = (d["progress"].as_f64().unwrap_or(0.0) * 100.0).round();
+        let label = match state.as_str() {
+            "downloading" => "Downloading", "importPending" => "Ready to import", "importing" => "Importing", "imported" => "Imported", "failedPending" => "Problem",
+            "failed" => "Failed", "queued" | "delay" => "Waiting", "paused" => "Paused", "completed" => "Finishing", other => other,
+        }
+        .to_string();
+        let left = d["timeLeft"].as_str().map(|t| {
+            let p: Vec<u64> = t.split(|c| c == ':' || c == '.').filter_map(|x| x.parse().ok()).collect();
+            let secs = if p.len() >= 3 { p[p.len() - 3] * 3600 + p[p.len() - 2] * 60 + p[p.len() - 1] } else { 0 };
+            if secs == 0 { String::new() } else if secs >= 3600 { format!(" · {} h left", (secs as f64 / 3600.0).round()) } else if secs >= 60 { format!(" · {} min left", (secs as f64 / 60.0).round()) } else { " · Almost done".to_string() }
+        }).unwrap_or_default();
+        let mut meta = label;
+        if state == "downloading" {
+            meta = format!("{meta} · {pct}%{left}");
+        }
+        if let Some(m) = d["message"].as_str().filter(|m| !m.is_empty()) {
+            meta = format!("{meta} · {m}");
+        }
+        let art: El = match d["image"].as_str().and_then(|p| app.images.get(p)) {
+            Some(h) => image(h.clone()).width(48).height(48).content_fit(iced::ContentFit::Cover).into(),
+            None => ui::cover(None, &title, 48.0),
+        };
+        let bar = iced::widget::progress_bar(0.0..=100.0, pct as f32).height(4).style(|_: &iced::Theme| iced::widget::progress_bar::Style { background: ui::SURFACE_3().into(), bar: ui::ACCENT().into(), border: iced::border::rounded(2.0) });
+        c = c.push(container(row![art, column![text(clip(&title, 60)).size(15), ui::dim(artist, 12), bar, ui::dim(meta, 12)].spacing(3).width(Length::Fill)].spacing(14).align_y(Alignment::Center)).padding([6, 12]));
+    }
     if f.requests.is_empty() {
         return c
             .push(ui::title("Requested", 22))
@@ -684,6 +721,20 @@ pub fn notifications(app: &App) -> El<'_> {
 
 fn setting_row<'a>(title: impl text::IntoFragment<'a>, sub: impl text::IntoFragment<'a>, control: El<'a>) -> El<'a> {
     container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).width(Length::Fill), control].spacing(16).align_y(Alignment::Center)).padding([10, 4]).into()
+}
+
+/// A small label above a form field, like the website's.
+fn labelled<'a>(label: &'a str, field: El<'a>) -> El<'a> {
+    column![text(label).size(13).font(ui::FONT_BOLD), field].spacing(6).into()
+}
+
+/// The website's switch row: a bordered card with a title, a line of text and the switch.
+fn switch_card<'a>(title: &'a str, about: &'a str, on: bool, f: fn(bool) -> Message) -> El<'a> {
+    container(row![column![text(title).size(14).font(ui::FONT_BOLD), ui::dim(about, 13)].spacing(2).width(Length::Fill), switch(on, f)].spacing(16).align_y(Alignment::Center))
+        .padding([12, 14])
+        .width(Length::Fill)
+        .style(|_: &iced::Theme| container::Style { border: iced::Border { color: ui::BORDER(), width: 1.0, radius: 10.0.into() }, ..Default::default() })
+        .into()
 }
 
 fn switch<'a>(on: bool, f: fn(bool) -> Message) -> El<'a> {
@@ -1310,13 +1361,14 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
     let field = |placeholder: &'a str, value: &'a str, n: u8| text_input(placeholder, value).on_input(move |s| Message::DialogText(n, s)).on_submit(Message::DialogOk).padding(10).size(15).style(ui::input);
     let err = |e: &'a Option<String>| -> Option<El<'a>> { e.as_ref().map(|e| container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box).into()) };
     match d {
-        Dialog::NewPlaylist { name, description, add, collaborative } => {
+        Dialog::NewPlaylist { name, description, add, collaborative, public } => {
             let title = if add.is_empty() { "New playlist".to_string() } else { format!("New playlist with {} song{}", add.len(), if add.len() == 1 { "" } else { "s" }) };
             column![
                 ui::title(title, 22),
-                field("Name", name, 0),
-                field("Description (optional)", description, 1),
-                checkbox("Collaborative: people you invite can add and reorder songs", *collaborative).on_toggle(|v| Message::DialogFlag(0, v)).size(18).text_size(14),
+                labelled("Name", field("My playlist", name, 0).into()),
+                labelled("Description", field("Add an optional description", description, 1).into()),
+                switch_card("Collaborative", "People you invite can add, remove and reorder songs.", *collaborative, |v| Message::DialogFlag(0, v)),
+                switch_card("Visible to the household", "Everyone here can see it on the Household page.", *public, |v| Message::DialogFlag(1, v)),
                 buttons("Create", true),
             ]
             .spacing(14)
@@ -1324,9 +1376,9 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
         }
         Dialog::EditPlaylist { name, description, public, .. } => column![
             ui::title("Edit details", 22),
-            field("Name", name, 0),
-            field("Description (optional)", description, 1),
-            checkbox("Visible to the household", *public).on_toggle(|v| Message::DialogFlag(0, v)).size(18).text_size(14),
+            labelled("Name", field("", name, 0).into()),
+            labelled("Description", field("Add an optional description", description, 1).into()),
+            switch_card("Visible to the household", "Everyone here can see it on the Household page.", *public, |v| Message::DialogFlag(0, v)),
             buttons("Save", true),
         ]
         .spacing(14)
@@ -1343,10 +1395,10 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             );
             for p in app.playlists().into_iter().filter(|p| p.can_edit()) {
                 let all_in = tracks.iter().all(|t| p.tracks.contains(t));
-                let sub = format!("{}{} songs", if p.is_shared() { "Collaborative · " } else { "" }, p.tracks.len());
+                let sub = format!("{}{} song{}", if p.is_shared() { "Collaborative · " } else { "" }, p.tracks.len(), if p.tracks.len() == 1 { "" } else { "s" });
                 let mut r = row![playlist_art(app, &p, 44.0), column![text(clip(&p.name, 40)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
                 if all_in {
-                    r = r.push(ui::dim("Added", 12));
+                    r = r.push(row![ui::wi("check", 14.0, ui::TEXT_2()), ui::dim("Added", 12)].spacing(4).align_y(Alignment::Center));
                 }
                 list = list.push(button(r).width(Length::Fill).padding(6).style(ui::flat).on_press_maybe((!all_in).then(|| Message::AddToChosen(p.id.clone()))));
             }
@@ -1380,6 +1432,53 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 None => column![ui::dim("That song isn't here any more.", 14), close].spacing(14).into(),
             }
         }
+        Dialog::AlbumInfo { album } => {
+            let close = row![horizontal_space(), ui::btn("Close", ui::Btn::Secondary).on_press(Message::DialogCancel)];
+            let Some(a) = app.lib.album(album) else { return column![ui::dim("That album isn't here any more.", 14), close].spacing(14).into() };
+            let tracks = app.lib.album_tracks(album);
+            let q = &a.quality;
+            let quality = if q.lossless {
+                let hi = q.bits.unwrap_or(16) >= 24 || q.khz.unwrap_or(44.1) > 48.0;
+                let detail = [q.bits.map(|b| format!("{b}-bit")), q.khz.map(|k| format!("{k} kHz")), Some(q.codec.clone()).filter(|c| !c.is_empty())].into_iter().flatten().collect::<Vec<_>>().join(" / ");
+                format!("{}{}", if hi { "Hi-Res Lossless" } else { "Lossless" }, if detail.is_empty() { String::new() } else { format!(" ({detail})") })
+            } else {
+                let k = q.kbps.unwrap_or(0);
+                format!("{} ({} {})", if k >= 256 { "High Quality" } else if k >= 128 { "Normal" } else { "Low" }, if q.codec.is_empty() { "Audio" } else { q.codec.as_str() }, if k > 0 { format!("{k} kbps") } else { String::new() })
+            };
+            let secs: f64 = tracks.iter().map(|t| t.duration as f64).sum();
+            let mut rows: Vec<(&str, String)> = vec![];
+            if let Some(y) = a.year { rows.push(("Released", y.to_string())); }
+            if let Some(l) = &a.label { rows.push(("Label", l.clone())); }
+            if let Some(n) = &a.catalog_number { rows.push(("Catalog number", n.clone())); }
+            if let Some(g) = &a.genre { rows.push(("Genre", g.clone())); }
+            rows.push(("Songs", format!("{} · {} min", tracks.len(), (secs / 60.0).round() as u64)));
+            rows.push(("Quality", quality));
+            if let Some(c) = &a.copyright { rows.push(("Copyright", c.clone())); }
+            let line = |k: &str, v: String| -> El<'_> { row![container(ui::dim(k.to_string(), 13)).width(130), text(v).size(14).width(Length::Fill)].spacing(8).into() };
+            let mut body = column![row![cover_of(app, Some(a), 56.0), column![text(a.title.clone()).size(16).font(ui::FONT_BOLD), ui::dim(a.artist.clone(), 13)].spacing(2)].spacing(12).align_y(Alignment::Center)].spacing(10);
+            for (k, v) in rows {
+                body = body.push(line(k, v));
+            }
+            let mut roles: Vec<(String, Vec<String>)> = vec![];
+            for t in &tracks {
+                for c in &t.credits {
+                    if c.role == "ISRC" { continue; }
+                    let i = match roles.iter().position(|(r, _)| *r == c.role) { Some(i) => i, None => { roles.push((c.role.clone(), vec![])); roles.len() - 1 } };
+                    for n in c.names.split(", ") {
+                        if !roles[i].1.iter().any(|x| x.eq_ignore_ascii_case(n)) { roles[i].1.push(n.to_string()); }
+                    }
+                }
+            }
+            if roles.is_empty() {
+                body = body.push(ui::dim("No credits are tagged in these files. Open a song's menu (the three dots) and choose Credits to look it up on MusicBrainz.", 13));
+            } else {
+                body = body.push(ui::dim("Credits on this album", 13));
+                for (r, n) in roles {
+                    body = body.push(line(&r, n.join(", ")));
+                }
+            }
+            column![ui::title("Album info", 22), container(scrollable(body).style(ui::scroller)).max_height(380), close].spacing(14).into()
+        }
         Dialog::Share { kind, name, tracks, days, link, error, busy } => {
             let what = if kind == "album" { "this album" } else { "this playlist" };
             let mut c = column![
@@ -1400,7 +1499,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                     let path = url.find("/s/").or(url.find("/share")).map(|i| url[i..].to_string()).unwrap_or_default();
                     c = c
                         .push(row![text_input("", url).padding(10).size(14).style(ui::input), ui::btn_icon("copy", "Copy", ui::Btn::Secondary, true).on_press(Message::ShareCopy(path))].spacing(8).align_y(Alignment::Center))
-                        .push(ui::dim(format!("Works for {left}."), 12))
+                        .push(ui::dim(format!("Works for {}.{}", left.trim_end_matches(" left"), if url.contains("//localhost") || url.contains("//127.") { " This address only works on this computer: open Volvix Home by your server's network or internet address to share with others." } else { "" }), 12))
                         .push(row![horizontal_space(), ui::btn("Close", ui::Btn::Secondary).on_press(Message::DialogCancel)]);
                 }
             }

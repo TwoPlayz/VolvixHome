@@ -245,7 +245,7 @@ pub enum Screen {
 /// A small window over the app (new playlist, rename, pick a playlist, change password…).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
-    NewPlaylist { name: String, description: String, add: Vec<String>, collaborative: bool },
+    NewPlaylist { name: String, description: String, add: Vec<String>, collaborative: bool, public: bool },
     EditPlaylist { id: String, name: String, description: String, public: bool },
     DeletePlaylist { id: String, name: String },
     AddTo { tracks: Vec<String> },
@@ -262,6 +262,8 @@ pub enum Dialog {
     Folder { browse: Option<volvix_core::admin::Browse>, error: Option<String> },
     /// a song's credits (from its ⋯ menu)
     Credits { track: String },
+    /// an album's info and who is credited on it
+    AlbumInfo { album: String },
     /// make a share link for an album or playlist: how long, then the link to copy
     Share { kind: String, name: String, tracks: Vec<String>, days: u32, link: Option<(String, String)>, error: Option<String>, busy: bool },
     /// who can edit a collaborative playlist (ticked = can edit, or invited)
@@ -296,6 +298,8 @@ pub struct FindState {
     pub asked: HashSet<String>,
     pub asking: HashSet<String>,
     pub requests: Vec<Request>,
+    /// what Lidarr is downloading right now (`/api/lidarr/queue`)
+    pub queue: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -342,6 +346,7 @@ pub enum Message {
     PlayNext(String),
     /// a song's credits in a window; a share link for an album ("album") or playlist: open, pick days, make it
     ShowCredits(String),
+    ShowAlbumInfo(String),
     ShareOpen(String, String, Vec<String>),
     ShareDays(u32),
     ShareCreate,
@@ -440,6 +445,7 @@ pub enum Message {
     RequestMusic(String, String),
     Requested(String, Result<(), Error>),
     RequestsLoaded(Result<Vec<Request>, Error>),
+    QueueLoaded(Result<serde_json::Value, Error>),
     CancelRequest(String),
 
     /* downloads */
@@ -963,7 +969,11 @@ impl App {
                     tasks.push(Task::perform(blocking(move || c.shared()), Message::SharedLoaded));
                 }
                 Page::Notifications => tasks.push(Task::perform(blocking(move || c.notifications()), Message::NotesLoaded)),
-                Page::GetMusic => tasks.push(Task::perform(blocking(move || c.requests()), Message::RequestsLoaded)),
+                Page::GetMusic => {
+                    let c2 = c.clone();
+                    tasks.push(Task::perform(blocking(move || c2.lidarr_queue()), Message::QueueLoaded));
+                    tasks.push(Task::perform(blocking(move || c.requests()), Message::RequestsLoaded));
+                }
                 Page::Settings => {
                     let (c2, c3) = (c.clone(), c.clone());
                     tasks.push(Task::perform(blocking(move || c3.shares()), Message::SharesLoaded));
@@ -1291,6 +1301,18 @@ impl App {
     /// Seconds of crossfade between songs, from your settings (shared with the website; 0 = off).
     pub fn crossfade_secs(&self) -> f32 {
         userdata::setting(&self.data, "crossfade").and_then(|v| v.as_f64()).unwrap_or(0.0).clamp(0.0, 12.0) as f32
+    }
+
+    /// The queue played out (or was skipped past its last song): back to "Nothing playing", like the website.
+    fn end_queue(&mut self) {
+        self.player.stop();
+        self.queue.clear();
+        self.status.track = None;
+        self.status.playing = false;
+        self.status.finished = false;
+        self.status.position = Duration::ZERO;
+        self.status.duration = None;
+        let _ = std::fs::remove_file(self.dir.join("resume.json"));
     }
 
     /// The song after this one took over by itself (it faded in as the last one faded out): move the queue on.
@@ -1700,6 +1722,7 @@ impl App {
                     self.pl_covers.insert((id, v), image::Handle::from_bytes(b));
                 }
             }
+            Message::ShowAlbumInfo(id) => self.dialog = Some(Dialog::AlbumInfo { album: id }),
             Message::ShowCredits(id) => {
                 self.dialog = Some(Dialog::Credits { track: id.clone() });
                 if !self.credits.contains_key(&id) {
@@ -2001,9 +2024,12 @@ impl App {
                 Err(e) => self.say(e.to_string()),
             },
             Message::Next => {
-                if self.queue.next(false).is_some() || self.queue.current().is_some() {
-                    // on the last song, Next starts it over
+                if self.queue.next(false).is_some() {
                     return self.start_current(true);
+                }
+                // skipping past the last song ends the queue, like the song finishing
+                if self.queue.current().is_some() {
+                    self.end_queue();
                 }
             }
             Message::Previous => {
@@ -2072,7 +2098,7 @@ impl App {
                 self.say(if on { "Added to Liked Songs" } else { "Removed from Liked Songs" });
                 return self.edit(vec![Edit::Like { track, on, at: userdata::now() }]);
             }
-            Message::NewPlaylist(add) => self.dialog = Some(Dialog::NewPlaylist { name: String::new(), description: String::new(), add, collaborative: false }),
+            Message::NewPlaylist(add) => self.dialog = Some(Dialog::NewPlaylist { name: String::new(), description: String::new(), add, collaborative: false, public: false }),
             Message::EditPlaylist(id) => {
                 if let Some(p) = self.playlist(&id) {
                     self.dialog = Some(Dialog::EditPlaylist { id, name: p.name, description: p.description, public: p.public });
@@ -2208,6 +2234,7 @@ impl App {
             },
             Message::DialogFlag(field, v) => match (&mut self.dialog, field) {
                 (Some(Dialog::NewPlaylist { collaborative, .. }), 0) => *collaborative = v,
+                (Some(Dialog::NewPlaylist { public, .. }), 1) => *public = v,
                 (Some(Dialog::EditPlaylist { public, .. }), 0) => *public = v,
                 _ => {}
             },
@@ -2327,6 +2354,11 @@ impl App {
                         }
                     }
                     Err(e) => self.say(e.to_string()),
+                }
+            }
+            Message::QueueLoaded(r) => {
+                if let Ok(q) = r {
+                    self.find.queue = Some(q);
                 }
             }
             Message::RequestsLoaded(r) => {
@@ -2835,7 +2867,7 @@ impl App {
     fn dialog_ok(&mut self) -> Task<Message> {
         let Some(d) = self.dialog.clone() else { return Task::none() };
         match d {
-            Dialog::NewPlaylist { name, description, add, collaborative } => {
+            Dialog::NewPlaylist { name, description, add, collaborative, public } => {
                 self.dialog = None;
                 let name = if name.trim().is_empty() { format!("My Playlist #{}", self.data.playlists.len() + 1) } else { name.trim().to_string() };
                 let id = userdata::new_playlist_id();
@@ -2846,6 +2878,7 @@ impl App {
                     description: description.trim().to_string(),
                     owner: userdata::ME.into(),
                     tracks: add.iter().map(|t| volvix_core::PlaylistEntry { id: t.clone(), added_by: userdata::ME.into(), at: now }).collect(),
+                    public,
                     ..Default::default()
                 };
                 self.say(format!("Created \"{name}\""));
@@ -2855,7 +2888,7 @@ impl App {
                     let Some(c) = self.client.clone() else { return t };
                     let ids = pl.track_ids();
                     let old = id.clone();
-                    return Task::batch([t, Task::perform(blocking(move || c.create_shared(&pl.name, &pl.description, false, &ids)), move |r| Message::SharedCreated(r, old.clone()))]);
+                    return Task::batch([t, Task::perform(blocking(move || c.create_shared(&pl.name, &pl.description, pl.public, &ids)), move |r| Message::SharedCreated(r, old.clone()))]);
                 }
                 if add.is_empty() {
                     return Task::batch([t, self.go(Page::Playlist(id))]);
@@ -2886,7 +2919,7 @@ impl App {
                 }
                 self.edit(vec![Edit::DeletePlaylist(id)])
             }
-            Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } | Dialog::Folder { .. } | Dialog::Credits { .. } | Dialog::Share { .. } => Task::none(),
+            Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } | Dialog::Folder { .. } | Dialog::Credits { .. } | Dialog::AlbumInfo { .. } | Dialog::Share { .. } => Task::none(),
             Dialog::Collab { id, picked } => {
                 self.dialog = None;
                 let Some(p) = self.playlist(&id) else { return Task::none() };
@@ -3008,7 +3041,7 @@ impl App {
             "settings" => tasks.push(self.go(Page::Settings)),
             "household" => tasks.push(self.go(Page::Household)),
             "notifications" => tasks.push(self.go(Page::Notifications)),
-            "dialog" => self.dialog = Some(Dialog::NewPlaylist { name: "Sunday morning".into(), description: String::new(), add: vec![], collaborative: false }),
+            "dialog" => self.dialog = Some(Dialog::NewPlaylist { name: "Sunday morning".into(), description: String::new(), add: vec![], collaborative: false, public: false }),
             "credits" => {
                 tasks.push(self.update(Message::PlayAlbum(first.0, 0)));
                 self.np_tab = NpTab::Credits;
@@ -3076,14 +3109,7 @@ impl App {
             if self.queue.next(true).is_some() {
                 tasks.push(self.start_current(true));
             } else {
-                // the last song finished: the player goes back to "Nothing playing" (like the website)
-                self.player.stop();
-                self.queue.clear();
-                self.status.track = None;
-                self.status.playing = false;
-                self.status.position = Duration::ZERO;
-                self.status.duration = None;
-                let _ = std::fs::remove_file(self.dir.join("resume.json"));
+                self.end_queue();
             }
         }
         tasks.push(self.resume_last());

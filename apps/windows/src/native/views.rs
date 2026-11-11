@@ -535,6 +535,7 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                 let ids: Vec<String> = app.lib.album_tracks(id).iter().map(|t| t.id.clone()).collect();
                 items.push(item("queue", "Add to queue", Message::QueueMany(ids.clone()), false));
                 items.push(item("queue", "Play next", Message::PlayNextMany(ids.clone()), false));
+                items.push(item("book", "Credits & info", Message::ShowAlbumInfo(id.clone()), false));
                 if app.can("share") {
                     items.push(item("send", "Share link…", Message::ShareOpen("album".into(), a.title.clone(), ids), false));
                 }
@@ -1207,7 +1208,9 @@ fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
         }]),
     ]
     .spacing(6);
-    let mut c = column![head].spacing(28);
+    let first = p.albums.first().or(p.appears_on.first());
+    let hero = ui::artist_hero::<Message>(&page_name, first.map(|a| a.title.as_str()).unwrap_or(&page_name), 152.0);
+    let mut c = column![row![hero, head].spacing(28).align_y(Alignment::Center)].spacing(28);
     if !p.songs.is_empty() {
         let top: Vec<&Track> = p.songs.iter().take(5).copied().collect();
         c = c.push(section("Songs", track_list(app, &top, &page_name, Numbers::Place, true, Rows::Plain)));

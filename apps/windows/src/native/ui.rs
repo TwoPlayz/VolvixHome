@@ -554,6 +554,19 @@ pub fn cover_box<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, w: f32,
         .into()
 }
 
+/// The artist page's big round stand-in: the artist's first album's tint with their initials.
+pub fn artist_hero<'a, M: 'a>(name: &str, tint_of: &str, size: f32) -> Element<'a, M> {
+    let initials: String = name.split_whitespace().filter(|w| w.chars().any(|c| c.is_alphanumeric())).filter_map(|w| w.chars().next()).take(2).collect::<String>().to_uppercase();
+    let bg = tint_for(tint_of);
+    container(text(initials).size(size * 0.36).font(FONT_BOLD).color(Color { a: 0.92, ..rgb(0xF5, 0xF5, 0xF7) }))
+        .width(size)
+        .height(size)
+        .center_x(size)
+        .center_y(size)
+        .style(move |_: &Theme| container::Style { background: Some(bg.into()), border: border::rounded(size), ..Default::default() })
+        .into()
+}
+
 /// A steady colour per album, so drawn covers are told apart.
 fn tint_for(s: &str) -> Color {
     let h = s.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ b as u32);
