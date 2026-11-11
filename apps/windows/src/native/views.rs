@@ -720,6 +720,12 @@ fn main_screen(app: &App) -> El<'_> {
         layers = layers.push(opaque(mouse_area(container(account_menu(app)).width(Length::Fill).height(Length::Fill).align_x(Alignment::Start).align_y(Alignment::End).padding(Padding { left: 16.0, bottom: 164.0, ..Padding::ZERO })).on_press(Message::AccountMenu(false))));
     }
     if let Some(d) = &app.dialog {
+        if matches!(d, crate::Dialog::PlayOn) {
+            // the website's "Play on" is a small pop-up above the player bar, not a centred dialog
+            let card = container(pages::dialog(app, d)).width(300).padding(6).style(ui::dialog);
+            layers = layers.push(opaque(mouse_area(container(opaque(card)).width(Length::Fill).height(Length::Fill).align_x(Alignment::End).align_y(Alignment::End).padding(Padding { right: 150.0, bottom: 96.0, ..Padding::ZERO })).on_press(Message::DialogCancel)));
+            return layers.into();
+        }
         let card = container(pages::dialog(app, d)).width(440).padding(24).style(ui::dialog);
         layers = layers.push(opaque(mouse_area(container(opaque(card)).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill).style(ui::scrim)).on_press(Message::DialogCancel)));
     }

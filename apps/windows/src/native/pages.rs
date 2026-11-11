@@ -1597,51 +1597,53 @@ fn people_list<'a>(app: &'a App, picked: &'a [String], skip: &[String]) -> El<'a
 
 /// The cast button's window: where the sound plays, and the listening party.
 fn play_on(app: &App) -> El<'_> {
-    let item = |icon_char: char, label: String, sub: Option<String>, on: bool, msg: Option<Message>, danger: bool| -> El<'_> {
-        let mut t = column![text(label).size(15).color(if danger { ui::ACCENT() } else { ui::TEXT() })].spacing(2);
+    let line = || -> El<'_> { container(iced::widget::Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER().into()), ..Default::default() }).into() };
+    let item = |icon_name: &'static str, label: String, sub: Option<String>, on: bool, msg: Option<Message>, danger: bool| -> El<'_> {
+        let mut t = column![text(label).size(14).font(ui::FONT_BOLD).color(if danger { ui::ACCENT() } else { ui::TEXT() })].spacing(2);
         if let Some(s) = sub {
             t = t.push(ui::dim(s, 12));
         }
-        button(row![ic(if on { icon::DOWNLOADED } else { icon_char }, 16), t.width(Length::Fill)].spacing(12).align_y(Alignment::Center))
+        button(row![ui::wi(if on { "check" } else { icon_name }, 18.0, if danger { ui::ACCENT() } else { ui::TEXT_2() }), t.width(Length::Fill)].spacing(12).align_y(Alignment::Center))
             .width(Length::Fill)
-            .padding(8)
+            .padding([9, 12])
             .style(ui::flat)
             .on_press_maybe(msg)
             .into()
     };
-    let mut c = column![ui::title("Play on", 22), ui::dim("One device plays at a time", 12)].spacing(4);
+    let mut c = column![container(column![text("Play on").size(14).font(ui::FONT_BOLD), ui::dim("One device plays at a time", 12)].spacing(2)).padding([8, 12]), line()].spacing(4);
     let mut list = Column::new().spacing(2);
     let casting = app.cast.as_ref();
-    list = list.push(item(icon::DEVICES, "This computer".into(), None, casting.is_none(), casting.map(|_| Message::CastStop), false));
+    list = list.push(item("devices", "This computer".into(), None, casting.is_none(), casting.map(|_| Message::CastStop), false));
+    list = list.push(line());
     match casting {
         Some(l) => {
-            list = list.push(item(icon::DEVICES, format!("Casting to {}", l.name), None, true, None, false));
-            list = list.push(item(icon::CLOSE, "Stop casting".into(), None, false, Some(Message::CastStop), false));
+            list = list.push(item("devices", format!("Casting to {}", l.name), None, true, None, false));
+            list = list.push(item("x", "Stop casting".into(), None, false, Some(Message::CastStop), false));
         }
         None => {
             for (i, d) in app.cast_devices.iter().enumerate() {
-                list = list.push(item(icon::DEVICES, d.name.clone(), (!d.model.is_empty()).then(|| d.model.clone()), false, Some(Message::CastStart(i)), false));
+                list = list.push(item("devices", d.name.clone(), (!d.model.is_empty()).then(|| d.model.clone()), false, Some(Message::CastStart(i)), false));
             }
             if app.cast_devices.is_empty() {
                 list = list.push(ui::dim("No TVs or speakers found yet", 13));
             }
-            list = list.push(item(icon::ADD, "Add a TV or speaker by address…".into(), None, false, Some(Message::CastAddOpen), false));
+            list = list.push(item("plus", "Add a TV or speaker by address…".into(), None, false, Some(Message::CastAddOpen), false));
         }
     }
     // the listening party lives here too: start it, invite people, leave or end it
-    list = list.push(container(text("")).height(8));
+    list = list.push(line());
     match &app.party {
-        None => list = list.push(item(icon::PEOPLE, "Start a listening party…".into(), None, false, Some(Message::PartyStartOpen), false)),
+        None => list = list.push(item("users", "Start a listening party…".into(), None, false, Some(Message::PartyStartOpen), false)),
         Some(p) => {
             let me = app.my_id();
             let host = p.host == me;
             let names: Vec<String> = p.members.iter().map(|m| if m.id == me { "You".to_string() } else { app.person_name(&m.id) }).collect();
             let who = if host { "You're the host".to_string() } else { format!("{} is the host", app.person_name(&p.host)) };
-            list = list.push(item(icon::PEOPLE, format!("Listening party ({} here)", p.members.len()), Some(format!("{} · {who}", names.join(", "))), true, None, false));
-            list = list.push(item(icon::ADD, "Invite people".into(), None, false, Some(Message::PartyInviteOpen), false));
-            list = list.push(item(icon::CLOSE, if host { "End party for everyone".into() } else { "Leave party".into() }, None, false, Some(Message::PartyLeave), true));
+            list = list.push(item("users", format!("Listening party ({} here)", p.members.len()), Some(format!("{} · {who}", names.join(", "))), true, None, false));
+            list = list.push(item("plus", "Invite people".into(), None, false, Some(Message::PartyInviteOpen), false));
+            list = list.push(item("x", if host { "End party for everyone".into() } else { "Leave party".into() }, None, false, Some(Message::PartyLeave), true));
         }
     }
     c = c.push(scrollable(list).style(ui::scroller).height(Length::Shrink));
-    c.push(row![horizontal_space(), button(text("Close").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel)]).spacing(14).into()
+    c.into()
 }
