@@ -55,6 +55,8 @@ pub mod icon {
     pub const GLOBE: char = '\u{E774}';
     pub const PLAYLIST: char = '\u{E8FD}';
     pub const CLOSE: char = '\u{E711}';
+    pub const PERSON: char = '\u{E77B}';
+    pub const SIGN_OUT: char = '\u{E7E8}';
 }
 
 pub fn icon<'a>(c: char, size: u16) -> iced::widget::Text<'a, Theme> {
@@ -219,6 +221,31 @@ pub fn secondary(_: &Theme, s: button::Status) -> button::Style {
         ..Default::default()
     }
 }
+/// Seconds since the app started (drives the launch screen's animation).
+pub fn since_start() -> f32 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_secs_f32()
+}
+
+/// How long the launch screen stays at least (one full breath of the logo).
+pub const SPLASH_MIN: f32 = 1.6;
+
+/// The launch screen, like the website's: the logo breathes (1 → 0.94 → 1 every 1.6 s) and "Volvix" fades in under it.
+pub fn splash<'a, M: 'a>() -> Element<'a, M> {
+    let t = since_start();
+    let breathe = 1.0 - 0.06 * (0.5 - 0.5 * (t / 1.6 * std::f32::consts::TAU).cos());
+    let word = ((t - 0.15) / 0.5).clamp(0.0, 1.0);
+    let word = 1.0 - (1.0 - word).powi(2); // ease-out
+    let mark = container(crate::marks::logo_scaled::<M>(104.0, breathe)).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill);
+    let name = container(text("Volvix").size(22).font(FONT_BOLD).color(Color { a: word, ..TEXT }))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .padding(iced::Padding { top: 144.0 + (1.0 - word) * 12.0, ..Default::default() });
+    container(iced::widget::stack![mark, name]).width(Length::Fill).height(Length::Fill).style(|_: &Theme| container::Style { background: Some(SURFACE.into()), ..Default::default() }).into()
+}
+
 /// The website's segmented control: a few choices in one pill, the chosen one raised.
 pub fn seg<'a>(options: &[(&'a str, &'a str)], selected: &str, f: impl Fn(String) -> crate::Message + 'a) -> Element<'a, crate::Message> {
     let mut r = iced::widget::Row::new().spacing(2).align_y(iced::Alignment::Center);

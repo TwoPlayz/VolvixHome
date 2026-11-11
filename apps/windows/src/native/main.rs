@@ -333,6 +333,8 @@ pub enum Message {
     SetCloseToTray(bool),
     SetAutoUpdate(bool),
     SetDownloadMetered(bool),
+    /// the account menu under the profile button (Settings, Sign out)
+    AccountMenu(bool),
     SetResume(bool),
     SetSleep(String),
     CheckUpdate,
@@ -341,6 +343,8 @@ pub enum Message {
     ServerStatus(Result<ServerStatus, Error>),
 
     Tick,
+    /// a new frame while the launch screen animates
+    Frame,
     WindowReady(Option<window::Id>),
     Hwnd(Option<isize>),
     CloseRequested(window::Id),
@@ -451,6 +455,9 @@ pub struct App {
     /// where the last session stopped has been put back (once per start)
     resumed: bool,
     resume_saved_at: Instant,
+    /// everything has loaded but the launch screen is still finishing its breath
+    splash_hold: bool,
+    pub account_menu: bool,
 }
 
 fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl std::future::Future<Output = T> {
@@ -460,6 +467,7 @@ fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl s
 impl App {
     fn new(instance: Receiver<()>, start_hidden: bool) -> (App, Task<Message>) {
         let dir = app_dir();
+        ui::since_start(); // the launch screen's clock starts now
         let saved = SavedSession::load(&dir);
         let settings = Settings::load();
         let (update_tx, update_rx) = mpsc::channel();
@@ -549,6 +557,8 @@ impl App {
             sleep_song: false,
             resumed: false,
             resume_saved_at: Instant::now(),
+            splash_hold: false,
+            account_menu: false,
         };
         app.apply_volume();
         let mut tasks = vec![window::get_oldest().map(Message::WindowReady)];
@@ -603,6 +613,9 @@ impl App {
     /// Every message lands here; the cache is refreshed afterwards unless it's one of the frequent
     /// ones (the clock, a slider, hovering while dragging) that can't change what it holds.
     fn update(&mut self, msg: Message) -> Task<Message> {
+        if self.account_menu && matches!(msg, Message::Go(_) | Message::SignOut) {
+            self.account_menu = false; // a choice in the account menu closes it
+        }
         let hot = matches!(msg, Message::Tick | Message::Volume(_) | Message::DragOver(_) | Message::CoverLoaded(..) | Message::ImageLoaded(..));
         let track_before = self.status.track.clone();
         let t = self.handle(msg);
@@ -1037,7 +1050,9 @@ impl App {
                             self.invites = s.invites;
                         }
                         self.offline = l.offline;
-                        self.screen = Screen::Main;
+                        // the launch screen stays for one full breath, even when the library arrives at once
+                        self.splash_hold = ui::since_start() < ui::SPLASH_MIN;
+                        self.screen = if self.splash_hold { Screen::Loading } else { Screen::Main };
                         self.save_session();
                         self.refresh_mixes();
                         if self.offline {
@@ -1492,7 +1507,11 @@ impl App {
                 (Some(Dialog::EditPlaylist { public, .. }), 0) => *public = v,
                 _ => {}
             },
-            Message::DialogCancel => self.dialog = None,
+            Message::DialogCancel => {
+                self.dialog = None;
+                self.account_menu = false;
+            }
+            Message::AccountMenu(open) => self.account_menu = open,
             Message::DialogOk => return self.dialog_ok(),
             Message::PasswordDone(r) => match r {
                 Ok((c, _)) => {
@@ -1700,6 +1719,12 @@ impl App {
 
             /* ---------- the clock: player status, saving, presence, tray, media keys, updates ---------- */
             Message::Tick => return self.tick(),
+            Message::Frame => {
+                if self.splash_hold && ui::since_start() >= ui::SPLASH_MIN {
+                    self.splash_hold = false;
+                    self.screen = Screen::Main;
+                }
+            }
             Message::WindowReady(id) => {
                 self.window = id;
                 if let Some(id) = id {
@@ -2184,6 +2209,10 @@ impl App {
         // Escape closes a dialog or Now Playing; Space plays/pauses when no text box is in use
         // the window was maximized or restored some other way (Win+Up, snapping): keep the button right
         subs.push(window::resize_events().map(|_| Message::CheckMaximized));
+        // the launch screen animates every frame
+        if self.screen == Screen::Loading {
+            subs.push(window::frames().map(|_| Message::Frame));
+        }
         subs.push(iced::keyboard::on_key_press(|key, mods| {
             use iced::keyboard::{key::Named, Key};
             match key {

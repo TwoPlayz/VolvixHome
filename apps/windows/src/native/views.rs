@@ -18,7 +18,7 @@ pub fn view(app: &App) -> El<'_> {
     let body: El = match app.screen {
         Screen::Connect => connect(app),
         Screen::SignIn => sign_in(app),
-        Screen::Loading => centered(column![marks::logo(48.0), ui::title("Volvix Home", 28), ui::dim("Loading your music…", 15)].spacing(10).align_x(Alignment::Center).into()),
+        Screen::Loading => ui::splash(),
         Screen::Main => main_screen(app),
     };
     let framed: El = column![title_bar(app), container(body).width(Length::Fill).height(Length::Fill)].into();
@@ -417,6 +417,9 @@ fn main_screen(app: &App) -> El<'_> {
                 .padding(Padding { bottom: 110.0, ..Padding::ZERO }),
         );
     }
+    if app.account_menu {
+        layers = layers.push(opaque(mouse_area(container(account_menu(app)).width(Length::Fill).height(Length::Fill).align_x(Alignment::Start).align_y(Alignment::End).padding(Padding { left: 16.0, bottom: 64.0, ..Padding::ZERO })).on_press(Message::AccountMenu(false))));
+    }
     if let Some(d) = &app.dialog {
         let card = container(pages::dialog(app, d)).width(440).padding(24).style(ui::dialog);
         layers = layers.push(opaque(mouse_area(container(opaque(card)).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill).style(ui::scrim)).on_press(Message::DialogCancel)));
@@ -470,8 +473,35 @@ fn sidebar(app: &App) -> El<'_> {
         .width(Length::Fill)
         .padding([8, 14])
         .style(ui::nav(is(&Page::Settings)))
-        .on_press(Message::Go(Page::Settings));
+        .on_press(Message::AccountMenu(!app.account_menu));
     container(column![nav, ui::gap(10), playlists, bottom].spacing(4)).width(240).height(Length::Fill).padding(8).style(ui::panel).into()
+}
+
+/// The menu the profile button opens, like the website's: who you are, then Account, Settings and Sign out.
+fn account_menu(app: &App) -> El<'_> {
+    let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
+    let initial: String = user.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    let avatar = container(text(initial).size(18).font(ui::FONT_BOLD)).width(40).height(40).center_x(40).center_y(40).style(|_: &iced::Theme| container::Style {
+        background: Some(iced::Color::from_rgb8(0x5E, 0x54, 0x8E).into()),
+        border: iced::border::rounded(100.0),
+        text_color: Some(ui::TEXT),
+        ..Default::default()
+    });
+    let head = row![avatar, column![text(clip(&user.name, 22)).size(15).font(ui::FONT_BOLD), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(1)].spacing(12).align_y(Alignment::Center);
+    let item = |c: char, label: &'static str, m: Message| -> El<'static> {
+        button(row![ic(c, 16), text(label).size(14)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([9, 12]).style(ui::flat).on_press(m).into()
+    };
+    let go = |p: Page| Message::Go(p);
+    let card = column![
+        container(head).padding([8, 12]),
+        container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER.into()), ..Default::default() }),
+        item(icon::PERSON, "Account", go(Page::Settings)),
+        item(icon::SETTINGS, "Settings", go(Page::Settings)),
+        container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER.into()), ..Default::default() }),
+        item(icon::SIGN_OUT, "Sign out", Message::SignOut),
+    ]
+    .spacing(2);
+    opaque(container(card).width(248).padding(6).style(ui::dialog)).into()
 }
 
 fn bell(app: &App) -> El<'_> {

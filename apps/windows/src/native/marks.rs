@@ -123,10 +123,16 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for EqBars {
 /// The Volvix logo (web/index.html): a red disc, a faint ring, a black centre, on a 32-unit grid.
 pub struct Logo {
     size: f32,
+    /// drawn this much smaller or larger around its centre (the launch screen breathes)
+    scale: f32,
 }
 
 pub fn logo<'a, M: 'a>(size: f32) -> Element<'a, M> {
-    Element::new(Logo { size })
+    Element::new(Logo { size, scale: 1.0 })
+}
+
+pub fn logo_scaled<'a, M: 'a>(size: f32, scale: f32) -> Element<'a, M> {
+    Element::new(Logo { size, scale })
 }
 
 impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for Logo {
@@ -140,8 +146,8 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for Logo {
 
     fn draw(&self, _tree: &Tree, renderer: &mut R, _theme: &Th, _style: &renderer::Style, layout: Layout<'_>, _cursor: mouse::Cursor, _viewport: &Rectangle) {
         let b = layout.bounds();
-        let u = self.size / 32.0;
-        let (cx, cy) = (b.x + 16.0 * u, b.y + 16.0 * u);
+        let (cx, cy) = (b.x + self.size / 2.0, b.y + self.size / 2.0);
+        let u = self.size * self.scale / 32.0;
         let circle = |r: f32| Rectangle { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
         let none = Color::TRANSPARENT;
         // disc r=15
