@@ -35,6 +35,9 @@ const CONNECT_URL: &str = "vh://localhost/connect.html";
 const CONNECT_HTML: &str = include_str!("../assets/connect.html");
 /// Only this PC can reach it: a second launch tells the first one to come forward.
 const INSTANCE_ADDR: &str = "127.0.0.1:47471";
+/// The release file the updater downloads (see update.rs) and the Windows startup entry (settings.rs).
+pub const RELEASE_EXE: &str = "volvix-home.exe";
+pub const RUN_NAME: &str = "Volvix Home";
 
 /// UI-thread messages from the page (IPC), the tray and background threads.
 enum UserEvent {

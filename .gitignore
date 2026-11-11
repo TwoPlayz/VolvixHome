@@ -1,4 +1,5 @@
 server/target/
+core/target/
 data/
 config/
 *.tmp
