@@ -165,7 +165,7 @@ struct Fade {
 
 fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>, eq: crate::eq::Shared, fade: Arc<AtomicU32>) {
     // the output device; without one (no speakers), every command just reports the error
-    let (_stream, handle) = match OutputStream::try_default() {
+    let (mut _stream, mut handle) = match OutputStream::try_default() {
         Ok(x) => x,
         Err(e) => {
             let msg = format!("No sound output ({e}). Plug in speakers or headphones, then restart the app.");
@@ -191,6 +191,12 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
     // the next song, opened ahead of time (track, sound, length, its volume leveling)
     let mut next: Option<(String, Decoder<Media>, Option<Duration>, f32)> = None;
     let mut fading: Option<Fade> = None;
+    // what is loaded (to open it again on a new device) and where to carry on once it has been
+    let mut current: Option<(Client, String, Option<PathBuf>)> = None;
+    let mut resume_at: Option<Duration> = None;
+    // the Windows default output device: when it changes (headphones, a speaker, another DAC) the sound follows it
+    let mut last_device = default_device_name();
+    let mut device_check = Instant::now();
 
     loop {
         let wait = if fading.is_some() { 30 } else { 100 };
@@ -211,6 +217,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             }
             Ok(Cmd::Load { client, track, local, play, gen }) => {
                 latest_gen = gen;
+                current = Some((client.clone(), track.clone(), local.clone()));
                 next = None;
                 if let Some(f) = fading.take() {
                     f.old.stop();
@@ -254,6 +261,10 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                         st.track = Some(track);
                         st.duration = total;
                         st.playing = play;
+                        if let Some(at) = resume_at.take() {
+                            let _ = s.try_seek(at);
+                            st.position = at;
+                        }
                         sink = Some(s);
                         was_busy = true;
                     }
@@ -319,6 +330,39 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
+        // the output device changed: open the new one and carry on where the song was
+        if device_check.elapsed() >= Duration::from_secs(1) {
+            device_check = Instant::now();
+            let now = default_device_name();
+            if now.is_some() && now != last_device {
+                last_device = now;
+                let (was_playing, pos, finished) = {
+                    let st = status.lock().unwrap();
+                    (st.playing, st.position, st.finished)
+                };
+                if let Some(f) = fading.take() {
+                    f.old.stop();
+                }
+                let had_sink = sink.take().map(|s| s.stop()).is_some();
+                match OutputStream::try_default() {
+                    Ok((st2, h2)) => {
+                        _stream = st2;
+                        handle = h2;
+                        next = None;
+                        was_busy = false;
+                        if had_sink && !finished {
+                            if let Some((client, track, local)) = current.clone() {
+                                resume_at = Some(pos);
+                                let _ = back.send(Cmd::Load { client, track, local, play: was_playing, gen: latest_gen });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        status.lock().unwrap().error = Some(format!("Can't use the new sound output ({e})."));
+                    }
+                }
+            }
+        }
         // crossfade: when the song is `fade` seconds from its end and the next one is ready, start it quietly
         let fade_secs = fade.load(Ordering::Relaxed) as f32 / 10.0;
         if fade_secs > 0.0 && fading.is_none() && next.is_some() && sink.is_some() {
@@ -377,6 +421,12 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             }
         }
     }
+}
+
+/// The name of the system's default sound output (None when there is none).
+fn default_device_name() -> Option<String> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    rodio::cpal::default_host().default_output_device().and_then(|d| d.name().ok())
 }
 
 /// ReplayGain as a volume multiplier: `mode` is "track" or "album" ("off" = 1.0). Never boosts past

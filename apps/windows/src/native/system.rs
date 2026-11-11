@@ -387,3 +387,11 @@ impl Media {
         self.last = None;
     }
 }
+
+/// Tell Windows this process is the app "Volvix Home" (the name and icon in the volume mixer, taskbar and media overlay).
+pub fn set_app_identity() {
+    use windows::core::w;
+    unsafe {
+        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("app.volvix.home"));
+    }
+}

@@ -3502,6 +3502,8 @@ fn main() -> iced::Result {
     let args: Vec<String> = std::env::args().collect();
     let background = args.iter().any(|a| a == "--background");
     let after_update = args.iter().any(|a| a == "--after-update");
+    // one app identity for the taskbar, the volume mixer and the media overlay, so the sound belongs to Volvix Home
+    system::set_app_identity();
     let Some(instance) = system::single_instance(after_update) else { return Ok(()) };
     update::clean_old();
 
