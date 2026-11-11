@@ -37,7 +37,7 @@ pub struct EqBars {
 }
 
 pub fn eq<'a, M: 'a>(playing: bool, h: f32) -> Element<'a, M> {
-    Element::new(EqBars { playing, w: h * 14.0 / 12.0, h, color: ui::ACCENT })
+    Element::new(EqBars { playing, w: h * 14.0 / 12.0, h, color: ui::ACCENT() })
 }
 
 /// The website's `@keyframes eq`: 25% → 100% height, 0.8 s, ease-in-out, alternating.
@@ -151,7 +151,7 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for Logo {
         let circle = |r: f32| Rectangle { x: cx - r, y: cy - r, width: 2.0 * r, height: 2.0 * r };
         let none = Color::TRANSPARENT;
         // disc r=15
-        renderer.fill_quad(Quad { bounds: circle(15.0 * u), border: Border { radius: (15.0 * u).into(), width: 0.0, color: none }, shadow: Shadow::default() }, ui::ACCENT);
+        renderer.fill_quad(Quad { bounds: circle(15.0 * u), border: Border { radius: (15.0 * u).into(), width: 0.0, color: none }, shadow: Shadow::default() }, ui::ACCENT());
         // ring r=9.5, 1-unit stroke, black at 22%
         renderer.fill_quad(
             Quad { bounds: circle(10.0 * u), border: Border { radius: (10.0 * u).into(), width: u.max(1.0), color: Color { a: 0.22, ..Color::BLACK } }, shadow: Shadow::default() },
@@ -222,8 +222,8 @@ impl<'a, M: Clone, Th, R: renderer::Renderer> Widget<M, Th, R> for Scrub<'a, M> 
         let live = st.dragging || cursor.is_over(b);
         let rail = Rectangle { x: b.x, y: b.center_y() - 2.0, width: b.width, height: 4.0 };
         let round = Border { radius: 2.0.into(), width: 0.0, color: Color::TRANSPARENT };
-        renderer.fill_quad(Quad { bounds: rail, border: round, shadow: Shadow::default() }, Color { a: 0.2, ..ui::TEXT });
-        renderer.fill_quad(Quad { bounds: Rectangle { width: rail.width * f, ..rail }, border: round, shadow: Shadow::default() }, if live { ui::ACCENT } else { ui::TEXT });
+        renderer.fill_quad(Quad { bounds: rail, border: round, shadow: Shadow::default() }, Color { a: 0.2, ..ui::TEXT() });
+        renderer.fill_quad(Quad { bounds: Rectangle { width: rail.width * f, ..rail }, border: round, shadow: Shadow::default() }, if live { ui::ACCENT() } else { ui::TEXT() });
         if live {
             let r = 6.0;
             renderer.fill_quad(
@@ -232,7 +232,7 @@ impl<'a, M: Clone, Th, R: renderer::Renderer> Widget<M, Th, R> for Scrub<'a, M> 
                     border: Border { radius: r.into(), width: 0.0, color: Color::TRANSPARENT },
                     shadow: Shadow::default(),
                 },
-                ui::TEXT,
+                ui::TEXT(),
             );
         }
     }

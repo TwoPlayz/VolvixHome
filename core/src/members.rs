@@ -16,6 +16,9 @@ pub struct Member {
     pub perms: Vec<String>,
     #[serde(default, rename = "hideExplicit")]
     pub hide_explicit: bool,
+    /// profile picture version; 0 = none
+    #[serde(default)]
+    pub avatar: u64,
 }
 
 /// All the things a member can be allowed to do (web/js/views/account.js PERMS).
@@ -46,6 +49,23 @@ impl Client {
         let res = self.request("PUT", &format!("/api/users/{}", enc(id))).send_json(body)?;
         let v: Value = res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))?;
         serde_json::from_value(v["user"].clone()).map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
+    /// Your profile picture: a JPEG (the website saves a 256 px square). Answers with its new version.
+    pub fn set_avatar(&self, jpeg: &[u8]) -> Result<u64> {
+        let res = self.request("PUT", "/api/me/avatar").set("Content-Type", "image/jpeg").send_bytes(jpeg)?;
+        let v: Value = res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))?;
+        Ok(v["avatar"].as_u64().unwrap_or(1))
+    }
+
+    pub fn remove_avatar(&self) -> Result<()> {
+        self.request("DELETE", "/api/me/avatar").call()?;
+        Ok(())
+    }
+
+    /// Someone's picture as the server has it (`version` keeps a changed picture from coming from a cache).
+    pub fn avatar_bytes(&self, id: &str, version: u64) -> Result<Vec<u8>> {
+        self.image_bytes(&format!("/api/avatar/{}?v={version}", enc(id)))
     }
 
     /// Set a new password for a member (they're signed out everywhere).

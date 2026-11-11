@@ -34,6 +34,8 @@ pub enum Edit {
     Like { track: String, on: bool, at: u64 },
     /// one of the website's settings (`settings.leveling`, `settings.shareActivity`, …)
     Setting(String, Value),
+    /// the website's theme: "system", "dark" or "light"
+    Theme(String),
 }
 
 /// One of the website's settings, or `default` when unset.
@@ -234,6 +236,9 @@ pub fn apply(d: &mut UserData, e: &Edit) {
                 *s = json!({});
             }
             s.as_object_mut().expect("object").insert(key.clone(), value.clone());
+        }
+        Edit::Theme(t) => {
+            d.rest.insert("theme".into(), json!(t));
         }
     }
 }

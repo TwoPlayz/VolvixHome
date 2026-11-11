@@ -138,15 +138,15 @@ pub fn lyrics<'a>(app: &'a App, track: &str) -> El<'a> {
         return note("Instrumental", "This song has no lyrics.".into());
     }
     if ly.synced.is_empty() {
-        return scrollable(text(ly.plain.clone()).size(20).color(ui::TEXT_2).line_height(1.5)).style(ui::scroller).height(Length::Fill).into();
+        return scrollable(text(ly.plain.clone()).size(20).color(ui::TEXT_2()).line_height(1.5)).style(ui::scroller).height(Length::Fill).into();
     }
     let now = ly.line_at(app.status.position.as_millis() as i64);
     let mut col = Column::new();
     for (i, l) in ly.synced.iter().enumerate() {
         let color = match now {
-            Some(n) if n == i => ui::TEXT,
-            Some(n) if i < n => ui::TEXT_3,
-            _ => ui::TEXT_2,
+            Some(n) if n == i => ui::TEXT(),
+            Some(n) if i < n => ui::TEXT_3(),
+            _ => ui::TEXT_2(),
         };
         let size = if now == Some(i) { 26.0 } else { 22.0 };
         // an instrumental gap: a music note from Windows' icon font (the text font has no ♪)
@@ -345,7 +345,7 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str) -> El<'a> {
 /// A link-looking text button (names in Credits).
 fn link<'a>(label: String, to: Message) -> El<'a> {
     button(text(label).size(15)).padding(0).on_press(to).style(|_, s| button::Style {
-        text_color: if matches!(s, button::Status::Hovered) { ui::ACCENT } else { ui::TEXT },
+        text_color: if matches!(s, button::Status::Hovered) { ui::ACCENT() } else { ui::TEXT() },
         ..Default::default()
     }).into()
 }
@@ -538,7 +538,7 @@ pub fn notifications(app: &App) -> El<'_> {
     for n in &app.notes.items {
         let mut line = row![
             container(ic(if n.kind.contains("invite") { icon::PEOPLE } else if n.kind.contains("request") { icon::GLOBE } else { icon::BELL }, 18)).width(28),
-            column![text(n.text.clone()).size(15).color(if n.read { ui::TEXT_2 } else { ui::TEXT }), ui::dim(ago(n.at), 12)].spacing(2).width(Length::Fill),
+            column![text(n.text.clone()).size(15).color(if n.read { ui::TEXT_2() } else { ui::TEXT() }), ui::dim(ago(n.at), 12)].spacing(2).width(Length::Fill),
         ]
         .spacing(12)
         .align_y(Alignment::Center);
@@ -654,7 +654,7 @@ pub fn rewind(app: &App) -> El<'_> {
     let (artists, albums) = (rank(artists), rank(albums));
     let stat = |n: String, label: &'static str| -> El<'static> { column![text(n).size(30).font(ui::FONT_BOLD), ui::dim(label, 13)].spacing(2).into() };
     let hero = column![
-        text(y.to_string()).size(56).font(ui::FONT_BOLD).color(ui::ACCENT),
+        text(y.to_string()).size(56).font(ui::FONT_BOLD).color(ui::ACCENT()),
         ui::title("Your year in music", 28),
         row![stat(minutes.to_string(), "minutes listened"), stat(plays.to_string(), "plays"), stat(songs.len().to_string(), "different songs")].spacing(40),
     ]
@@ -665,7 +665,7 @@ pub fn rewind(app: &App) -> El<'_> {
     for (i, (t, n)) in songs.iter().take(5).enumerate() {
         rows = rows.push(
             row![
-                container(text((i + 1).to_string()).size(15).color(ui::TEXT_2)).width(24),
+                container(text((i + 1).to_string()).size(15).color(ui::TEXT_2())).width(24),
                 cover_of(app, app.lib.album_of(t), 44.0),
                 column![text(clip(&t.title, 40)).size(15), ui::dim(clip(&t.artist, 40), 12)].spacing(2).width(Length::Fill),
                 ui::dim(format!("{n} plays"), 13),
@@ -746,7 +746,7 @@ fn manage_dialog<'a>(app: &'a App, id: &'a str, password: &'a str, error: &'a Op
     }
     c = c.push(
         row![
-            button(text(if confirm_remove { format!("Really remove {}? Click again", m.name) } else { format!("Remove {}", m.name) }).size(13).color(ui::ACCENT)).padding([8, 16]).style(ui::secondary).on_press(Message::ManageRemove),
+            button(text(if confirm_remove { format!("Really remove {}? Click again", m.name) } else { format!("Remove {}", m.name) }).size(13).color(ui::ACCENT())).padding([8, 16]).style(ui::secondary).on_press(Message::ManageRemove),
             horizontal_space(),
             button(text("Done").size(14)).padding([8, 18]).style(ui::primary).on_press(Message::DialogCancel),
         ]
@@ -795,7 +795,7 @@ fn field<'a>(label: &'a str, value: &'a str, n: u8, secret: bool, hint: Option<&
     }
     let mut c = column![text(label).size(13).font(ui::FONT_BOLD), input].spacing(6);
     if let Some(h) = hint {
-        c = c.push(ui::dim(h, 12).color(ui::TEXT_3));
+        c = c.push(ui::dim(h, 12).color(ui::TEXT_3()));
     }
     container(c).max_width(428).into()
 }
@@ -807,9 +807,12 @@ fn profile(app: &App) -> El<'_> {
         field("Your name", name, 0, false, Some("This is also what you sign in with, on every device."), Some(Message::SaveName)),
         button(text("Save name").size(14)).padding([10, 22]).style(ui::primary).on_press(Message::SaveName),
         row![
-            ui::avatar::<Message>(&user.name, 56.0),
+            ui::avatar_pic::<Message>(app.avatar_handle(&user.id, user.avatar), &user.name, 56.0),
             column![text(user.name.clone()).size(15), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(2).width(Length::Fill),
+            button(row![ic(icon::PERSON, 13), text("Change picture").size(13)].spacing(8).align_y(Alignment::Center)).padding([7, 16]).style(ui::secondary).on_press(Message::PickPicture),
+            button(text("Remove").size(13)).padding([7, 14]).style(ui::flat).on_press_maybe((user.avatar > 0).then_some(Message::RemovePicture)),
         ]
+        .spacing(10)
         .spacing(14)
         .align_y(Alignment::Center),
     ]
@@ -832,7 +835,7 @@ fn members(app: &App) -> El<'_> {
     let mut list = Column::new().spacing(10);
     for m in &app.members {
         let you = if m.id == me { " (you)" } else { "" };
-        let mut line = row![ui::avatar::<Message>(&m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2).width(Length::Fixed(300.0))].spacing(12).align_y(Alignment::Center);
+        let mut line = row![ui::avatar_pic::<Message>(app.avatar_handle(&m.id, m.avatar), &m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2).width(Length::Fixed(300.0))].spacing(12).align_y(Alignment::Center);
         if m.id != me && can_manage(m) {
             line = line.push(button(text("Manage").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManageMember(m.id.clone())));
         }
@@ -881,7 +884,17 @@ fn settings(app: &App) -> El<'_> {
         setting_row("Private session", "Stops sharing, and keeps what you play out of Recently played, until you turn it off.", switch(app.setting_bool("privateSession", false), Message::SetPrivate)),
     ];
 
-    let mut playback = Column::new();
+    let mut playback = Column::new()
+        .push(setting_row(
+            "Crossfade",
+            "The end of one song fades into the start of the next. Not used in listening parties, and the last song just ends.",
+            ui::seg(&[("0", "Off"), ("2", "2 s"), ("4", "4 s"), ("6", "6 s"), ("8", "8 s"), ("12", "12 s")], &format!("{}", app.crossfade_secs() as u32), Message::SetCrossfade),
+        ))
+        .push(setting_row(
+            "Crossfade songs on the same album",
+            "Off keeps albums flowing the way they were recorded (live albums, mixes), and only crossfades between different albums.",
+            switch(app.setting_bool("crossfadeAlbums", false), Message::SetCrossfadeAlbums),
+        ));
     if transcoding {
         playback = playback
             .push(setting_row(
@@ -905,6 +918,15 @@ fn settings(app: &App) -> El<'_> {
             ui::seg(&[("0", "Off"), ("15", "15 min"), ("30", "30 min"), ("60", "1 hour"), ("song", "End of song")], &app.sleep_choice, Message::SetSleep),
         ))
         .push(setting_row("Resume where I left off", "Reopening Volvix shows the last song and spot, paused.", switch(app.setting_bool("resumeLast", true), Message::SetResume)));
+    let eq = app.eq_now();
+    playback = playback.push(setting_row(
+        "Equalizer",
+        "Shape the sound: raise the sliders to boost a part of the sound and lower them to cut it. It works on this computer while it plays (not when casting to a TV).",
+        switch(eq.on, Message::EqOn),
+    ));
+    if eq.on {
+        playback = playback.push(eq_panel(&eq));
+    }
 
     let windows = column![
         setting_row("Start with Windows", "Open in the tray when you sign in to Windows.", switch(app.settings.start_with_windows, Message::SetStartWithWindows)),
@@ -946,7 +968,16 @@ fn settings(app: &App) -> El<'_> {
     let scanning = app.server_status.as_ref().map(|s| s.scanning).unwrap_or(false);
     library = library.push(action_row("Music on this server", counts, btn("Check now", (app.can("rescan") && !scanning).then_some(Message::Rescan))));
 
-    let mut page = column![section("Privacy", privacy.into()), section("Playback", playback.into()), section("Windows app", windows.into())].spacing(24);
+    let theme = column![setting_row(
+        "Theme",
+        match app.theme_choice().as_str() {
+            "light" => "Always light.",
+            "dark" => "Always dark.",
+            _ => "Matches your device's light or dark setting.",
+        },
+        ui::seg(&[("system", "System"), ("dark", "Dark"), ("light", "Light")], &app.theme_choice(), Message::SetTheme),
+    )];
+    let mut page = column![section("Appearance", theme.into()), section("Privacy", privacy.into()), section("Playback", playback.into()), section("Windows app", windows.into())].spacing(24);
     if app.can("share") || app.can("members") {
         let now = volvix_core::userdata::now();
         let mut shares = Column::new().spacing(0);
@@ -968,7 +999,7 @@ fn settings(app: &App) -> El<'_> {
                     );
                 }
             }
-            Some(_) => shares = shares.push(ui::dim("No links are open. Share an album or playlist from its ⋯ menu.", 13)),
+            Some(_) => shares = shares.push(ui::dim("No links are open. Share an album or playlist from its menu.", 13)),
             None => shares = shares.push(ui::dim("Loading…", 13)),
         }
         page = page.push(column![ui::title("Share links", 22), ui::dim("Open links, newest first. Cancelling one stops it working straight away.", 13), container(shares).padding([6, 0])].spacing(6));
@@ -976,6 +1007,43 @@ fn settings(app: &App) -> El<'_> {
     page = page.push(section("Downloads", downloads.into())).push(section("Library", library.into()));
     page = page.push(section("Server", column![action_row("Connected to", server_line, btn("Switch server", Some(Message::SwitchServer)))].into()));
     page.max_width(820).into()
+}
+
+/// The equalizer's controls: preset, preamp, reset, and ten band sliders (32 Hz on the left, 16 kHz on the right).
+fn eq_panel(eq: &crate::eq::EqSettings) -> El<'static> {
+    let names: Vec<&'static str> = crate::eq::PRESETS.iter().map(|p| p.0).collect();
+    let selected = eq.preset_name();
+    let sign = |v: f32| if v > 0.0 { format!("+{v:.0}") } else { format!("{v:.0}") };
+    let top = row![
+        column![
+            ui::dim("Preset", 12),
+            iced::widget::pick_list(names, selected, |n: &'static str| Message::EqPreset(n.to_string())).placeholder("Custom").padding([8, 12]).text_size(14).width(240).style(ui::pick_style).menu_style(ui::pick_menu),
+        ]
+        .spacing(4),
+        column![
+            ui::dim(format!("Preamp {} dB", sign(eq.pre_db)), 12),
+            container(iced::widget::slider(-12.0..=6.0, eq.pre_db, Message::EqPre).step(1.0_f32).style(ui::vslider_style)).width(180),
+        ]
+        .spacing(10),
+        button(text("Reset").size(13)).padding([6, 14]).style(ui::flat).on_press(Message::EqReset),
+    ]
+    .spacing(24)
+    .align_y(Alignment::End);
+    let mut bands = Row::new().spacing(4).align_y(Alignment::Center);
+    for (i, f) in crate::eq::BANDS.iter().enumerate() {
+        let label = if *f >= 1000.0 { format!("{}k", *f / 1000.0) } else { format!("{f}") };
+        bands = bands.push(
+            column![
+                ui::dim(sign(eq.gains[i]), 11),
+                iced::widget::vertical_slider(-12.0..=12.0, eq.gains[i], move |v| Message::EqBand(i, v)).step(1.0).height(150).style(ui::vslider_style),
+                ui::dim(label, 11),
+            ]
+            .spacing(6)
+            .width(Length::Fill)
+            .align_x(Alignment::Center),
+        );
+    }
+    container(column![top, bands].spacing(16)).padding([8, 4]).into()
 }
 
 /// Pick the server's music folder: the folders in the one you're in, and "Use this folder".
@@ -1062,7 +1130,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
         Dialog::AddTo { tracks } => {
             let mut list = Column::new().spacing(2);
             list = list.push(
-                button(row![container(ic(icon::ADD, 18)).width(44).height(44).center_x(44).center_y(44).style(|_| container::Style { background: Some(ui::SURFACE_3.into()), border: iced::border::rounded(6.0), ..Default::default() }), text("New playlist").size(15)].spacing(12).align_y(Alignment::Center))
+                button(row![container(ic(icon::ADD, 18)).width(44).height(44).center_x(44).center_y(44).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(6.0), ..Default::default() }), text("New playlist").size(15)].spacing(12).align_y(Alignment::Center))
                     .width(Length::Fill)
                     .padding(6)
                     .style(ui::flat)
@@ -1157,7 +1225,7 @@ fn people_list<'a>(app: &'a App, picked: &'a [String], skip: &[String]) -> El<'a
 /// The cast button's window: where the sound plays, and the listening party.
 fn play_on(app: &App) -> El<'_> {
     let item = |icon_char: char, label: String, sub: Option<String>, on: bool, msg: Option<Message>, danger: bool| -> El<'_> {
-        let mut t = column![text(label).size(15).color(if danger { ui::ACCENT } else { ui::TEXT })].spacing(2);
+        let mut t = column![text(label).size(15).color(if danger { ui::ACCENT() } else { ui::TEXT() })].spacing(2);
         if let Some(s) = sub {
             t = t.push(ui::dim(s, 12));
         }

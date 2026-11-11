@@ -2,22 +2,42 @@
 use iced::widget::{button, container, image, text, Space};
 use iced::{border, Background, Border, Color, Element, Font, Length, Shadow, Theme, Vector};
 
-pub const ACCENT: Color = rgb(0xE5, 0x48, 0x4D);
-pub const ACCENT_HOVER: Color = rgb(0xD6, 0x3D, 0x42);
-pub const FRAME: Color = rgb(0x00, 0x00, 0x00);
-pub const SURFACE: Color = rgb(0x12, 0x12, 0x14);
-pub const SURFACE_2: Color = rgb(0x19, 0x19, 0x1C);
-pub const SURFACE_3: Color = rgb(0x24, 0x24, 0x28);
-pub const INPUT_BG: Color = rgb(0x1C, 0x1C, 0x1F);
-pub const TEXT: Color = rgb(0xF5, 0xF5, 0xF7);
-pub const TEXT_2: Color = rgb(0xA1, 0xA1, 0xA8);
-pub const TEXT_3: Color = rgb(0x86, 0x86, 0x8E);
-/// White at 6% and 10% over the dark panel, as solid colours (see-through white is drawn too bright here).
-pub const HOVER: Color = rgb(0x20, 0x20, 0x23);
-pub const ACTIVE: Color = rgb(0x2A, 0x2A, 0x2D);
-/// A hairline: white at 8% over the dark surfaces, as one solid colour (a see-through border is drawn too bright here).
-pub const BORDER: Color = rgb(0x2B, 0x2B, 0x2F);
+/// Light or dark: the whole app's colours follow this (set from Settings → Appearance, or the system).
+static LIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_light(on: bool) {
+    LIGHT.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+pub fn is_light() -> bool {
+    LIGHT.load(std::sync::atomic::Ordering::Relaxed)
+}
 
+/// A colour with a dark and a light version, the website's (web/css/styles.css). Hover, active and border are the
+/// website's see-through white/black as solid colours (a see-through colour is drawn too bright here).
+macro_rules! themed {
+    ($name:ident, $dark:expr, $light:expr) => {
+        #[allow(non_snake_case)]
+        pub fn $name() -> Color {
+            if is_light() {
+                $light
+            } else {
+                $dark
+            }
+        }
+    };
+}
+themed!(ACCENT, rgb(0xE5, 0x48, 0x4D), rgb(0xE5, 0x48, 0x4D));
+themed!(ACCENT_HOVER, rgb(0xD6, 0x3D, 0x42), rgb(0xD6, 0x3D, 0x42));
+themed!(FRAME, rgb(0x00, 0x00, 0x00), rgb(0xE9, 0xE9, 0xEC));
+themed!(SURFACE, rgb(0x12, 0x12, 0x14), rgb(0xFF, 0xFF, 0xFF));
+themed!(SURFACE_2, rgb(0x19, 0x19, 0x1C), rgb(0xF6, 0xF6, 0xF8));
+themed!(SURFACE_3, rgb(0x24, 0x24, 0x28), rgb(0xED, 0xED, 0xF0));
+themed!(INPUT_BG, rgb(0x1C, 0x1C, 0x1F), rgb(0xF2, 0xF2, 0xF5));
+themed!(TEXT, rgb(0xF5, 0xF5, 0xF7), rgb(0x1D, 0x1D, 0x1F));
+themed!(TEXT_2, rgb(0xA1, 0xA1, 0xA8), rgb(0x5F, 0x5F, 0x65));
+themed!(TEXT_3, rgb(0x86, 0x86, 0x8E), rgb(0x74, 0x74, 0x7A));
+themed!(HOVER, rgb(0x20, 0x20, 0x23), rgb(0xF4, 0xF4, 0xF5));
+themed!(ACTIVE, rgb(0x2A, 0x2A, 0x2D), rgb(0xEC, 0xEC, 0xED));
+themed!(BORDER, rgb(0x2B, 0x2B, 0x2F), rgb(0xE6, 0xE6, 0xE9));
 pub const RADIUS: f32 = 10.0;
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color {
@@ -71,30 +91,30 @@ pub fn icon<'a>(c: char, size: u16) -> iced::widget::Text<'a, Theme> {
 pub fn theme() -> Theme {
     Theme::custom(
         "Volvix Home".into(),
-        iced::theme::Palette { background: FRAME, text: TEXT, primary: ACCENT, success: rgb(0x30, 0xA4, 0x6C), danger: ACCENT },
+        iced::theme::Palette { background: FRAME(), text: TEXT(), primary: ACCENT(), success: rgb(0x30, 0xA4, 0x6C), danger: ACCENT() },
     )
 }
 
 pub fn title<'a, M: 'a>(s: impl text::IntoFragment<'a>, size: u16) -> Element<'a, M> {
-    text(s).font(FONT_BOLD).size(size as f32).color(TEXT).into()
+    text(s).font(FONT_BOLD).size(size as f32).color(TEXT()).into()
 }
 pub fn dim<'a>(s: impl text::IntoFragment<'a>, size: u16) -> iced::widget::Text<'a, Theme> {
-    text(s).size(size as f32).color(TEXT_2)
+    text(s).size(size as f32).color(TEXT_2())
 }
 
 /* ---------- containers ---------- */
 
 pub fn panel(_: &Theme) -> container::Style {
-    container::Style { background: Some(SURFACE.into()), border: border::rounded(RADIUS), ..Default::default() }
+    container::Style { background: Some(SURFACE().into()), border: border::rounded(RADIUS), ..Default::default() }
 }
 pub fn frame(_: &Theme) -> container::Style {
-    container::Style { background: Some(FRAME.into()), text_color: Some(TEXT), ..Default::default() }
+    container::Style { background: Some(FRAME().into()), text_color: Some(TEXT()), ..Default::default() }
 }
 pub fn error_box(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(Color { a: 0.14, ..ACCENT }.into()),
-        border: Border { radius: 8.0.into(), width: 1.0, color: Color { a: 0.4, ..ACCENT } },
-        text_color: Some(TEXT),
+        background: Some(Color { a: 0.14, ..ACCENT() }.into()),
+        border: Border { radius: 8.0.into(), width: 1.0, color: Color { a: 0.4, ..ACCENT() } },
+        text_color: Some(TEXT()),
         ..Default::default()
     }
 }
@@ -104,22 +124,22 @@ pub fn error_box(_: &Theme) -> container::Style {
 /// A row or tile that only shows it's clickable on hover.
 pub fn flat(_: &Theme, status: button::Status) -> button::Style {
     let bg = match status {
-        button::Status::Hovered => Some(HOVER.into()),
-        button::Status::Pressed => Some(ACTIVE.into()),
+        button::Status::Hovered => Some(HOVER().into()),
+        button::Status::Pressed => Some(ACTIVE().into()),
         _ => None,
     };
-    button::Style { background: bg, text_color: TEXT, border: border::rounded(8.0), ..Default::default() }
+    button::Style { background: bg, text_color: TEXT(), border: border::rounded(8.0), ..Default::default() }
 }
 /// A sidebar item, highlighted when it's the current page.
 pub fn nav(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |t, s| {
         let mut st = flat(t, s);
         if active {
-            st.background = Some(ACTIVE.into());
+            st.background = Some(ACTIVE().into());
         }
-        st.text_color = if active { TEXT } else { TEXT_2 };
+        st.text_color = if active { TEXT() } else { TEXT_2() };
         if matches!(s, button::Status::Hovered) {
-            st.text_color = TEXT;
+            st.text_color = TEXT();
         }
         st
     }
@@ -129,16 +149,16 @@ pub fn icon_btn(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     // the whole round area lights up on hover (not just the icon), like the website
     move |_, s| button::Style {
         background: match s {
-            button::Status::Hovered => Some(HOVER.into()),
-            button::Status::Pressed => Some(ACTIVE.into()),
+            button::Status::Hovered => Some(HOVER().into()),
+            button::Status::Pressed => Some(ACTIVE().into()),
             _ => None,
         },
         border: border::rounded(100.0),
         text_color: match (on, s) {
-            (true, _) => ACCENT,
-            (false, button::Status::Hovered | button::Status::Pressed) => TEXT,
-            (false, button::Status::Disabled) => TEXT_3,
-            _ => TEXT_2,
+            (true, _) => ACCENT(),
+            (false, button::Status::Hovered | button::Status::Pressed) => TEXT(),
+            (false, button::Status::Disabled) => TEXT_3(),
+            _ => TEXT_2(),
         },
         ..Default::default()
     }
@@ -168,9 +188,9 @@ pub fn tip<'a>(content: impl Into<Element<'a, crate::Message>>, label: impl ToSt
     let shown: Element<'a, crate::Message> = if ready {
         // no outline: a soft shadow lifts it off the page instead
         container(text(label.clone()).size(12)).padding([5, 10]).style(|_: &Theme| container::Style {
-            background: Some(SURFACE_3.into()),
+            background: Some(SURFACE_3().into()),
             border: Border { radius: 6.0.into(), width: 0.0, color: Color::TRANSPARENT },
-            text_color: Some(TEXT),
+            text_color: Some(TEXT()),
             shadow: iced::Shadow { color: Color { a: 0.45, ..Color::BLACK }, offset: iced::Vector::new(0.0, 3.0), blur_radius: 10.0 },
             ..Default::default()
         })
@@ -199,8 +219,8 @@ pub fn hint_off() {
 /// The big round play button.
 pub fn round_play(_: &Theme, s: button::Status) -> button::Style {
     button::Style {
-        background: Some(Background::Color(if matches!(s, button::Status::Hovered) { rgb(0xFF, 0xFF, 0xFF) } else { TEXT })),
-        text_color: FRAME,
+        background: Some(Background::Color(if matches!(s, button::Status::Hovered) { rgb(0xFF, 0xFF, 0xFF) } else { TEXT() })),
+        text_color: FRAME(),
         border: border::rounded(100.0),
         ..Default::default()
     }
@@ -208,9 +228,9 @@ pub fn round_play(_: &Theme, s: button::Status) -> button::Style {
 pub fn primary(_: &Theme, s: button::Status) -> button::Style {
     button::Style {
         background: Some(match s {
-            button::Status::Hovered | button::Status::Pressed => ACCENT_HOVER,
-            button::Status::Disabled => Color { a: 0.5, ..ACCENT },
-            _ => ACCENT,
+            button::Status::Hovered | button::Status::Pressed => ACCENT_HOVER(),
+            button::Status::Disabled => Color { a: 0.5, ..ACCENT() },
+            _ => ACCENT(),
         }
         .into()),
         text_color: rgb(0xFF, 0xFF, 0xFF),
@@ -220,9 +240,9 @@ pub fn primary(_: &Theme, s: button::Status) -> button::Style {
 }
 pub fn secondary(_: &Theme, s: button::Status) -> button::Style {
     button::Style {
-        background: Some(if matches!(s, button::Status::Hovered) { SURFACE_3 } else { SURFACE_2 }.into()),
-        text_color: TEXT,
-        border: Border { radius: 100.0.into(), width: 1.0, color: BORDER },
+        background: Some(if matches!(s, button::Status::Hovered) { SURFACE_3() } else { SURFACE_2() }.into()),
+        text_color: TEXT(),
+        border: Border { radius: 100.0.into(), width: 1.0, color: BORDER() },
         ..Default::default()
     }
 }
@@ -230,6 +250,14 @@ pub fn secondary(_: &Theme, s: button::Status) -> button::Style {
 pub fn since_start() -> f32 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     START.get_or_init(std::time::Instant::now).elapsed().as_secs_f32()
+}
+
+/// Someone's profile picture (already cut round), or the letter stand-in while there is none.
+pub fn avatar_pic<'a, M: 'a>(handle: Option<&image::Handle>, name: &str, size: f32) -> Element<'a, M> {
+    match handle {
+        Some(h) => image(h.clone()).width(size).height(size).into(),
+        None => avatar(name, size),
+    }
 }
 
 /// A round picture stand-in: the first letter of a name on one of the website's avatar colours.
@@ -253,7 +281,7 @@ pub fn splash<'a, M: 'a>() -> Element<'a, M> {
     let word = ((t - 0.15) / 0.5).clamp(0.0, 1.0);
     let word = 1.0 - (1.0 - word).powi(2); // ease-out
     let mark = container(crate::marks::logo_scaled::<M>(104.0, breathe)).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill);
-    let name = container(text("Volvix").size(22).font(FONT_BOLD).color(Color { a: word, ..TEXT }))
+    let name = container(text("Volvix").size(22).font(FONT_BOLD).color(Color { a: word, ..TEXT() }))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
@@ -272,8 +300,8 @@ pub fn seg<'a>(options: &[(&'a str, &'a str)], selected: &str, f: impl Fn(String
             button(text(*label).size(13).font(FONT_BOLD))
                 .padding([6, 12])
                 .style(move |_: &Theme, s: button::Status| button::Style {
-                    background: if on { Some(SURFACE.into()) } else if matches!(s, button::Status::Hovered) { Some(HOVER.into()) } else { None },
-                    text_color: if on || matches!(s, button::Status::Hovered) { TEXT } else { TEXT_2 },
+                    background: if on { Some(SURFACE().into()) } else if matches!(s, button::Status::Hovered) { Some(HOVER().into()) } else { None },
+                    text_color: if on || matches!(s, button::Status::Hovered) { TEXT() } else { TEXT_2() },
                     border: border::rounded(8.0),
                     shadow: if on { Shadow { color: Color { a: 0.35, ..Color::BLACK }, offset: Vector::new(0.0, 1.0), blur_radius: 2.0 } } else { Shadow::default() },
                     ..Default::default()
@@ -281,7 +309,33 @@ pub fn seg<'a>(options: &[(&'a str, &'a str)], selected: &str, f: impl Fn(String
                 .on_press(f(value.to_string())),
         );
     }
-    container(r).padding(3).style(|_: &Theme| container::Style { background: Some(SURFACE_3.into()), border: border::rounded(10.0), ..Default::default() }).into()
+    container(r).padding(3).style(|_: &Theme| container::Style { background: Some(SURFACE_3().into()), border: border::rounded(10.0), ..Default::default() }).into()
+}
+
+/// A vertical slider (the equalizer's bands): a thin rail, red below the handle, a round white handle.
+pub fn vslider_style(_: &Theme, s: iced::widget::slider::Status) -> iced::widget::slider::Style {
+    use iced::widget::slider::{Handle, HandleShape, Rail, Status, Style};
+    let big = matches!(s, Status::Hovered | Status::Dragged);
+    Style {
+        rail: Rail { backgrounds: (ACCENT().into(), rgb(0x3A, 0x3A, 0x40).into()), width: 4.0, border: border::rounded(2.0) },
+        handle: Handle { shape: HandleShape::Circle { radius: if big { 7.0 } else { 6.0 } }, background: Color::WHITE.into(), border_width: 0.0, border_color: Color::TRANSPARENT },
+    }
+}
+
+/// A drop-down box (the equalizer's preset): dark, rounded, with the website's colours.
+pub fn pick_style(_: &Theme, s: iced::widget::pick_list::Status) -> iced::widget::pick_list::Style {
+    let hot = !matches!(s, iced::widget::pick_list::Status::Active);
+    iced::widget::pick_list::Style {
+        text_color: TEXT(),
+        placeholder_color: TEXT_2(),
+        handle_color: TEXT_2(),
+        background: INPUT_BG().into(),
+        border: Border { radius: 8.0.into(), width: 1.0, color: if hot { TEXT_2() } else { BORDER() } },
+    }
+}
+
+pub fn pick_menu(_: &Theme) -> iced::overlay::menu::Style {
+    iced::overlay::menu::Style { background: SURFACE_3().into(), border: Border { radius: 8.0.into(), width: 1.0, color: BORDER() }, text_color: TEXT(), selected_text_color: TEXT(), selected_background: ACTIVE().into() }
 }
 
 /// The website's switch: red when on, a white knob.
@@ -289,7 +343,7 @@ pub fn switch_style(_: &Theme, s: iced::widget::toggler::Status) -> iced::widget
     use iced::widget::toggler::Status;
     let on = matches!(s, Status::Active { is_toggled: true } | Status::Hovered { is_toggled: true });
     iced::widget::toggler::Style {
-        background: if on { ACCENT } else { rgb(0x4A, 0x4A, 0x52) },
+        background: if on { ACCENT() } else { rgb(0x4A, 0x4A, 0x52) },
         background_border_width: 0.0,
         background_border_color: Color::TRANSPARENT,
         foreground: Color::WHITE,
@@ -301,8 +355,8 @@ pub fn switch_style(_: &Theme, s: iced::widget::toggler::Status) -> iced::widget
 /// Library tabs ("Albums", "Artists").
 pub fn chip(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, s| button::Style {
-        background: Some(if active { TEXT } else if matches!(s, button::Status::Hovered) { SURFACE_3 } else { SURFACE_2 }.into()),
-        text_color: if active { FRAME } else { TEXT },
+        background: Some(if active { TEXT() } else if matches!(s, button::Status::Hovered) { SURFACE_3() } else { SURFACE_2() }.into()),
+        text_color: if active { FRAME() } else { TEXT() },
         border: border::rounded(100.0),
         ..Default::default()
     }
@@ -311,12 +365,12 @@ pub fn chip(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
 pub fn input(_: &Theme, s: iced::widget::text_input::Status) -> iced::widget::text_input::Style {
     use iced::widget::text_input::{Status, Style};
     Style {
-        background: INPUT_BG.into(),
-        border: Border { radius: 8.0.into(), width: 1.0, color: if matches!(s, Status::Focused) { TEXT_2 } else { BORDER } },
-        icon: TEXT_2,
-        placeholder: TEXT_3,
-        value: TEXT,
-        selection: Color { a: 0.35, ..ACCENT },
+        background: INPUT_BG().into(),
+        border: Border { radius: 8.0.into(), width: 1.0, color: if matches!(s, Status::Focused) { TEXT_2() } else { BORDER() } },
+        icon: TEXT_2(),
+        placeholder: TEXT_3(),
+        value: TEXT(),
+        selection: Color { a: 0.35, ..ACCENT() },
     }
 }
 
@@ -326,7 +380,7 @@ pub fn scroller(_: &Theme, s: iced::widget::scrollable::Status) -> iced::widget:
     let rail = Rail {
         background: None,
         border: border::rounded(4.0),
-        scroller: Scroller { color: if shown { Color { a: 0.25, ..TEXT } } else { Color::TRANSPARENT }, border: border::rounded(4.0) },
+        scroller: Scroller { color: if shown { Color { a: 0.25, ..TEXT() } } else { Color::TRANSPARENT }, border: border::rounded(4.0) },
     };
     Style { container: container::Style::default(), vertical_rail: rail, horizontal_rail: rail, gap: None }
 }
@@ -343,7 +397,7 @@ pub fn cover<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, size: f32) 
                 Some(c) => text(c.to_uppercase().collect::<String>()).font(FONT_BOLD),
                 None => text('\u{E8D6}'.to_string()).font(ICONS), // a note, when there's no title
             };
-            container(mark.size(size * 0.38).color(Color { a: 0.85, ..TEXT }))
+            container(mark.size(size * 0.38).color(Color { a: 0.85, ..rgb(0xF5, 0xF5, 0xF7) }))
                 .width(size)
                 .height(size)
                 .center_x(size)
@@ -363,32 +417,32 @@ fn tint_for(s: &str) -> Color {
 
 /// The see-through layer behind a dialog.
 pub fn scrim(_: &Theme) -> container::Style {
-    container::Style { background: Some(Color { a: 0.6, ..FRAME }.into()), ..Default::default() }
+    container::Style { background: Some(Color { a: 0.6, ..FRAME() }.into()), ..Default::default() }
 }
 /// A dialog's card.
 pub fn dialog(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(SURFACE_2.into()),
-        border: Border { radius: 14.0.into(), width: 1.0, color: BORDER },
-        text_color: Some(TEXT),
-        shadow: Shadow { color: Color { a: 0.5, ..FRAME }, offset: Vector::new(0.0, 12.0), blur_radius: 32.0 },
+        background: Some(SURFACE_2().into()),
+        border: Border { radius: 14.0.into(), width: 1.0, color: BORDER() },
+        text_color: Some(TEXT()),
+        shadow: Shadow { color: Color { a: 0.5, ..FRAME() }, offset: Vector::new(0.0, 12.0), blur_radius: 32.0 },
     }
 }
 /// The little message that pops up above the player.
 pub fn toast(_: &Theme) -> container::Style {
-    container::Style { background: Some(TEXT.into()), text_color: Some(FRAME), border: border::rounded(8.0), ..Default::default() }
+    container::Style { background: Some(TEXT().into()), text_color: Some(FRAME()), border: border::rounded(8.0), ..Default::default() }
 }
 /// The unread count on the bell.
 pub fn badge(_: &Theme) -> container::Style {
-    container::Style { background: Some(ACCENT.into()), text_color: Some(rgb(0xFF, 0xFF, 0xFF)), border: border::rounded(9.0), ..Default::default() }
+    container::Style { background: Some(ACCENT().into()), text_color: Some(rgb(0xFF, 0xFF, 0xFF)), border: border::rounded(9.0), ..Default::default() }
 }
 /// Mix cards: a coloured tile per mix.
 pub fn mix_tile(seed: &str) -> impl Fn(&Theme) -> container::Style {
     let tint = tint_for(seed);
     move |_| container::Style {
-        background: Some(Background::Gradient(iced::Gradient::Linear(iced::gradient::Linear::new(0.8).add_stop(0.0, Color { a: 1.0, ..ACCENT }).add_stop(1.0, tint)))),
+        background: Some(Background::Gradient(iced::Gradient::Linear(iced::gradient::Linear::new(0.8).add_stop(0.0, Color { a: 1.0, ..ACCENT() }).add_stop(1.0, tint)))),
         border: border::rounded(6.0),
-        text_color: Some(TEXT),
+        text_color: Some(rgb(0xF5, 0xF5, 0xF7)), // on a coloured tile the text is light in both themes
         ..Default::default()
     }
 }

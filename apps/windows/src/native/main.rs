@@ -15,8 +15,10 @@ mod settings;
 mod update;
 
 mod audio;
+mod eq;
 mod marks;
 mod pages;
+mod pictures;
 mod system;
 mod ui;
 mod views;
@@ -346,6 +348,23 @@ pub enum Message {
     AccountMenu(bool),
     SetResume(bool),
     SetSleep(String),
+    /// crossfade length in seconds ("0" = off), and whether songs on the same album fade into each other too
+    SetCrossfade(String),
+    SetCrossfadeAlbums(bool),
+    SetTheme(String),
+    /// Profile → Change picture / Remove: pick a file, send it, remove it; and a picture arriving from the server
+    PickPicture,
+    PictureChosen(Option<std::path::PathBuf>),
+    PictureSaved(Result<u64, String>),
+    RemovePicture,
+    PictureRemoved(Result<(), Error>),
+    AvatarLoaded(String, u64, Option<Vec<u8>>),
+    /// the equalizer: on/off, a preset by name, the preamp (dB), one band (index, dB), back to flat
+    EqOn(bool),
+    EqPreset(String),
+    EqPre(f32),
+    EqBand(usize, f32),
+    EqReset,
     SetStreamQuality(String),
     SetDownloadQuality(String),
     SetDataSaver(bool),
@@ -498,6 +517,9 @@ pub struct App {
     /// where the last session stopped has been put back (once per start)
     resumed: bool,
     resume_saved_at: Instant,
+    last_advanced: u64,
+    /// the song whose successor has been opened ahead of time (crossfade)
+    preload_for: Option<String>,
     pub account_menu: bool,
     /// Account → Profile: the name being typed (None: as it is now), and the two password fields
     pub profile_name: Option<String>,
@@ -510,6 +532,9 @@ pub struct App {
     pub member_error: Option<String>,
     pub rewind_year: Option<i32>,
     /// Settings → Library and Share links (loaded when Settings opens)
+    /// profile pictures by (person, version), cut round; and the ones being fetched
+    avatars: HashMap<(String, u64), image::Handle>,
+    avatar_pending: HashSet<(String, u64)>,
     pub folder: Option<volvix_core::admin::LibraryFolder>,
     pub shares: Option<Vec<volvix_core::admin::Share>>,
 }
@@ -611,6 +636,8 @@ impl App {
             sleep_song: false,
             resumed: false,
             resume_saved_at: Instant::now(),
+            last_advanced: 0,
+            preload_for: None,
             account_menu: false,
             profile_name: None,
             pw_current: String::new(),
@@ -620,6 +647,8 @@ impl App {
             new_member_pw: String::new(),
             member_error: None,
             rewind_year: None,
+            avatars: HashMap::new(),
+            avatar_pending: HashSet::new(),
             folder: None,
             shares: None,
         };
@@ -675,7 +704,27 @@ impl App {
 
     /// Every message lands here; the cache is refreshed afterwards unless it's one of the frequent
     /// ones (the clock, a slider, hovering while dragging) that can't change what it holds.
+    /// The theme in your settings (shared with the website): "system", "dark" or "light".
+    pub fn theme_choice(&self) -> String {
+        self.data.rest.get("theme").and_then(|v| v.as_str()).unwrap_or("system").to_string()
+    }
+
+    fn apply_theme(&self) {
+        // debug builds only: VH_THEME=light | dark previews a theme without touching your saved setting
+        #[cfg(debug_assertions)]
+        if let Ok(t) = std::env::var("VH_THEME") {
+            ui::set_light(t == "light");
+            return;
+        }
+        ui::set_light(match self.theme_choice().as_str() {
+            "light" => true,
+            "dark" => false,
+            _ => system::system_uses_light(),
+        });
+    }
+
     fn update(&mut self, msg: Message) -> Task<Message> {
+        self.apply_theme();
         if self.account_menu && matches!(msg, Message::Go(_) | Message::SignOut) {
             self.account_menu = false; // a choice in the account menu closes it
         }
@@ -910,6 +959,7 @@ impl App {
             self.say("That song isn't downloaded, and the server can't be reached.");
             return Task::none();
         }
+        self.preload_for = None;
         self.player.set_gain(self.gain_for(&id));
         self.player.load(&self.stream_client(&c), &id, local, play);
         self.status.track = Some(id.clone());
@@ -990,6 +1040,90 @@ impl App {
         }
         self.dl_queue = needed.into_iter().filter(|id| !self.downloaded.contains(id) && self.lib.track(id).is_some()).collect();
         self.pump_downloads()
+    }
+
+    /// A person's profile picture, once it has been fetched.
+    pub fn avatar_handle(&self, id: &str, version: u64) -> Option<&image::Handle> {
+        if version == 0 {
+            return None;
+        }
+        self.avatars.get(&(id.to_string(), version))
+    }
+
+    /// Fetch the pictures of you and the household members that aren't here yet.
+    fn fetch_avatars(&mut self) -> Vec<Task<Message>> {
+        let Some(c) = self.client.clone().filter(|_| !self.offline) else { return vec![] };
+        let mut wanted: Vec<(String, u64)> = self.members.iter().map(|m| (m.id.clone(), m.avatar)).collect();
+        if let Some(m) = &self.me {
+            wanted.push((m.user.id.clone(), m.user.avatar));
+        }
+        let mut tasks = vec![];
+        for (id, v) in wanted {
+            if v == 0 || self.avatars.contains_key(&(id.clone(), v)) || !self.avatar_pending.insert((id.clone(), v)) {
+                continue;
+            }
+            let c = c.clone();
+            let (who, ver) = (id.clone(), v);
+            tasks.push(Task::perform(blocking(move || c.avatar_bytes(&who, ver).ok()), move |b| Message::AvatarLoaded(id.clone(), v, b)));
+        }
+        tasks
+    }
+
+    /// Seconds of crossfade between songs, from your settings (shared with the website; 0 = off).
+    pub fn crossfade_secs(&self) -> f32 {
+        userdata::setting(&self.data, "crossfade").and_then(|v| v.as_f64()).unwrap_or(0.0).clamp(0.0, 12.0) as f32
+    }
+
+    /// The song after this one took over by itself (it faded in as the last one faded out): move the queue on.
+    fn on_crossfaded(&mut self) -> Task<Message> {
+        self.queue.next(true);
+        self.preload_for = None;
+        self.lyric_line = None;
+        let Some(id) = self.status.track.clone() else { return Task::none() };
+        let mut tasks = vec![self.fetch_covers(), self.load_lyrics()];
+        if let Some(album) = self.lib.track(&id).map(|t| t.album_id.clone()) {
+            if self.data.recent.first() != Some(&album) && !self.setting_bool("privateSession", false) {
+                tasks.push(self.edit(vec![Edit::Recent(album)]));
+            }
+        }
+        Task::batch(tasks)
+    }
+
+    /// Crossfade: a few seconds before the end, open the next song so it can fade in.
+    fn crossfade_prepare(&mut self) {
+        let fade = self.crossfade_secs();
+        self.player.set_crossfade(fade);
+        if fade <= 0.0 || !self.status.playing || self.cast.is_some() || self.party.is_some() || self.queue.repeat() == volvix_core::Repeat::One {
+            return;
+        }
+        let (Some(cur), Some(dur)) = (self.status.track.clone(), self.status.duration) else { return };
+        let left = dur.as_secs_f32() - self.status.position.as_secs_f32();
+        if left > fade + 6.0 || self.preload_for.as_deref() == Some(cur.as_str()) {
+            return;
+        }
+        self.preload_for = Some(cur.clone());
+        let Some(next) = self.queue.upcoming().first().cloned() else { return };
+        let same_album = match (self.lib.track(&cur), self.lib.track(&next)) {
+            (Some(a), Some(b)) => a.album_id == b.album_id,
+            _ => false,
+        };
+        if same_album && !self.setting_bool("crossfadeAlbums", false) {
+            return; // albums flow straight through unless asked
+        }
+        let Some(c) = self.client.clone() else { return };
+        let local = self.downloads.path(&next).filter(|p| p.exists());
+        let gain = self.gain_for(&next);
+        self.player.preload(&self.stream_client(&c), &next, local, gain);
+    }
+
+    /// The equalizer as saved in your settings (shared with the website).
+    pub fn eq_now(&self) -> eq::EqSettings {
+        eq::EqSettings::from_json(userdata::setting(&self.data, "eq").as_ref())
+    }
+
+    fn save_eq(&mut self, e: eq::EqSettings) -> Task<Message> {
+        self.player.set_eq(e.clone());
+        self.edit(vec![Edit::Setting("eq".into(), e.to_json())])
     }
 
     /// The client with the streaming quality chosen in Settings (the data saver drops to "low" on a metered connection).
@@ -1987,6 +2121,85 @@ impl App {
                 }
                 Err(e) => self.member_error = Some(e.to_string()),
             },
+            Message::SetCrossfade(s) => {
+                let secs: f64 = s.parse().unwrap_or(0.0);
+                return self.edit(vec![Edit::Setting("crossfade".into(), json!(secs))]);
+            }
+            Message::PickPicture => {
+                return Task::perform(
+                    blocking(|| rfd::FileDialog::new().set_title("Choose a picture").add_filter("Pictures", &["jpg", "jpeg", "png", "webp"]).pick_file()),
+                    Message::PictureChosen,
+                );
+            }
+            Message::PictureChosen(Some(path)) => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                self.say("Saving your picture…");
+                return Task::perform(blocking(move || pictures::prepare(&path).and_then(|jpeg| c.set_avatar(&jpeg).map_err(|e| e.to_string()))), Message::PictureSaved);
+            }
+            Message::PictureChosen(None) => {}
+            Message::PictureSaved(r) => match r {
+                Ok(v) => {
+                    if let Some(m) = &mut self.me {
+                        m.user.avatar = v;
+                    }
+                    self.save_session();
+                    self.say("Picture updated");
+                }
+                Err(e) => self.say(e),
+            },
+            Message::RemovePicture => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(blocking(move || c.remove_avatar()), Message::PictureRemoved);
+            }
+            Message::PictureRemoved(r) => match r {
+                Ok(()) => {
+                    if let Some(m) = &mut self.me {
+                        m.user.avatar = 0;
+                    }
+                    self.save_session();
+                    self.say("Picture removed");
+                }
+                Err(e) => self.say(e.to_string()),
+            },
+            Message::AvatarLoaded(id, v, bytes) => {
+                self.avatar_pending.remove(&(id.clone(), v));
+                if let Some(h) = bytes.and_then(|b| pictures::round_handle(&b)) {
+                    self.avatars.insert((id, v), h);
+                }
+            }
+            Message::SetTheme(t) => {
+                let task = self.edit(vec![Edit::Theme(t)]);
+                self.apply_theme();
+                return task;
+            }
+            Message::SetCrossfadeAlbums(v) => return self.edit(vec![Edit::Setting("crossfadeAlbums".into(), json!(v))]),
+            Message::EqOn(v) => {
+                let mut e = self.eq_now();
+                e.on = v;
+                return self.save_eq(e);
+            }
+            Message::EqPreset(name) => {
+                let e = self.eq_now().with_preset(&name);
+                return self.save_eq(e);
+            }
+            Message::EqPre(v) => {
+                let mut e = self.eq_now();
+                e.pre_db = v.round();
+                e.preset = "custom".into();
+                return self.save_eq(e);
+            }
+            Message::EqBand(i, v) => {
+                let mut e = self.eq_now();
+                if i < 10 {
+                    e.gains[i] = v.round();
+                    e.preset = "custom".into();
+                }
+                return self.save_eq(e);
+            }
+            Message::EqReset => {
+                let e = self.eq_now().with_preset("Flat");
+                return self.save_eq(e);
+            }
             Message::SetStreamQuality(q) => {
                 self.settings.set_text("streamQuality", &q);
                 self.say(if q == "original" { "Streaming in original quality" } else { "Streaming smaller files from the next song" });
@@ -2266,7 +2479,15 @@ impl App {
         let st = self.player.status();
         let ended = st.ended != self.last_ended;
         self.last_ended = st.ended;
+        let advanced = st.advanced != self.last_advanced;
+        self.last_advanced = st.advanced;
         self.status = st;
+        if advanced {
+            tasks.push(self.on_crossfaded());
+        }
+        self.crossfade_prepare();
+        tasks.extend(self.fetch_avatars());
+        self.player.set_eq(self.eq_now()); // follows a change made on the website too
         let dt = self.last_tick.elapsed().as_secs_f64().min(2.0);
         self.last_tick = Instant::now();
 

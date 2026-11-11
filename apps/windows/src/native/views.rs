@@ -31,8 +31,8 @@ fn title_bar(app: &App) -> El<'_> {
         button(container(ic(c, 10)).center_x(46).center_y(32)).width(46).height(32).padding(0).style(move |_, s| {
             let hover = matches!(s, button::Status::Hovered | button::Status::Pressed);
             button::Style {
-                background: hover.then(|| if close { iced::Color::from_rgb8(0xC4, 0x2B, 0x1C) } else { ui::HOVER }.into()),
-                text_color: if hover && close { iced::Color::WHITE } else { ui::TEXT_2 },
+                background: hover.then(|| if close { iced::Color::from_rgb8(0xC4, 0x2B, 0x1C) } else { ui::HOVER() }.into()),
+                text_color: if hover && close { iced::Color::WHITE } else { ui::TEXT_2() },
                 ..Default::default()
             }
         })
@@ -157,7 +157,7 @@ pub fn cover_of<'a>(app: &'a App, album: Option<&Album>, size: f32) -> El<'a> {
 /// A playlist's cover: its first song's album (Liked Songs gets a heart).
 pub fn playlist_cover<'a>(app: &'a App, tracks: &[String], liked: bool, name: &str, size: f32) -> El<'a> {
     if liked {
-        return container(ic(icon::HEART_FILL, (size * 0.36) as u16).color(ui::TEXT)).width(size).height(size).center_x(size).center_y(size).style(ui::mix_tile("liked")).into();
+        return container(ic(icon::HEART_FILL, (size * 0.36) as u16).color(iced::Color::WHITE)).width(size).height(size).center_x(size).center_y(size).style(ui::mix_tile("liked")).into();
     }
     match tracks.iter().find_map(|id| app.lib.track(id)).and_then(|t| app.lib.album_of(t)) {
         Some(a) => cover_of(app, Some(a), size),
@@ -171,7 +171,7 @@ pub fn section<'a>(title: &'a str, body: El<'a>) -> El<'a> {
 
 pub fn card<'a>(art: El<'a>, title: String, sub: String, on: Message) -> El<'a> {
     let size = 164.0;
-    button(column![art, text(clip(&title, 22)).size(14).color(ui::TEXT), ui::dim(clip(&sub, 26), 13)].spacing(4).width(size)).padding(8).style(ui::flat).on_press(on).into()
+    button(column![art, text(clip(&title, 22)).size(14).color(ui::TEXT()), ui::dim(clip(&sub, 26), 13)].spacing(4).width(size)).padding(8).style(ui::flat).on_press(on).into()
 }
 
 fn album_card<'a>(app: &'a App, a: &'a Album, sub: String) -> El<'a> {
@@ -212,7 +212,7 @@ pub enum Rows<'a> {
 
 /// The grip you drag a row by.
 pub fn drag_handle<'a>(list: crate::DragList, index: usize) -> El<'a> {
-    mouse_area(container(ic('\u{E700}', 13).color(ui::TEXT_3)).padding([8, 6]))
+    mouse_area(container(ic('\u{E700}', 13).color(ui::TEXT_3())).padding([8, 6]))
         .interaction(iced::mouse::Interaction::Grab)
         .on_press(Message::DragStart(list, index))
         .into()
@@ -223,12 +223,12 @@ pub fn drop_target<'a>(app: &App, list: &crate::DragList, index: usize, row: El<
     let Some(d) = app.drag.as_ref().filter(|d| d.list == *list) else { return row };
     let line = |show: bool| -> El<'a> {
         container(Space::new(Length::Fill, 2))
-            .style(move |_| container::Style { background: show.then(|| ui::ACCENT.into()), ..Default::default() })
+            .style(move |_| container::Style { background: show.then(|| ui::ACCENT().into()), ..Default::default() })
             .into()
     };
     let above = d.over == index && d.over < d.from;
     let below = d.over == index && d.over > d.from;
-    let faded: El = if d.from == index { container(row).style(|_| container::Style { background: Some(ui::ACTIVE.into()), border: iced::border::rounded(8.0), ..Default::default() }).into() } else { row };
+    let faded: El = if d.from == index { container(row).style(|_| container::Style { background: Some(ui::ACTIVE().into()), border: iced::border::rounded(8.0), ..Default::default() }).into() } else { row };
     mouse_area(column![line(above), faded, line(below)]).on_enter(Message::DragOver(index)).into()
 }
 
@@ -253,12 +253,12 @@ pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered
         } else {
             cover_of(app, app.lib.album_of(t), 40.0)
         };
-        let mut title_line = row![text(clip(&t.title, 60)).size(15).color(if playing { ui::ACCENT } else { ui::TEXT })].spacing(6).align_y(Alignment::Center);
+        let mut title_line = row![text(clip(&t.title, 60)).size(15).color(if playing { ui::ACCENT() } else { ui::TEXT() })].spacing(6).align_y(Alignment::Center);
         if t.explicit {
-            title_line = title_line.push(container(text("E").size(10).color(ui::FRAME)).padding([0, 4]).style(|_| container::Style { background: Some(ui::TEXT_2.into()), border: iced::border::rounded(3.0), ..Default::default() }));
+            title_line = title_line.push(container(text("E").size(10).color(ui::FRAME())).padding([0, 4]).style(|_| container::Style { background: Some(ui::TEXT_2().into()), border: iced::border::rounded(3.0), ..Default::default() }));
         }
         if app.downloaded.contains(&t.id) {
-            title_line = title_line.push(ic(icon::DOWNLOADED, 11).color(ui::ACCENT));
+            title_line = title_line.push(ic(icon::DOWNLOADED, 11).color(ui::ACCENT()));
         }
         let mut sub = t.artist.clone();
         if show_album {
@@ -313,7 +313,7 @@ pub fn round_icon<'a>(c: char, on: bool, tip: &'a str, m: Option<Message>) -> El
     let b = button(container(ic(c, 16)).center_x(20).center_y(20)).width(42).height(42).padding(11).style(move |t, s| {
         let mut st = ui::secondary(t, s);
         if on {
-            st.text_color = ui::ACCENT;
+            st.text_color = ui::ACCENT();
         }
         st
     });
@@ -388,8 +388,8 @@ fn history_arrows(app: &App) -> El<'_> {
     let arrow = |c: char, m: Option<Message>| {
         let on = m.is_some();
         button(container(ic(c, 12)).center_x(32).center_y(32)).width(32).height(32).padding(0).on_press_maybe(m).style(move |_, s| button::Style {
-            background: Some(if on && matches!(s, button::Status::Hovered) { ui::SURFACE_3 } else { ui::FRAME }.into()),
-            text_color: if on { ui::TEXT } else { ui::TEXT_3 },
+            background: Some(if on && matches!(s, button::Status::Hovered) { ui::SURFACE_3() } else { ui::FRAME() }.into()),
+            text_color: if on { ui::TEXT() } else { ui::TEXT_3() },
             border: iced::border::rounded(16.0),
             ..Default::default()
         })
@@ -489,7 +489,7 @@ fn account_menu(app: &App) -> El<'_> {
     let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
     // the name card is the "Account" button: it opens your profile
     let head = button(
-        row![ui::avatar(&user.name, 40.0), column![text(clip(&user.name, 22)).size(15).font(ui::FONT_BOLD), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(1)]
+        row![ui::avatar_pic(app.avatar_handle(&user.id, user.avatar), &user.name, 40.0), column![text(clip(&user.name, 22)).size(15).font(ui::FONT_BOLD), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(1)]
             .spacing(12)
             .align_y(Alignment::Center),
     )
@@ -500,7 +500,7 @@ fn account_menu(app: &App) -> El<'_> {
     let item = |c: char, label: &'static str, m: Message| -> El<'static> {
         button(row![ic(c, 16), text(label).size(14).font(ui::FONT_BOLD)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([9, 12]).style(ui::flat).on_press(m).into()
     };
-    let line = || container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER.into()), ..Default::default() });
+    let line = || container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER().into()), ..Default::default() });
     let may_members = user.admin || user.perms.iter().any(|p| p == "members");
     let mut card = column![head, container(line()).padding([4, 6])].spacing(2);
     if may_members {
@@ -588,12 +588,12 @@ fn home(app: &App) -> El<'_> {
     let tiles: Vec<El> = home_quick(app)
         .into_iter()
         .map(|a| {
-            button(row![cover_of(app, Some(a), 56.0), text(clip(&a.title, 26)).size(15).color(ui::TEXT), horizontal_space()].spacing(14).align_y(Alignment::Center))
+            button(row![cover_of(app, Some(a), 56.0), text(clip(&a.title, 26)).size(15).color(ui::TEXT()), horizontal_space()].spacing(14).align_y(Alignment::Center))
                 .width(300)
                 .padding(0)
                 .style(|t, s| {
                     let mut st = ui::flat(t, s);
-                    st.background = Some(if matches!(s, button::Status::Hovered) { ui::SURFACE_3 } else { ui::SURFACE_2 }.into());
+                    st.background = Some(if matches!(s, button::Status::Hovered) { ui::SURFACE_3() } else { ui::SURFACE_2() }.into());
                     st.border = iced::border::rounded(6.0);
                     st
                 })
@@ -635,7 +635,7 @@ fn library(app: &App) -> El<'_> {
         LibTab::Albums => album_grid(app, app.lib.albums_by_title(), true),
         LibTab::Playlists => {
             let new = card(
-                container(ic(icon::ADD, 40)).width(164).height(164).center_x(164).center_y(164).style(|_| container::Style { background: Some(ui::SURFACE_3.into()), border: iced::border::rounded(6.0), ..Default::default() }).into(),
+                container(ic(icon::ADD, 40)).width(164).height(164).center_x(164).center_y(164).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(6.0), ..Default::default() }).into(),
                 "New playlist".into(),
                 "Make one".into(),
                 Message::NewPlaylist(vec![]),
@@ -652,7 +652,7 @@ fn library(app: &App) -> El<'_> {
                 .map(|n| {
                     let count = app.lib.albums_by(n).len();
                     let sub = if count == 0 { "Appears on albums".to_string() } else { format!("{count} album{}", if count == 1 { "" } else { "s" }) };
-                    button(row![cover_of(app, app.lib.artist_cover_album(n), 48.0), column![text(n.as_str()).size(15).color(ui::TEXT), ui::dim(sub, 13)].spacing(2)].spacing(14).align_y(Alignment::Center))
+                    button(row![cover_of(app, app.lib.artist_cover_album(n), 48.0), column![text(n.as_str()).size(15).color(ui::TEXT()), ui::dim(sub, 13)].spacing(2)].spacing(14).align_y(Alignment::Center))
                         .width(Length::Fill)
                         .padding([6, 10])
                         .style(ui::flat)
@@ -675,7 +675,7 @@ fn album_page<'a>(app: &'a App, id: &str) -> El<'a> {
         ui::dim("Album", 13),
         ui::title(a.title.as_str(), 40),
         row![
-            button(text(a.artist.as_str()).size(15).color(ui::TEXT)).padding(0).style(ui::flat).on_press(Message::Go(Page::Artist(a.artist.clone()))),
+            button(text(a.artist.as_str()).size(15).color(ui::TEXT())).padding(0).style(ui::flat).on_press(Message::Go(Page::Artist(a.artist.clone()))),
             ui::dim(format!("· {}", app.lib.album_summary(id)), 15),
         ]
         .spacing(6)
@@ -839,8 +839,8 @@ fn now_playing(app: &App) -> El<'_> {
         row![
             column![
                 ui::title(clip(&t.title, 40), 28),
-                button(text(t.artist.as_str()).size(16).color(ui::TEXT_2)).padding(0).style(ui::flat).on_press(Message::Go(Page::Artist(t.artist.clone()))),
-                button(text(album.map(|a| a.title.as_str()).unwrap_or("")).size(14).color(ui::TEXT_3)).padding(0).style(ui::flat).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
+                button(text(t.artist.as_str()).size(16).color(ui::TEXT_2())).padding(0).style(ui::flat).on_press(Message::Go(Page::Artist(t.artist.clone()))),
+                button(text(album.map(|a| a.title.as_str()).unwrap_or("")).size(14).color(ui::TEXT_3())).padding(0).style(ui::flat).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
             ]
             .spacing(4)
             .width(Length::Fill),
@@ -869,7 +869,7 @@ fn now_playing(app: &App) -> El<'_> {
                 let index = pos + 1 + k;
                 let line = row![
                     cover_of(app, app.lib.album_of(t), 40.0),
-                    column![text(clip(&t.title, 50)).size(14).color(ui::TEXT), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
+                    column![text(clip(&t.title, 50)).size(14).color(ui::TEXT()), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
                     ui::tip(button(ic(icon::CLOSE, 11)).style(ui::icon_btn(false)).padding(8).on_press(Message::RemoveFromQueue(index)), "Remove from queue"),
                     ui::dim(format_duration(t.duration), 12),
                 ]
@@ -912,7 +912,7 @@ fn player_row(app: &App, width: f32) -> El<'_> {
                 button(
                     row![
                         cover_of(app, album, 56.0),
-                        column![text(clip(&t.title, 28)).size(14).color(ui::TEXT).wrapping(text::Wrapping::None), ui::dim(clip(&t.artist, 32), 12).wrapping(text::Wrapping::None)].spacing(2).width(Length::Fill).clip(true)
+                        column![text(clip(&t.title, 28)).size(14).color(ui::TEXT()).wrapping(text::Wrapping::None), ui::dim(clip(&t.artist, 32), 12).wrapping(text::Wrapping::None)].spacing(2).width(Length::Fill).clip(true)
                     ]
                     .spacing(12)
                     .align_y(Alignment::Center)
@@ -934,7 +934,7 @@ fn player_row(app: &App, width: f32) -> El<'_> {
 
     let has = track.is_some() || !app.queue.is_empty();
     let small = |c: char, on: bool, hint: &str, m: Message| -> El<'_> { ui::tip(button(ic(c, 16)).padding(8).style(ui::icon_btn(on)).on_press_maybe(has.then_some(m)), hint) };
-    let play =ui::tip(button(container(ui::play_pause(st.playing, 18.0, ui::FRAME)).center_x(18).center_y(18)).width(36).height(36).padding(9).style(ui::round_play).on_press_maybe(has.then_some(Message::TogglePlay)), if st.playing { "Pause" } else { "Play" });
+    let play =ui::tip(button(container(ui::play_pause(st.playing, 18.0, ui::FRAME())).center_x(18).center_y(18)).width(36).height(36).padding(9).style(ui::round_play).on_press_maybe(has.then_some(Message::TogglePlay)), if st.playing { "Pause" } else { "Play" });
     let repeat_icon = if app.queue.repeat() == Repeat::One { icon::REPEAT_ONE } else { icon::REPEAT_ALL };
     let controls = row![
         small(icon::SHUFFLE, app.queue.shuffle(), "Shuffle", Message::ToggleShuffle),
@@ -966,7 +966,7 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     let playing_elsewhere = app.cast.is_some() || app.party.is_some();
     let right = row![
         horizontal_space(),
-        ui::tip(button(container(ui::cast_icon(17.0, if playing_elsewhere { ui::ACCENT } else { ui::TEXT_2 })).center_x(16).center_y(16)).padding(8).style(ui::icon_btn(playing_elsewhere)).on_press(Message::PlayOn), "Play on"),
+        ui::tip(button(container(ui::cast_icon(17.0, if playing_elsewhere { ui::ACCENT() } else { ui::TEXT_2() })).center_x(16).center_y(16)).padding(8).style(ui::icon_btn(playing_elsewhere)).on_press(Message::PlayOn), "Play on"),
         ui::tip(button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }), "Queue"),
         ui::tip(button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute), if app.volume <= 0.001 { "Unmute" } else { "Mute" }),
         container(El::from(marks::scrub(app.volume, 1.0, Message::Volume).on_change(Message::Volume))).width(if narrow { 64 } else { 110 }),

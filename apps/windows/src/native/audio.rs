@@ -5,8 +5,9 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rodio::{Decoder, OutputStream, Sink, Source};
 use volvix_core::stream::HttpFile;
@@ -26,6 +27,8 @@ pub struct Status {
     pub ended: u64,
     /// the loaded song has played to its end (Play starts it again)
     pub finished: bool,
+    /// bumped each time the next song took over by itself while this one faded out (crossfade)
+    pub advanced: u64,
     pub error: Option<String>,
 }
 
@@ -56,6 +59,9 @@ type Opened = Result<(Decoder<Media>, Option<Duration>), String>;
 enum Cmd {
     Load { client: Client, track: String, local: Option<PathBuf>, play: bool, gen: u64 },
     Loaded { gen: u64, track: String, result: Opened, play: bool },
+    /// open the next song ahead of time, so it can fade in while this one fades out
+    Preload { client: Client, track: String, local: Option<PathBuf>, gain: f32, gen: u64 },
+    Preloaded { gen: u64, track: String, result: Opened, gain: f32 },
     Play,
     Pause,
     Seek(Duration),
@@ -70,16 +76,39 @@ pub struct Player {
     tx: Sender<Cmd>,
     status: Arc<Mutex<Status>>,
     gen: Arc<Mutex<u64>>,
+    eq: crate::eq::Shared,
+    /// crossfade length in tenths of a second (0 = off)
+    fade: Arc<AtomicU32>,
 }
 
 impl Player {
     pub fn start() -> Player {
         let (tx, rx) = mpsc::channel();
         let status = Arc::new(Mutex::new(Status::default()));
+        let eq = crate::eq::shared();
         let s = status.clone();
         let back = tx.clone();
-        std::thread::Builder::new().name("audio".into()).spawn(move || audio_thread(rx, back, s)).expect("audio thread");
-        Player { tx, status, gen: Arc::new(Mutex::new(0)) }
+        let e = eq.clone();
+        let fade = Arc::new(AtomicU32::new(0));
+        let f = fade.clone();
+        std::thread::Builder::new().name("audio".into()).spawn(move || audio_thread(rx, back, s, e, f)).expect("audio thread");
+        Player { tx, status, gen: Arc::new(Mutex::new(0)), eq, fade }
+    }
+
+    /// Seconds of crossfade between songs (0 = none).
+    pub fn set_crossfade(&self, secs: f32) {
+        self.fade.store((secs.clamp(0.0, 12.0) * 10.0) as u32, Ordering::Relaxed);
+    }
+
+    /// Open the next song now (it starts fading in when the current one is `crossfade` seconds from its end).
+    pub fn preload(&self, client: &Client, track: &str, local: Option<PathBuf>, gain: f32) {
+        let gen = *self.gen.lock().unwrap();
+        let _ = self.tx.send(Cmd::Preload { client: client.clone(), track: track.to_string(), local, gain, gen });
+    }
+
+    /// The equalizer for what is playing and what plays next (changes are heard within a moment).
+    pub fn set_eq(&self, e: crate::eq::EqSettings) {
+        crate::eq::set(&self.eq, e);
     }
 
     pub fn status(&self) -> Status {
@@ -126,7 +155,15 @@ fn open(client: &Client, track: &str, local: Option<PathBuf>) -> Opened {
     Ok((dec, total))
 }
 
-fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>) {
+/// The song that is fading out while the next one fades in.
+struct Fade {
+    old: Sink,
+    old_gain: f32,
+    started: Instant,
+    secs: f32,
+}
+
+fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>, eq: crate::eq::Shared, fade: Arc<AtomicU32>) {
     // the output device; without one (no speakers), every command just reports the error
     let (_stream, handle) = match OutputStream::try_default() {
         Ok(x) => x,
@@ -151,11 +188,33 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
     let mut gain = 1.0f32;
     let mut latest_gen = 0u64;
     let mut was_busy = false;
+    // the next song, opened ahead of time (track, sound, length, its volume leveling)
+    let mut next: Option<(String, Decoder<Media>, Option<Duration>, f32)> = None;
+    let mut fading: Option<Fade> = None;
 
     loop {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        let wait = if fading.is_some() { 30 } else { 100 };
+        match rx.recv_timeout(Duration::from_millis(wait)) {
+            Ok(Cmd::Preload { client, track, local, gain, gen }) => {
+                let back = back.clone();
+                std::thread::spawn(move || {
+                    let result = open(&client, &track, local);
+                    let _ = back.send(Cmd::Preloaded { gen, track, result, gain });
+                });
+            }
+            Ok(Cmd::Preloaded { gen, track, result, gain }) => {
+                if gen == latest_gen {
+                    if let Ok((dec, total)) = result {
+                        next = Some((track, dec, total, gain));
+                    }
+                }
+            }
             Ok(Cmd::Load { client, track, local, play, gen }) => {
                 latest_gen = gen;
+                next = None;
+                if let Some(f) = fading.take() {
+                    f.old.stop();
+                }
                 if let Some(s) = sink.take() {
                     s.stop();
                 }
@@ -186,7 +245,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 match result.and_then(|(dec, total)| Sink::try_new(&handle).map(|s| (s, dec, total)).map_err(|e| e.to_string())) {
                     Ok((s, dec, total)) => {
                         s.set_volume(volume * gain);
-                        s.append(dec);
+                        s.append(crate::eq::EqSource::new(dec.convert_samples::<f32>(), eq.clone()));
                         if play {
                             s.play();
                         } else {
@@ -209,10 +268,16 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                     s.play();
                     status.lock().unwrap().playing = true;
                 }
+                if let Some(f) = &fading {
+                    f.old.play();
+                }
             }
             Ok(Cmd::Pause) => {
                 if let Some(s) = &sink {
                     s.pause();
+                }
+                if let Some(f) = &fading {
+                    f.old.pause();
                 }
                 status.lock().unwrap().playing = false;
             }
@@ -235,6 +300,10 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 }
             }
             Ok(Cmd::Stop) => {
+                next = None;
+                if let Some(f) = fading.take() {
+                    f.old.stop();
+                }
                 if let Some(s) = sink.take() {
                     s.stop();
                 }
@@ -249,6 +318,52 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
+        }
+        // crossfade: when the song is `fade` seconds from its end and the next one is ready, start it quietly
+        let fade_secs = fade.load(Ordering::Relaxed) as f32 / 10.0;
+        if fade_secs > 0.0 && fading.is_none() && next.is_some() && sink.is_some() {
+            let (playing, pos, total) = {
+                let st = status.lock().unwrap();
+                (st.playing, st.position, st.duration)
+            };
+            if let (true, Some(total)) = (playing, total) {
+                let secs = fade_secs.min(total.as_secs_f32() / 2.0);
+                if secs > 0.2 && total.as_secs_f32() - pos.as_secs_f32() <= secs {
+                    if let (Some((track, dec, length, new_gain)), Ok(s2)) = (next.take(), Sink::try_new(&handle)) {
+                        s2.set_volume(0.0);
+                        s2.append(crate::eq::EqSource::new(dec.convert_samples::<f32>(), eq.clone()));
+                        s2.play();
+                        if let Some(old) = sink.replace(s2) {
+                            fading = Some(Fade { old, old_gain: gain, started: Instant::now(), secs });
+                        }
+                        gain = new_gain;
+                        was_busy = true;
+                        let mut st = status.lock().unwrap();
+                        st.track = Some(track);
+                        st.duration = length;
+                        st.position = Duration::ZERO;
+                        st.finished = false;
+                        st.playing = true;
+                        st.advanced += 1;
+                    }
+                }
+            }
+        }
+        // the two songs' volumes follow a quarter circle while they swap (the sound stays even)
+        if let Some(f) = &fading {
+            let t = (f.started.elapsed().as_secs_f32() / f.secs).clamp(0.0, 1.0);
+            f.old.set_volume(volume * f.old_gain * (t * std::f32::consts::FRAC_PI_2).cos());
+            if let Some(s) = &sink {
+                s.set_volume(volume * gain * (t * std::f32::consts::FRAC_PI_2).sin());
+            }
+            if t >= 1.0 {
+                if let Some(f) = fading.take() {
+                    f.old.stop();
+                }
+                if let Some(s) = &sink {
+                    s.set_volume(volume * gain);
+                }
+            }
         }
         // keep the status fresh, and notice when a song has played to the end
         if let Some(s) = &sink {

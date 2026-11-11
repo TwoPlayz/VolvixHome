@@ -200,6 +200,26 @@ pub struct Tray {
     quit: MenuItem,
 }
 
+/// Does Windows use its light theme for apps right now? (Settings → Personalization → Colors.) Asked at most every 2 seconds.
+pub fn system_uses_light() -> bool {
+    static LAST: std::sync::Mutex<Option<(Instant, bool)>> = std::sync::Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else { return false };
+    if let Some((at, v)) = *last {
+        if at.elapsed() < Duration::from_secs(2) {
+            return v;
+        }
+    }
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let v = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_value::<u32, _>("AppsUseLightTheme"))
+        .map(|n| n != 0)
+        .unwrap_or(false);
+    *last = Some((Instant::now(), v));
+    v
+}
+
 /// Is the connection in use one Windows calls metered (a mobile hotspot, or one set as "metered connection")?
 /// Asked at most every 30 seconds; if Windows can't say, it counts as not metered.
 pub fn on_metered_connection() -> bool {

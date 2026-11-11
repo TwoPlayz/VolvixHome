@@ -17,7 +17,7 @@ path = "src/native/main.rs"
 required-features = ["native"]
 
 [features]
-native = ["dep:volvix-core", "dep:iced", "dep:rodio", "dep:tokio", "dep:souvlaki", "dep:raw-window-handle", "dep:windows"]
+native = ["dep:volvix-core", "dep:iced", "dep:rodio", "dep:tokio", "dep:souvlaki", "dep:raw-window-handle", "dep:windows", "dep:rfd", "dep:image"]
 
 [dependencies]
 wry = "0.57"
@@ -38,6 +38,9 @@ souvlaki = { version = "0.8", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
 # asks Windows whether this connection is metered (the same version wry already uses)
 windows = { version = "0.62", optional = true, features = ["Networking_Connectivity"] }
+# picking a picture file, and shaping it into a round profile picture
+rfd = { version = "0.15", optional = true, default-features = false }
+image = { version = "0.24", optional = true, default-features = false, features = ["png", "jpeg", "webp"] }
 
 [build-dependencies]
 winres = "0.1"
