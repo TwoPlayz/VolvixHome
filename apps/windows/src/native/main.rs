@@ -85,6 +85,9 @@ pub enum Page {
     GetMusic,
     Household,
     Notifications,
+    /// Account → Profile, Members and Settings: three tabs of one page, like the website
+    Profile,
+    Members,
     Settings,
 }
 
@@ -337,6 +340,13 @@ pub enum Message {
     AccountMenu(bool),
     SetResume(bool),
     SetSleep(String),
+    /// a text box on the Profile or Members tab: 0 your name, 1 current password, 2 new password, 3 member name, 4 member password
+    ProfileField(u8, String),
+    SaveName,
+    SavePassword,
+    AddMember,
+    MembersLoaded(Result<Vec<volvix_core::members::Member>, Error>),
+    MemberAdded(Result<(), Error>),
     CheckUpdate,
     ChangePassword,
     RenameMe,
@@ -455,9 +465,16 @@ pub struct App {
     /// where the last session stopped has been put back (once per start)
     resumed: bool,
     resume_saved_at: Instant,
-    /// everything has loaded but the launch screen is still finishing its breath
-    splash_hold: bool,
     pub account_menu: bool,
+    /// Account → Profile: the name being typed (None: as it is now), and the two password fields
+    pub profile_name: Option<String>,
+    pub pw_current: String,
+    pub pw_new: String,
+    /// Account → Members
+    pub members: Vec<volvix_core::members::Member>,
+    pub new_member_name: String,
+    pub new_member_pw: String,
+    pub member_error: Option<String>,
 }
 
 fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl std::future::Future<Output = T> {
@@ -557,8 +574,14 @@ impl App {
             sleep_song: false,
             resumed: false,
             resume_saved_at: Instant::now(),
-            splash_hold: false,
             account_menu: false,
+            profile_name: None,
+            pw_current: String::new(),
+            pw_new: String::new(),
+            members: vec![],
+            new_member_name: String::new(),
+            new_member_pw: String::new(),
+            member_error: None,
         };
         app.apply_volume();
         let mut tasks = vec![window::get_oldest().map(Message::WindowReady)];
@@ -686,6 +709,8 @@ impl App {
                 Page::Notifications => tasks.push(Task::perform(blocking(move || c.notifications()), Message::NotesLoaded)),
                 Page::GetMusic => tasks.push(Task::perform(blocking(move || c.requests()), Message::RequestsLoaded)),
                 Page::Settings => tasks.push(Task::perform(blocking(move || c.status()), Message::ServerStatus)),
+                Page::Members => tasks.push(Task::perform(blocking(move || c.members()), Message::MembersLoaded)),
+                Page::Profile => self.profile_name = None,
                 _ => {}
             }
         }
@@ -1050,9 +1075,7 @@ impl App {
                             self.invites = s.invites;
                         }
                         self.offline = l.offline;
-                        // the launch screen stays for one full breath, even when the library arrives at once
-                        self.splash_hold = ui::since_start() < ui::SPLASH_MIN;
-                        self.screen = if self.splash_hold { Screen::Loading } else { Screen::Main };
+                        self.screen = Screen::Main;
                         self.save_session();
                         self.refresh_mixes();
                         if self.offline {
@@ -1518,6 +1541,8 @@ impl App {
                     self.client = Some(c);
                     self.save_session();
                     self.dialog = None;
+                    self.pw_current.clear();
+                    self.pw_new.clear();
                     self.say("Password changed");
                 }
                 Err(e) => {
@@ -1534,6 +1559,7 @@ impl App {
                     }
                     self.save_session();
                     self.dialog = None;
+                    self.profile_name = None;
                     self.say("Name changed");
                 }
                 Err(e) => {
@@ -1697,6 +1723,49 @@ impl App {
                     t.set_checks(None, None, Some(v));
                 }
             }
+            Message::ProfileField(n, s) => match n {
+                0 => self.profile_name = Some(s),
+                1 => self.pw_current = s,
+                2 => self.pw_new = s,
+                3 => self.new_member_name = s,
+                _ => self.new_member_pw = s,
+            },
+            // the same calls the old dialogs made; a problem is shown in the dialog that opens
+            Message::SaveName => {
+                let name = self.profile_name.clone().or_else(|| self.me.as_ref().map(|m| m.user.name.clone())).unwrap_or_default();
+                self.dialog = Some(Dialog::Rename { name, error: None });
+                return self.dialog_ok();
+            }
+            Message::SavePassword => {
+                self.dialog = Some(Dialog::Password { current: self.pw_current.clone(), new: self.pw_new.clone(), error: None, busy: false });
+                return self.dialog_ok();
+            }
+            Message::AddMember => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                let (name, pw) = (self.new_member_name.trim().to_string(), self.new_member_pw.clone());
+                if name.is_empty() || pw.is_empty() {
+                    self.member_error = Some("Enter a name and a password.".into());
+                    return Task::none();
+                }
+                self.member_error = None;
+                return Task::perform(blocking(move || c.add_member(&name, &pw)), Message::MemberAdded);
+            }
+            Message::MembersLoaded(r) => {
+                if let Ok(list) = r {
+                    self.members = list;
+                }
+            }
+            Message::MemberAdded(r) => match r {
+                Ok(()) => {
+                    self.new_member_name.clear();
+                    self.new_member_pw.clear();
+                    self.say("Added to the household");
+                    if let Some(c) = self.client.clone() {
+                        return Task::perform(blocking(move || c.members()), Message::MembersLoaded);
+                    }
+                }
+                Err(e) => self.member_error = Some(e.to_string()),
+            },
             Message::SetResume(v) => return self.edit(vec![Edit::Setting("resumeLast".into(), json!(v))]),
             Message::SetSleep(choice) => {
                 self.sleep_song = choice == "song";
@@ -1719,12 +1788,7 @@ impl App {
 
             /* ---------- the clock: player status, saving, presence, tray, media keys, updates ---------- */
             Message::Tick => return self.tick(),
-            Message::Frame => {
-                if self.splash_hold && ui::since_start() >= ui::SPLASH_MIN {
-                    self.splash_hold = false;
-                    self.screen = Screen::Main;
-                }
-            }
+            Message::Frame => {} // only here to redraw the launch screen while it shows
             Message::WindowReady(id) => {
                 self.window = id;
                 if let Some(id) = id {

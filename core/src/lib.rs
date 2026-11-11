@@ -17,6 +17,7 @@ pub mod covers;
 pub mod downloads;
 pub mod error;
 pub mod library;
+pub mod members;
 pub mod mixes;
 pub mod model;
 pub mod playlists;

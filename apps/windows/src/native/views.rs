@@ -117,7 +117,7 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                     ids.extend(r.artists.iter().take(6).filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone()));
                 }
             }
-            Page::GetMusic | Page::Notifications | Page::Settings => {}
+            Page::GetMusic | Page::Notifications | Page::Profile | Page::Members | Page::Settings => {}
         }
     }
     let mut seen = std::collections::HashSet::new();
@@ -418,7 +418,7 @@ fn main_screen(app: &App) -> El<'_> {
         );
     }
     if app.account_menu {
-        layers = layers.push(opaque(mouse_area(container(account_menu(app)).width(Length::Fill).height(Length::Fill).align_x(Alignment::Start).align_y(Alignment::End).padding(Padding { left: 16.0, bottom: 64.0, ..Padding::ZERO })).on_press(Message::AccountMenu(false))));
+        layers = layers.push(opaque(mouse_area(container(account_menu(app)).width(Length::Fill).height(Length::Fill).align_x(Alignment::Start).align_y(Alignment::End).padding(Padding { left: 16.0, bottom: 164.0, ..Padding::ZERO })).on_press(Message::AccountMenu(false))));
     }
     if let Some(d) = &app.dialog {
         let card = container(pages::dialog(app, d)).width(440).padding(24).style(ui::dialog);
@@ -472,7 +472,7 @@ fn sidebar(app: &App) -> El<'_> {
     let bottom = button(row![ic(icon::SETTINGS, 16), column![text(clip(&who, 22)).size(13), ui::dim("Settings and account", 11)]].spacing(12).align_y(Alignment::Center))
         .width(Length::Fill)
         .padding([8, 14])
-        .style(ui::nav(is(&Page::Settings)))
+        .style(ui::nav(is(&Page::Settings) || is(&Page::Profile) || is(&Page::Members)))
         .on_press(Message::AccountMenu(!app.account_menu));
     container(column![nav, ui::gap(10), playlists, bottom].spacing(4)).width(240).height(Length::Fill).padding(8).style(ui::panel).into()
 }
@@ -480,28 +480,27 @@ fn sidebar(app: &App) -> El<'_> {
 /// The menu the profile button opens, like the website's: who you are, then Account, Settings and Sign out.
 fn account_menu(app: &App) -> El<'_> {
     let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
-    let initial: String = user.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-    let avatar = container(text(initial).size(18).font(ui::FONT_BOLD)).width(40).height(40).center_x(40).center_y(40).style(|_: &iced::Theme| container::Style {
-        background: Some(iced::Color::from_rgb8(0x5E, 0x54, 0x8E).into()),
-        border: iced::border::rounded(100.0),
-        text_color: Some(ui::TEXT),
-        ..Default::default()
-    });
-    let head = row![avatar, column![text(clip(&user.name, 22)).size(15).font(ui::FONT_BOLD), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(1)].spacing(12).align_y(Alignment::Center);
+    // the name card is the "Account" button: it opens your profile
+    let head = button(
+        row![ui::avatar(&user.name, 40.0), column![text(clip(&user.name, 22)).size(15).font(ui::FONT_BOLD), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(1)]
+            .spacing(12)
+            .align_y(Alignment::Center),
+    )
+    .width(Length::Fill)
+    .padding([8, 12])
+    .style(ui::flat)
+    .on_press(Message::Go(Page::Profile));
     let item = |c: char, label: &'static str, m: Message| -> El<'static> {
-        button(row![ic(c, 16), text(label).size(14)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([9, 12]).style(ui::flat).on_press(m).into()
+        button(row![ic(c, 16), text(label).size(14).font(ui::FONT_BOLD)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([9, 12]).style(ui::flat).on_press(m).into()
     };
-    let go = |p: Page| Message::Go(p);
-    let card = column![
-        container(head).padding([8, 12]),
-        container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER.into()), ..Default::default() }),
-        item(icon::PERSON, "Account", go(Page::Settings)),
-        item(icon::SETTINGS, "Settings", go(Page::Settings)),
-        container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER.into()), ..Default::default() }),
-        item(icon::SIGN_OUT, "Sign out", Message::SignOut),
-    ]
-    .spacing(2);
-    opaque(container(card).width(248).padding(6).style(ui::dialog)).into()
+    let line = || container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER.into()), ..Default::default() });
+    let may_members = user.admin || user.perms.iter().any(|p| p == "members");
+    let mut card = column![head, container(line()).padding([4, 6])].spacing(2);
+    if may_members {
+        card = card.push(item(icon::PEOPLE, "Members", Message::Go(Page::Members)));
+    }
+    card = card.push(item(icon::SETTINGS, "Settings", Message::Go(Page::Settings))).push(container(line()).padding([4, 6])).push(item(icon::SIGN_OUT, "Sign out", Message::SignOut));
+    opaque(container(card).width(240).padding(6).style(ui::dialog)).into()
 }
 
 fn bell(app: &App) -> El<'_> {
@@ -525,7 +524,7 @@ fn page(app: &App) -> El<'_> {
         Page::GetMusic => pages::requests(app),
         Page::Household => pages::household(app),
         Page::Notifications => pages::notifications(app),
-        Page::Settings => pages::settings(app),
+        Page::Profile | Page::Members | Page::Settings => pages::account(app),
     }
 }
 

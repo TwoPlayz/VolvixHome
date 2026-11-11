@@ -566,7 +566,100 @@ fn switch<'a>(on: bool, f: fn(bool) -> Message) -> El<'a> {
     toggler(on).on_toggle(f).size(24).style(ui::switch_style).into()
 }
 
-pub fn settings(app: &App) -> El<'_> {
+/* ---------- Account: Profile, Members, Settings (three tabs, like the website) ---------- */
+
+pub fn account(app: &App) -> El<'_> {
+    let tab = match app.page {
+        Page::Members => 1,
+        Page::Settings => 2,
+        _ => 0,
+    };
+    let may_members = app.me.as_ref().map(|m| m.user.admin || m.user.perms.iter().any(|p| p == "members")).unwrap_or(false);
+    let item = |c: char, label: &'static str, page: Page, on: bool| -> El<'static> {
+        button(row![ic(c, 16), text(label).size(14)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([10, 14]).style(ui::nav(on)).on_press(Message::Go(page)).into()
+    };
+    let mut tabs = column![item(icon::PERSON, "Profile", Page::Profile, tab == 0)].spacing(2);
+    if may_members {
+        tabs = tabs.push(item(icon::PEOPLE, "Members", Page::Members, tab == 1));
+    }
+    tabs = tabs.push(item(icon::SETTINGS, "Settings", Page::Settings, tab == 2));
+    let body: El = match tab {
+        0 => profile(app),
+        1 => members(app),
+        _ => settings(app),
+    };
+    column![ui::title(if tab == 2 { "Settings" } else { "Account" }, 32), row![container(tabs).width(210), container(body).width(Length::Fill).max_width(660)].spacing(32)].spacing(16).into()
+}
+
+/// A labelled text box, like the website's form fields.
+fn field<'a>(label: &'a str, value: &'a str, n: u8, secret: bool, hint: Option<&'a str>, submit: Option<Message>) -> El<'a> {
+    let mut input = text_input("", value).on_input(move |s| Message::ProfileField(n, s)).padding(13).size(15).style(ui::input);
+    if secret {
+        input = input.secure(true);
+    }
+    if let Some(m) = submit {
+        input = input.on_submit(m);
+    }
+    let mut c = column![text(label).size(13).font(ui::FONT_BOLD), input].spacing(6);
+    if let Some(h) = hint {
+        c = c.push(ui::dim(h, 12).color(ui::TEXT_3));
+    }
+    container(c).max_width(428).into()
+}
+
+fn profile(app: &App) -> El<'_> {
+    let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
+    let name: &str = app.profile_name.as_deref().or(app.me.as_ref().map(|m| m.user.name.as_str())).unwrap_or("");
+    let you = column![
+        field("Your name", name, 0, false, Some("This is also what you sign in with, on every device."), Some(Message::SaveName)),
+        button(text("Save name").size(14)).padding([10, 22]).style(ui::primary).on_press(Message::SaveName),
+        row![
+            ui::avatar::<Message>(&user.name, 56.0),
+            column![text(user.name.clone()).size(15), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(2).width(Length::Fill),
+        ]
+        .spacing(14)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(14);
+    let password = column![
+        field("Current password", app.pw_current.as_str(), 1, true, None, None),
+        field("New password", app.pw_new.as_str(), 2, true, Some("At least 8 characters. Your other devices will need to sign in again."), Some(Message::SavePassword)),
+        button(text("Change password").size(14)).padding([10, 22]).style(ui::primary).on_press_maybe((!app.pw_current.is_empty() && !app.pw_new.is_empty()).then_some(Message::SavePassword)),
+    ]
+    .spacing(14);
+    let sign_out = setting_row("Sign out on this device", "Your playlists and settings stay on the server.", button(text("Sign out").size(13)).padding([8, 16]).style(ui::secondary).on_press(Message::SignOut).into());
+    column![section("You", you.into()), section("Password", password.into()), section("Sign out", sign_out)].spacing(28).into()
+}
+
+fn members(app: &App) -> El<'_> {
+    let me = app.me.as_ref().map(|m| m.user.id.clone()).unwrap_or_default();
+    let mut list = Column::new().spacing(10);
+    for m in &app.members {
+        let you = if m.id == me { " (you)" } else { "" };
+        list = list.push(
+            row![ui::avatar::<Message>(&m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2)].spacing(12).align_y(Alignment::Center),
+        );
+    }
+    let first = column![
+        ui::title("Members of this server", 22),
+        ui::dim("Everyone shares the same music. Playlists, play history and settings are personal.", 13),
+        container(list).padding([6, 4]),
+    ]
+    .spacing(6);
+    let mut add = column![
+        field("Name", app.new_member_name.as_str(), 3, false, Some("They sign in with this name."), None),
+        field("Password", app.new_member_pw.as_str(), 4, true, Some("At least 8 characters. They can change it under Account."), Some(Message::AddMember)),
+        ui::dim("New members can request music and start parties. Change that any time under Manage.", 13),
+    ]
+    .spacing(14);
+    if let Some(e) = &app.member_error {
+        add = add.push(container(text(e.as_str()).size(13)).padding([8, 10]).style(ui::error_box));
+    }
+    add = add.push(button(row![ic(icon::ADD, 14), text("Add to household").size(14)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::primary).on_press(Message::AddMember));
+    column![first, section("Add a member", add.into())].spacing(28).into()
+}
+
+fn settings(app: &App) -> El<'_> {
     let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
     let leveling = app.setting_str("leveling", "off") != "off";
     let server = app.client.as_ref().map(|c| c.base().to_string()).unwrap_or_default();
@@ -582,18 +675,8 @@ pub fn settings(app: &App) -> El<'_> {
         Some(crate::update::State::Ready(v)) => format!("Version {v} is ready. Restart from the tray menu to finish."),
         Some(crate::update::State::Failed(m)) => m.clone(),
     };
-    let role = if user.admin { "Admin" } else { "Member" };
+    let _ = user;
     let col = column![
-        ui::title("Settings", 32),
-        section(
-            "Account",
-            column![
-                setting_row(Box::leak(user.name.clone().into_boxed_str()), Box::leak(format!("{role} · signed in as {}", user.username).into_boxed_str()), button(text("Change name").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::RenameMe).into()),
-                setting_row("Password", "Change the password you sign in with.", button(text("Change password").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ChangePassword).into()),
-                setting_row("Sign out", "Sign out on this computer. Downloads stay.", button(text("Sign out").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::SignOut).into()),
-            ]
-            .into()
-        ),
         section(
             "Privacy",
             column![
@@ -636,7 +719,7 @@ pub fn settings(app: &App) -> El<'_> {
             .into()
         ),
         section(
-            "Windows",
+            "Windows app",
             column![
                 setting_row("Start with Windows", "Open in the tray when you sign in to Windows.", switch(app.settings.start_with_windows, Message::SetStartWithWindows)),
                 setting_row("Close to the system tray", "The close button hides the window and the music keeps playing.", switch(app.settings.close_to_tray, Message::SetCloseToTray)),

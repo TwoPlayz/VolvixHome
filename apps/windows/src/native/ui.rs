@@ -12,9 +12,11 @@ pub const INPUT_BG: Color = rgb(0x1C, 0x1C, 0x1F);
 pub const TEXT: Color = rgb(0xF5, 0xF5, 0xF7);
 pub const TEXT_2: Color = rgb(0xA1, 0xA1, 0xA8);
 pub const TEXT_3: Color = rgb(0x86, 0x86, 0x8E);
-pub const HOVER: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 0.06 };
-pub const ACTIVE: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 0.10 };
-pub const BORDER: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 0.08 };
+/// White at 6% and 10% over the dark panel, as solid colours (see-through white is drawn too bright here).
+pub const HOVER: Color = rgb(0x20, 0x20, 0x23);
+pub const ACTIVE: Color = rgb(0x2A, 0x2A, 0x2D);
+/// A hairline: white at 8% over the dark surfaces, as one solid colour (a see-through border is drawn too bright here).
+pub const BORDER: Color = rgb(0x2B, 0x2B, 0x2F);
 
 pub const RADIUS: f32 = 10.0;
 
@@ -227,8 +229,19 @@ pub fn since_start() -> f32 {
     START.get_or_init(std::time::Instant::now).elapsed().as_secs_f32()
 }
 
-/// How long the launch screen stays at least (one full breath of the logo).
-pub const SPLASH_MIN: f32 = 1.6;
+/// A round picture stand-in: the first letter of a name on one of the website's avatar colours.
+pub fn avatar<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
+    const COLORS: [(u8, u8, u8); 8] = [(0x5E, 0x54, 0x8E), (0x33, 0x5C, 0x67), (0x9E, 0x2A, 0x2B), (0xBC, 0x6C, 0x25), (0x3D, 0x5A, 0x80), (0x6B, 0x4F, 0x3A), (0x4A, 0x6C, 0x2F), (0x7A, 0x40, 0x69)];
+    let (r, g, b) = COLORS[name.bytes().map(|b| b as usize).sum::<usize>() % COLORS.len()];
+    let initial: String = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    container(text(initial).size(size * 0.4).font(FONT_BOLD))
+        .width(size)
+        .height(size)
+        .center_x(size)
+        .center_y(size)
+        .style(move |_: &Theme| container::Style { background: Some(rgb(r, g, b).into()), border: border::rounded(100.0), text_color: Some(Color::WHITE), ..Default::default() })
+        .into()
+}
 
 /// The launch screen, like the website's: the logo breathes (1 → 0.94 → 1 every 1.6 s) and "Volvix" fades in under it.
 pub fn splash<'a, M: 'a>() -> Element<'a, M> {
