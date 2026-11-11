@@ -51,6 +51,7 @@ pub mod icon {
     pub const EDIT: char = '\u{E70F}';
     pub const BELL: char = '\u{EA8F}';
     pub const PEOPLE: char = '\u{E716}';
+    pub const DEVICES: char = '\u{E772}';
     pub const SETTINGS: char = '\u{E713}';
     pub const GLOBE: char = '\u{E774}';
     pub const PLAYLIST: char = '\u{E8FD}';

@@ -2676,7 +2676,13 @@ html.player-empty .queue-panel { bottom: var(--gap); }
   .player-art { margin-right: 4px; }
 }
 .player-meta { flex: 1; }
-@media (max-width: 1000px) { .player .volume .bar { display: none; } }
+/* the volume slider stays until the phone layout (like the Windows app); it just gets shorter */
+@media (min-width: 761px) and (max-width: 999px) { .player .volume .bar { width: 64px; } }
+
+/* a cover without art: tinted tile and the album's first letter (same as the Windows app) */
+.cover--tile { display: grid; place-items: center; background: var(--tint, #2B2F4A); container-type: inline-size; color: var(--text); }
+.cover--tile .cover-letter { font-size: 38cqw; font-weight: 700; line-height: 1; opacity: .85; }
+.cover--tile .icon { width: 38%; height: 38%; opacity: .85; }
 
 /* the reorder handle sits at the left of the row */
 .drag-sign { width: 22px; justify-content: start; }
@@ -2996,6 +3002,11 @@ a.gm-link:hover .t-name { text-decoration: underline; }
   .player-art { background: #2B2F4A; color: var(--text); }
   .mix-card .card-title, .card .card-title { font-weight: 400; }
   .volume .bar { width: 110px; }
+  /* narrow window: the sides shrink (250 / 196) and the volume slider gets shorter, but stays, like the app */
+  @media (max-width: 999px) {
+    .player { grid-template-columns: 250px minmax(0, 1fr) 196px; gap: 12px; }
+    .volume .bar { width: 64px; }
+  }
   /* sliders: 4 rail at 20%, filled part white (red while hovered), round 12 handle while hovered */
   .bar { height: 4px; background: rgba(245, 245, 247, .2); }
   .bar-fill::after { content: ""; position: absolute; right: -6px; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; background: var(--text); opacity: 0; transition: opacity .1s; }

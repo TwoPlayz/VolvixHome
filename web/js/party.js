@@ -122,6 +122,7 @@ window.Spin = window.Spin || {};
       b.innerHTML = S.icon(P.active ? 'partyFill' : 'party', parseInt(b.dataset.size || '18', 10)) +
         (P.active && members().length > 1 ? '<span class="party-count">' + members().length + '</span>' : '');
     });
+    S.$$('[data-player="output"]').forEach(function (b) { b.classList.toggle('on', P.active); }); // the cast button lights up in a party
     const h = S.$('[data-p="queue-panel"] .q-head h2');
     if (h) h.textContent = P.active ? 'Party queue' : 'Queue';
     document.documentElement.classList.toggle('in-party', P.active);
@@ -226,6 +227,13 @@ window.Spin = window.Spin || {};
       apply(r.party);
       S.toast(to === 'host' ? 'This device is silent: music comes from ' + first(P.state.host) + '\'s speaker' : 'Playing on this device', 'volume');
     }).catch(function (e) { S.toast(e.message, 'x'); });
+  };
+
+  /** The party entries for the Play on menu (the player bar has no party button of its own on computers, like the app). */
+  P.menuItems = function () {
+    if (!P.active) return [{ sep: true }, { label: 'Start a listening party…', icon: 'party', onClick: startDialog }];
+    return [{ sep: true }, { label: 'Party: invite people', icon: 'plus', onClick: inviteDialog },
+      { label: isHost() ? 'End party for everyone' : 'Leave party', icon: 'x', danger: true, onClick: leave }];
   };
 
   function menu(anchor) {

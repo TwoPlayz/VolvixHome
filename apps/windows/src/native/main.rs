@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use iced::widget::{image, scrollable};
 use iced::{window, Size, Subscription, Task};
 use serde_json::{json, Value};
+use volvix_core::cast::{CastDevice, CastStatus, Party};
 use volvix_core::client::SignedIn;
 use volvix_core::covers::CoverCache;
 use volvix_core::downloads::{Downloads, Saved};
@@ -172,6 +173,23 @@ pub enum Dialog {
     AddTo { tracks: Vec<String> },
     Password { current: String, new: String, error: Option<String>, busy: bool },
     Rename { name: String, error: Option<String> },
+    /// the cast button: this device, TVs and speakers, and the listening party
+    PlayOn,
+    AddCast { host: String, error: Option<String>, busy: bool },
+    PartyStart { invite: Vec<String> },
+    PartyInvite { invite: Vec<String> },
+}
+
+/// Playing on a TV or speaker: the app keeps the queue and the clock but stays silent, and tells the TV
+/// what to do (like the website).
+#[derive(Debug, Clone)]
+pub struct CastLink {
+    pub device: String,
+    pub name: String,
+    /// the song the TV was last asked to play
+    loaded: Option<String>,
+    sent_playing: bool,
+    sent_volume: f32,
 }
 
 /// "Get more music": looking through MusicBrainz for music you don't have.
@@ -223,6 +241,21 @@ pub enum Message {
     DragOver(usize),
     DragEnd,
     TogglePlay,
+    /* the cast button: TVs, speakers and listening parties */
+    PlayOn,
+    CastDevices(Result<Vec<CastDevice>, Error>),
+    CastStart(usize),
+    CastStop,
+    CastAddOpen,
+    CastAddDone(Result<CastDevice, Error>),
+    CastPlayed(Result<(), Error>),
+    CastStatus(Result<CastStatus, Error>),
+    PartyLoaded(Result<Option<Party>, Error>),
+    PartyStartOpen,
+    PartyInviteOpen,
+    PartyPick(String, bool),
+    PartyLeave,
+    PartyDone(Result<Option<Party>, Error>, String),
     Next,
     Previous,
     ToggleShuffle,
@@ -387,6 +420,11 @@ pub struct App {
     last_ended: u64,
     pub volume: f32,
     muted_from: Option<f32>,
+    pub cast: Option<CastLink>,
+    pub cast_devices: Vec<CastDevice>,
+    pub party: Option<Party>,
+    cast_poll: Instant,
+    party_poll: Instant,
     presence: (Option<String>, bool),
     presence_at: Instant,
     next_poll: Instant,
@@ -476,6 +514,11 @@ impl App {
             last_ended: 0,
             volume: 0.8,
             muted_from: None,
+            cast: None,
+            cast_devices: vec![],
+            party: None,
+            cast_poll: Instant::now(),
+            party_poll: Instant::now(),
             presence: (None, false),
             presence_at: Instant::now(),
             next_poll: Instant::now() + Duration::from_secs(30),
@@ -489,7 +532,7 @@ impl App {
             update_rx,
             next_update_check: Instant::now() + Duration::from_secs(20),
         };
-        app.player.set_volume(app.volume * app.volume);
+        app.apply_volume();
         let mut tasks = vec![window::get_oldest().map(Message::WindowReady)];
         match saved {
             Some(s) if s.token.is_some() => {
@@ -686,6 +729,71 @@ impl App {
     }
 
     /* ---------- playing ---------- */
+
+    /// The sound this device makes: none while a TV or speaker is playing (it keeps the clock, the TV makes the sound).
+    fn apply_volume(&mut self) {
+        let v = if self.cast.is_some() { 0.0 } else { self.volume * self.volume };
+        self.player.set_volume(v);
+    }
+
+    pub fn my_id(&self) -> String {
+        self.me.as_ref().map(|m| m.user.id.clone()).unwrap_or_default()
+    }
+
+    /// A household member's first name.
+    pub fn person_name(&self, id: &str) -> String {
+        let me = self.me.as_ref().filter(|m| m.user.id == id).map(|m| m.user.name.clone());
+        let name = me.or_else(|| self.household.members.iter().find(|m| m.id == id).map(|m| m.name.clone())).unwrap_or_else(|| "Someone".into());
+        name.split_whitespace().next().unwrap_or("Someone").to_string()
+    }
+
+    /// Whether this account may start listening parties (admins always).
+    fn may_party(&self) -> bool {
+        self.me.as_ref().map(|m| m.user.admin || m.user.perms.iter().any(|p| p == "parties")).unwrap_or(false)
+    }
+
+    /// Everyone else in the household, for inviting.
+    pub fn others(&self) -> Vec<(String, String)> {
+        let me = self.my_id();
+        self.household.members.iter().filter(|m| m.id != me).map(|m| (m.id.clone(), m.name.clone())).collect()
+    }
+
+    fn end_cast(&mut self, message: &str) {
+        if self.cast.take().is_some() {
+            self.apply_volume();
+            self.say(message.to_string());
+        }
+    }
+
+    /// Keep the TV doing what this app says: the song, play / pause, volume.
+    fn cast_sync(&mut self) -> Task<Message> {
+        let Some(c) = self.client.clone() else { return Task::none() };
+        let Some(link) = self.cast.as_mut() else { return Task::none() };
+        let dev = link.device.clone();
+        let mut tasks = vec![];
+        if let Some(t) = self.status.track.clone() {
+            if link.loaded.as_deref() != Some(t.as_str()) {
+                link.loaded = Some(t.clone());
+                link.sent_playing = self.status.playing;
+                let (at, playing, c, dev) = (self.status.position.as_secs_f64(), self.status.playing, c.clone(), dev.clone());
+                tasks.push(Task::perform(blocking(move || c.cast_play(&dev, &t, at, playing)), Message::CastPlayed));
+            } else if link.sent_playing != self.status.playing {
+                link.sent_playing = self.status.playing;
+                let (c, dev, act) = (c.clone(), dev.clone(), if self.status.playing { "play" } else { "pause" });
+                std::thread::spawn(move || {
+                    let _ = c.cast_control(&dev, act, None);
+                });
+            }
+        }
+        let v = if self.muted_from.is_some() { 0.0 } else { self.volume };
+        if (v - link.sent_volume).abs() > 0.02 {
+            link.sent_volume = v;
+            std::thread::spawn(move || {
+                let _ = c.cast_control(&dev, "volume", Some(v as f64));
+            });
+        }
+        Task::batch(tasks)
+    }
 
     fn start_current(&mut self, play: bool) -> Task<Message> {
         let (Some(c), Some(id)) = (self.client.clone(), self.queue.current().map(String::from)) else { return Task::none() };
@@ -1052,6 +1160,124 @@ impl App {
                     self.status.playing = true;
                 }
             }
+            /* ---------- the cast button: TVs, speakers and listening parties ---------- */
+            Message::PlayOn => {
+                self.dialog = Some(Dialog::PlayOn);
+                if let Some(c) = self.client.clone().filter(|_| !self.offline) {
+                    let c2 = c.clone();
+                    return Task::batch([Task::perform(blocking(move || c.cast_devices()), Message::CastDevices), Task::perform(blocking(move || c2.party_current()), Message::PartyLoaded)]);
+                }
+            }
+            Message::CastDevices(r) => {
+                if let Ok(list) = r {
+                    self.cast_devices = list;
+                }
+            }
+            Message::CastStart(i) => {
+                let Some(dev) = self.cast_devices.get(i).cloned() else { return Task::none() };
+                if self.party.is_some() {
+                    self.say("Casting isn't available in a party");
+                    return Task::none();
+                }
+                if self.status.track.is_none() {
+                    self.say("Start a song first, then cast it");
+                    return Task::none();
+                }
+                self.cast = Some(CastLink { device: dev.id, name: dev.name.clone(), loaded: None, sent_playing: self.status.playing, sent_volume: -1.0 });
+                self.cast_poll = Instant::now() + Duration::from_secs(4);
+                self.dialog = None;
+                self.apply_volume();
+                self.say(format!("Connecting to {}…", dev.name));
+                return self.cast_sync();
+            }
+            Message::CastStop => {
+                self.dialog = None;
+                if let (Some(link), Some(c)) = (self.cast.clone(), self.client.clone()) {
+                    std::thread::spawn(move || {
+                        let _ = c.cast_control(&link.device, "stop", None);
+                    });
+                    self.end_cast("Stopped casting");
+                }
+            }
+            Message::CastAddOpen => self.dialog = Some(Dialog::AddCast { host: String::new(), error: None, busy: false }),
+            Message::CastAddDone(r) => match r {
+                Ok(d) => {
+                    self.say(format!("{} added", if d.name.is_empty() { "That device" } else { d.name.as_str() }));
+                    self.dialog = Some(Dialog::PlayOn);
+                    if let Some(c) = self.client.clone() {
+                        return Task::perform(blocking(move || c.cast_devices()), Message::CastDevices);
+                    }
+                }
+                Err(e) => {
+                    if let Some(Dialog::AddCast { error, busy, .. }) = &mut self.dialog {
+                        *error = Some(e.to_string());
+                        *busy = false;
+                    }
+                }
+            },
+            Message::CastPlayed(r) => {
+                if let Err(e) = r {
+                    let name = self.cast.as_ref().map(|c| c.name.clone()).unwrap_or_default();
+                    self.end_cast(&format!("Couldn't cast to {name}: {e}"));
+                } else if let Some(l) = &self.cast {
+                    self.say(format!("Casting to {}", l.name));
+                }
+            }
+            Message::CastStatus(r) => {
+                if let (Ok(s), Some(link)) = (r, self.cast.clone()) {
+                    if !s.connected {
+                        self.end_cast(&format!("Lost the connection to {}", link.name));
+                    } else if s.player_state == "IDLE" && s.idle_reason == "CANCELLED" {
+                        self.end_cast(&format!("{} is playing something else now", link.name));
+                    }
+                }
+            }
+            Message::PartyLoaded(r) => {
+                if let Ok(p) = r {
+                    if p.is_some() && self.cast.is_some() {
+                        // a party and a TV can't both have the sound
+                        if let (Some(link), Some(c)) = (self.cast.clone(), self.client.clone()) {
+                            std::thread::spawn(move || {
+                                let _ = c.cast_control(&link.device, "stop", None);
+                            });
+                        }
+                        self.end_cast("Stopped casting for the party");
+                    }
+                    self.party = p;
+                }
+            }
+            Message::PartyStartOpen => {
+                if !self.may_party() {
+                    self.say("You don't have permission to start parties. Ask an admin.");
+                } else {
+                    self.dialog = Some(Dialog::PartyStart { invite: vec![] });
+                }
+            }
+            Message::PartyInviteOpen => self.dialog = Some(Dialog::PartyInvite { invite: vec![] }),
+            Message::PartyPick(id, on) => {
+                if let Some(Dialog::PartyStart { invite } | Dialog::PartyInvite { invite }) = &mut self.dialog {
+                    invite.retain(|i| *i != id);
+                    if on {
+                        invite.push(id);
+                    }
+                }
+            }
+            Message::PartyLeave => {
+                self.dialog = None;
+                let (Some(c), Some(p)) = (self.client.clone(), self.party.clone()) else { return Task::none() };
+                let text = if p.host == self.my_id() { "Party ended" } else { "You left the party" };
+                return Task::perform(
+                    blocking(move || c.party_leave(&p.id).map(|_| None)),
+                    move |r| Message::PartyDone(r, text.to_string()),
+                );
+            }
+            Message::PartyDone(r, text) => match r {
+                Ok(p) => {
+                    self.party = p;
+                    self.say(text);
+                }
+                Err(e) => self.say(e.to_string()),
+            },
             Message::Next => {
                 if self.queue.next(false).is_some() {
                     return self.start_current(true);
@@ -1072,11 +1298,16 @@ impl App {
                 self.player.seek(to);
                 self.status.position = to;
                 self.lyric_line = None;
+                if let (Some(link), Some(c)) = (self.cast.clone(), self.client.clone()) {
+                    std::thread::spawn(move || {
+                        let _ = c.cast_control(&link.device, "seek", Some(to.as_secs_f64()));
+                    });
+                }
             }
             Message::Volume(v) => {
                 self.volume = v;
                 self.muted_from = None;
-                self.player.set_volume(v * v); // feels even across the slider
+                self.apply_volume(); // feels even across the slider
             }
             Message::ToggleMute => {
                 match self.muted_from.take() {
@@ -1086,7 +1317,7 @@ impl App {
                         self.volume = 0.0;
                     }
                 }
-                self.player.set_volume(self.volume * self.volume);
+                self.apply_volume();
             }
             Message::JumpQueue(i) => {
                 if self.queue.jump(i).is_some() {
@@ -1227,6 +1458,7 @@ impl App {
             Message::DialogText(field, s) => match (&mut self.dialog, field) {
                 (Some(Dialog::NewPlaylist { name, .. }), 0) | (Some(Dialog::EditPlaylist { name, .. }), 0) | (Some(Dialog::Rename { name, .. }), 0) => *name = s,
                 (Some(Dialog::NewPlaylist { description, .. }), 1) | (Some(Dialog::EditPlaylist { description, .. }), 1) => *description = s,
+                (Some(Dialog::AddCast { host, .. }), 0) => *host = s,
                 (Some(Dialog::Password { current, .. }), 0) => *current = s,
                 (Some(Dialog::Password { new, .. }), 1) => *new = s,
                 _ => {}
@@ -1552,7 +1784,37 @@ impl App {
                 }
                 self.edit(vec![Edit::DeletePlaylist(id)])
             }
-            Dialog::AddTo { .. } => Task::none(),
+            Dialog::AddTo { .. } | Dialog::PlayOn => Task::none(),
+            Dialog::AddCast { host, busy, .. } => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                if busy || host.trim().is_empty() {
+                    return Task::none();
+                }
+                if let Some(Dialog::AddCast { busy, error, .. }) = &mut self.dialog {
+                    *busy = true;
+                    *error = None;
+                }
+                Task::perform(blocking(move || c.cast_add(host.trim())), Message::CastAddDone)
+            }
+            Dialog::PartyStart { invite } => {
+                self.dialog = None;
+                let Some(c) = self.client.clone() else { return Task::none() };
+                let queue = self.queue.items().to_vec();
+                let index = self.queue.position().unwrap_or(0);
+                let pos_ms = self.status.position.as_millis() as i64;
+                let playing = self.status.playing && self.status.track.is_some();
+                let names: Vec<String> = self.others().into_iter().filter(|(id, _)| invite.contains(id)).map(|(_, n)| n).collect();
+                let text = if names.is_empty() { "Party started".to_string() } else { format!("Party started. Invited {}", names.join(", ")) };
+                Task::perform(blocking(move || c.party_start(&invite, &queue, index, pos_ms, playing).map(Some)), move |r| Message::PartyDone(r, text.clone()))
+            }
+            Dialog::PartyInvite { invite } => {
+                self.dialog = None;
+                let (Some(c), Some(p)) = (self.client.clone(), self.party.clone()) else { return Task::none() };
+                if invite.is_empty() {
+                    return Task::none();
+                }
+                Task::perform(blocking(move || c.party_invite(&p.id, &invite).map(Some)), |r| Message::PartyDone(r, "Invites sent".to_string()))
+            }
             Dialog::Password { current, new, busy, .. } => {
                 let Some(c) = self.client.clone() else { return Task::none() };
                 if busy || current.is_empty() || new.is_empty() {
@@ -1704,6 +1966,21 @@ impl App {
                 let c2 = c.clone();
                 tasks.push(Task::perform(blocking(move || c2.notifications()), Message::NotesLoaded));
                 tasks.push(Task::perform(blocking(move || c.shared()), Message::SharedLoaded));
+            }
+        }
+        // TVs and speakers: keep the TV in step, check it's still there; and whether a party is going
+        if let Some(c) = self.client.clone().filter(|_| !self.offline && self.screen == Screen::Main) {
+            if self.cast.is_some() {
+                tasks.push(self.cast_sync());
+                if Instant::now() >= self.cast_poll {
+                    self.cast_poll = Instant::now() + Duration::from_secs(2);
+                    let (c2, dev) = (c.clone(), self.cast.as_ref().map(|l| l.device.clone()).unwrap_or_default());
+                    tasks.push(Task::perform(blocking(move || c2.cast_status(&dev)), Message::CastStatus));
+                }
+            }
+            if Instant::now() >= self.party_poll {
+                self.party_poll = Instant::now() + Duration::from_secs(5);
+                tasks.push(Task::perform(blocking(move || c.party_current()), Message::PartyLoaded));
             }
         }
         if self.toast.as_ref().map(|(_, at)| at.elapsed() > Duration::from_secs(4)).unwrap_or(false) {

@@ -15,7 +15,7 @@ window.Spin = window.Spin || {};
       if (P.isHost()) {
         S.popover(anchor, {
           header: '<div class="q-pop"><div class="menu-name">Party sound</div><div class="menu-sub">Guests on your speaker hear this device</div></div>',
-          items: [{ label: 'This device (host)', icon: 'check', onClick: function () {} }]
+          items: [{ label: 'This device (host)', icon: 'check', onClick: function () {} }].concat(P.menuItems())
         });
         return;
       }
@@ -25,7 +25,7 @@ window.Spin = window.Spin || {};
         items: [
           { label: 'This device', icon: own ? 'check' : 'devices', onClick: function () { if (!own) P.setOutput('own'); } },
           { label: host + '\'s speaker', icon: own ? 'devices' : 'check', onClick: function () { if (own) P.setOutput('host'); } }
-        ]
+        ].concat(P.menuItems())
       });
       return;
     }
@@ -57,6 +57,7 @@ window.Spin = window.Spin || {};
       if (!C.devices.length) items.push({ label: 'No TVs or speakers found yet', icon: 'info', onClick: function () { C.refresh(); } });
       items.push({ label: 'Add a TV or speaker by address…', icon: 'plus', onClick: C.addByAddress });
     }
+    if (P && P.menuItems) P.menuItems().forEach(function (i) { items.push(i); });
     if (C.airplay()) items.push({ label: 'AirPlay…', icon: 'volume', onClick: C.airplayPicker });
     S.popover(anchor, { header: '<div class="q-pop"><div class="menu-name">Play on</div><div class="menu-sub">One device plays at a time</div></div>', items: items });
   }

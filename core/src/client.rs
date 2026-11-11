@@ -81,7 +81,7 @@ impl Client {
         format!("{}{}", self.base, path)
     }
 
-    fn request(&self, method: &str, path: &str) -> ureq::Request {
+    pub(crate) fn request(&self, method: &str, path: &str) -> ureq::Request {
         let mut r = self.agent.request(method, &self.url(path));
         if let Some(t) = &self.token {
             r = r.set("Authorization", &format!("Bearer {t}"));
@@ -89,7 +89,7 @@ impl Client {
         r
     }
 
-    fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+    pub(crate) fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let res = self.request("GET", path).call()?;
         res.into_json::<T>().map_err(|e| Error::BadAnswer(e.to_string()))
     }
@@ -378,7 +378,7 @@ pub fn normalize_address(typed: &str) -> String {
 }
 
 /// Percent-encode one path segment (ids are plain, but be safe).
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),

@@ -230,6 +230,12 @@ window.Spin = window.Spin || {};
     const a = album.art || {};
     // no cover file: the album's name is printed on generated art (in the background and font someone chose, if they did)
     const look = !album.cover && album.look ? album.look : null;
+    // no cover and no chosen look: a tinted tile with the first letter, exactly like the Windows app
+    if (!album.cover && !look) {
+      const ch = Array.from(album.title || '').find(function (c) { return /[\p{L}\p{N}]/u.test(c); });
+      return '<div class="cover cover--tile ' + (extraClass || '') + '" style="--tint:' + S.tintFor(album.title || '') + '">' +
+        (ch ? '<span class="cover-letter">' + S.esc(ch.toUpperCase()) + '</span>' : S.icon('music', 22)) + '</div>';
+    }
     const text = !album.cover ? '<span class="cover-title">' + S.esc(album.title) + '</span><span class="cover-artist">' + S.esc(album.artist) + '</span>' : '';
     // has a cover file: a plain tile while it loads, so the generated art doesn't flash first; it fades in once decoded.
     // Only if the picture fails does the generated art show.

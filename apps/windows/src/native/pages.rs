@@ -710,5 +710,106 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             }
             c.push(buttons("Save", !name.trim().is_empty())).into()
         }
+        Dialog::PlayOn => play_on(app),
+        Dialog::AddCast { host, error, busy } => {
+            let mut c = column![
+                ui::title("Add a TV or speaker", 22),
+                ui::dim("Type its address on your network. You can find it in the Google Home app: the device → Settings → Device information.", 13),
+                field("192.168.1.40", host, 0),
+            ]
+            .spacing(14);
+            if let Some(e) = err(error) {
+                c = c.push(e);
+            }
+            c.push(buttons(if *busy { "Adding…" } else { "Add" }, !busy && !host.trim().is_empty())).into()
+        }
+        Dialog::PartyStart { invite } => {
+            let has = app.status.track.is_some();
+            let intro = if has { "What's playing now becomes the party's queue. " } else { "Nothing is playing yet, so you'll start with an empty queue. " };
+            column![
+                ui::title("Start a listening party", 22),
+                ui::dim(format!("{intro}Everyone you invite can add, remove and skip songs, and you all stay in sync."), 13),
+                people_list(app, invite, &[]),
+                buttons("Start party", true),
+            ]
+            .spacing(14)
+            .into()
+        }
+        Dialog::PartyInvite { invite } => {
+            let skip: Vec<String> = app.party.as_ref().map(|p| p.members.iter().map(|m| m.id.clone()).chain(p.invited.iter().cloned()).collect()).unwrap_or_default();
+            column![ui::title("Invite to the party", 22), people_list(app, invite, &skip), buttons("Send invites", !invite.is_empty())].spacing(14).into()
+        }
     }
+}
+
+/// Household members to tick (`skip` = already in or invited).
+fn people_list<'a>(app: &'a App, picked: &'a [String], skip: &[String]) -> El<'a> {
+    let others = app.others();
+    if others.is_empty() {
+        return ui::dim("No one else is in your household yet. You can still start a party and invite people later.", 13).into();
+    }
+    let mut list = Column::new().spacing(6);
+    for (id, name) in others {
+        let here = skip.contains(&id);
+        let on = here || picked.contains(&id);
+        let label = if here { format!("{name} · already invited or in the party") } else { name };
+        let id2 = id.clone();
+        let mut cb = checkbox(label, on).size(18).text_size(14);
+        if !here {
+            cb = cb.on_toggle(move |v| Message::PartyPick(id2.clone(), v));
+        }
+        list = list.push(cb);
+    }
+    scrollable(list).style(ui::scroller).height(Length::Shrink).into()
+}
+
+/// The cast button's window: where the sound plays, and the listening party.
+fn play_on(app: &App) -> El<'_> {
+    let item = |icon_char: char, label: String, sub: Option<String>, on: bool, msg: Option<Message>, danger: bool| -> El<'_> {
+        let mut t = column![text(label).size(15).color(if danger { ui::ACCENT } else { ui::TEXT })].spacing(2);
+        if let Some(s) = sub {
+            t = t.push(ui::dim(s, 12));
+        }
+        button(row![ic(if on { icon::DOWNLOADED } else { icon_char }, 16), t.width(Length::Fill)].spacing(12).align_y(Alignment::Center))
+            .width(Length::Fill)
+            .padding(8)
+            .style(ui::flat)
+            .on_press_maybe(msg)
+            .into()
+    };
+    let mut c = column![ui::title("Play on", 22), ui::dim("One device plays at a time", 12)].spacing(4);
+    let mut list = Column::new().spacing(2);
+    let casting = app.cast.as_ref();
+    list = list.push(item(icon::DEVICES, "This computer".into(), None, casting.is_none(), casting.map(|_| Message::CastStop), false));
+    match casting {
+        Some(l) => {
+            list = list.push(item(icon::DEVICES, format!("Casting to {}", l.name), None, true, None, false));
+            list = list.push(item(icon::CLOSE, "Stop casting".into(), None, false, Some(Message::CastStop), false));
+        }
+        None => {
+            for (i, d) in app.cast_devices.iter().enumerate() {
+                list = list.push(item(icon::DEVICES, d.name.clone(), (!d.model.is_empty()).then(|| d.model.clone()), false, Some(Message::CastStart(i)), false));
+            }
+            if app.cast_devices.is_empty() {
+                list = list.push(ui::dim("No TVs or speakers found yet", 13));
+            }
+            list = list.push(item(icon::ADD, "Add a TV or speaker by address…".into(), None, false, Some(Message::CastAddOpen), false));
+        }
+    }
+    // the listening party lives here too: start it, invite people, leave or end it
+    list = list.push(container(text("")).height(8));
+    match &app.party {
+        None => list = list.push(item(icon::PEOPLE, "Start a listening party…".into(), None, false, Some(Message::PartyStartOpen), false)),
+        Some(p) => {
+            let me = app.my_id();
+            let host = p.host == me;
+            let names: Vec<String> = p.members.iter().map(|m| if m.id == me { "You".to_string() } else { app.person_name(&m.id) }).collect();
+            let who = if host { "You're the host".to_string() } else { format!("{} is the host", app.person_name(&p.host)) };
+            list = list.push(item(icon::PEOPLE, format!("Listening party ({} here)", p.members.len()), Some(format!("{} · {who}", names.join(", "))), true, None, false));
+            list = list.push(item(icon::ADD, "Invite people".into(), None, false, Some(Message::PartyInviteOpen), false));
+            list = list.push(item(icon::CLOSE, if host { "End party for everyone".into() } else { "Leave party".into() }, None, false, Some(Message::PartyLeave), true));
+        }
+    }
+    c = c.push(scrollable(list).style(ui::scroller).height(Length::Shrink));
+    c.push(row![horizontal_space(), button(text("Close").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel)]).spacing(14).into()
 }

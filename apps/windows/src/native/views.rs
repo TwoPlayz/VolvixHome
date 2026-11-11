@@ -922,8 +922,11 @@ fn player_row(app: &App, width: f32) -> El<'_> {
 
     let vol_icon = if app.volume <= 0.001 { icon::MUTE } else { icon::VOLUME };
     let queue_on = app.now_playing && app.np_tab == NpTab::Queue;
+    // where the sound goes: this device, a TV or speaker, or a listening party (lit while either is on)
+    let playing_elsewhere = app.cast.is_some() || app.party.is_some();
     let right = row![
         horizontal_space(),
+        button(ic(icon::DEVICES, 16)).padding(8).style(ui::icon_btn(playing_elsewhere)).on_press(Message::PlayOn),
         button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }),
         button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute),
         container(El::from(marks::scrub(app.volume, 1.0, Message::Volume).on_change(Message::Volume))).width(if narrow { 64 } else { 110 }),
