@@ -554,6 +554,71 @@ pub fn cover_box<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, w: f32,
         .into()
 }
 
+/// The website's drawn-cover backgrounds: (stops as offset + colour, angle in degrees, ink). Patterns the app can't draw
+/// (rings, grid, sunburst, checker) use a plain colour or gradient close to them.
+pub fn look_bg(name: &str) -> (Vec<(f32, Color)>, f32, Color) {
+    let h = |x: u32| rgb((x >> 16) as u8, (x >> 8) as u8, x as u8);
+    match name {
+        "sunset" => (vec![(0.0, h(0xff6a3d)), (0.55, h(0xffb36b)), (1.0, h(0xffd89b))], 135.0, h(0x3a1200)),
+        "ocean" => (vec![(0.0, h(0x0f4c75)), (0.55, h(0x3282b8)), (1.0, h(0x7fd1e8))], 160.0, h(0xffffff)),
+        "midnight" => (vec![(0.0, h(0x0b132b)), (0.6, h(0x1c2541)), (1.0, h(0x3a506b))], 160.0, h(0xe8f1ff)),
+        "forest" => (vec![(0.0, h(0x0f3d2e)), (0.6, h(0x2f7d57)), (1.0, h(0x8fc98a))], 150.0, h(0xf3fff0)),
+        "grape" => (vec![(0.0, h(0x3c1053)), (0.55, h(0x7a3cb8)), (1.0, h(0xc99bff))], 145.0, h(0xffffff)),
+        "rose" => (vec![(0.0, h(0xffd1dc)), (0.6, h(0xff9fb8)), (1.0, h(0xff6f91))], 145.0, h(0x4a0f22)),
+        "ember" => (vec![(0.0, h(0xffcf5a)), (0.45, h(0xff6a2b)), (1.0, h(0x8a1c0d))], 135.0, h(0xffffff)),
+        "mono" => (vec![(0.0, h(0x2b2b2e)), (0.6, h(0x3d3d42)), (1.0, h(0x55555c))], 160.0, h(0xf4f4f5)),
+        "paper" => (vec![(0.0, h(0xf1e9db)), (1.0, h(0xf1e9db))], 0.0, h(0x2a241c)),
+        "stripes" => (vec![(0.0, h(0xe5484d)), (0.25, h(0xe5484d)), (0.25, h(0xc23a3f)), (0.5, h(0xc23a3f)), (0.5, h(0xe5484d)), (0.75, h(0xe5484d)), (0.75, h(0xc23a3f)), (1.0, h(0xc23a3f))], 45.0, h(0xffffff)),
+        "rings" => (vec![(0.0, h(0x1d3557)), (1.0, h(0x274b7a))], 135.0, h(0xf1faee)),
+        "grid" => (vec![(0.0, h(0x101820)), (1.0, h(0x16222e))], 135.0, h(0xe7f6ff)),
+        "sunburst" => (vec![(0.0, h(0xffd23f)), (1.0, h(0xff9f1c))], 135.0, h(0x2b1800)),
+        "checker" => (vec![(0.0, h(0x222222)), (1.0, h(0x444444))], 135.0, h(0xffffff)),
+        "aurora" => (vec![(0.0, h(0x0d1b2a)), (0.45, h(0x1b998b)), (0.75, h(0x7d5ba6)), (1.0, h(0xe0a1ff))], 200.0, h(0xffffff)),
+        _ => (vec![(0.0, h(0x2b1055)), (0.7, h(0x7597de)), (1.0, h(0xffc3a0))], 180.0, h(0xffffff)), // dusk
+    }
+}
+
+/// The website's cover fonts, as far as Windows has them.
+pub fn look_font(name: &str) -> (Font, bool) {
+    let f = |n: &'static str| Font { weight: iced::font::Weight::Bold, ..Font::with_name(n) };
+    match name {
+        "serif" => (f("Georgia"), false),
+        "mono" => (f("Consolas"), false),
+        "rounded" => (f("Segoe UI"), false),
+        "condensed" => (f("Impact"), true),
+        "script" => (Font { weight: iced::font::Weight::Normal, ..Font::with_name("Segoe Script") }, false),
+        "slab" => (f("Rockwell"), false),
+        _ => (FONT_BOLD, false),
+    }
+}
+
+/// A drawn cover in the look someone chose (background + font) for an album without art.
+pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, bg: &str, font: &str) -> Element<'a, M> {
+    let (stops, angle, ink) = look_bg(bg);
+    let (font, upper) = look_font(font);
+    let name = title.trim();
+    let shown = if upper { name.to_uppercase() } else { name.to_string() };
+    let body: Element<'a, M> = if size <= 76.0 {
+        text(name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default()).font(font).size(size * 0.4).color(ink).into()
+    } else {
+        let n = name.chars().count();
+        let pct = if n <= 10 { 0.17 } else if n <= 22 { 0.13 } else if n <= 40 { 0.105 } else { 0.085 };
+        text(shown).font(font).size(size * pct).color(ink).align_x(iced::alignment::Horizontal::Center).width(Length::Fixed(size * 0.82)).wrapping(text::Wrapping::WordOrGlyph).into()
+    };
+    let mut g = iced::gradient::Linear::new(angle.to_radians());
+    for (o, c) in stops {
+        g = g.add_stop(o, c);
+    }
+    container(body)
+        .width(size)
+        .height(size)
+        .center_x(size)
+        .center_y(size)
+        .clip(true)
+        .style(move |_| container::Style { background: Some(Background::Gradient(iced::Gradient::Linear(g))), border: border::rounded(radius), ..Default::default() })
+        .into()
+}
+
 /// The artist page's big round stand-in: the artist's first album's tint with their initials.
 pub fn artist_hero<'a, M: 'a>(name: &str, tint_of: &str, size: f32) -> Element<'a, M> {
     let initials: String = name.split_whitespace().filter(|w| w.chars().any(|c| c.is_alphanumeric())).filter_map(|w| w.chars().next()).take(2).collect::<String>().to_uppercase();

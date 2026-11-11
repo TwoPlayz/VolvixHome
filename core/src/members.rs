@@ -58,6 +58,17 @@ impl Client {
         Ok(v["avatar"].as_u64().unwrap_or(1))
     }
 
+    /// Choose how an album without cover art is drawn (for everyone on the server).
+    pub fn set_album_look(&self, album: &str, bg: &str, font: &str) -> Result<()> {
+        self.request("PUT", &format!("/api/album/{}/art", enc(album))).send_json(serde_json::json!({ "bg": bg, "font": font }))?;
+        Ok(())
+    }
+
+    pub fn clear_album_look(&self, album: &str) -> Result<()> {
+        self.request("DELETE", &format!("/api/album/{}/art", enc(album))).call()?;
+        Ok(())
+    }
+
     pub fn remove_avatar(&self) -> Result<()> {
         self.request("DELETE", "/api/me/avatar").call()?;
         Ok(())

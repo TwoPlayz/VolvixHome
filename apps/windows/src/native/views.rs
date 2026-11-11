@@ -153,6 +153,13 @@ pub fn clip(s: &str, max: usize) -> String {
 
 pub fn cover_of<'a>(app: &'a App, album: Option<&Album>, size: f32) -> El<'a> {
     let handle = album.and_then(|a| app.cover_images.get(&(a.id.clone(), COVER)));
+    if handle.is_none() {
+        if let Some((a, (bg, font))) = album.and_then(|a| app.lib.look(&a.id).map(|l| (a, l))) {
+            if !a.cover {
+                return ui::cover_look(&a.title, size, 6.0, bg, font);
+            }
+        }
+    }
     ui::cover(handle, album.map(|a| a.title.as_str()).unwrap_or(""), size)
 }
 
@@ -536,6 +543,9 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                 items.push(item("queue", "Add to queue", Message::QueueMany(ids.clone()), false));
                 items.push(item("queue", "Play next", Message::PlayNextMany(ids.clone()), false));
                 items.push(item("book", "Credits & info", Message::ShowAlbumInfo(id.clone()), false));
+                if !a.cover {
+                    items.push(item("settings", "Customize cover", Message::CoverOpen(id.clone()), false));
+                }
                 if app.can("share") {
                     items.push(item("send", "Share link…", Message::ShareOpen("album".into(), a.title.clone(), ids), false));
                 }
@@ -1215,8 +1225,15 @@ fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
     ]
     .spacing(6);
     let first = p.albums.first().or(p.appears_on.first());
-    let hero = ui::artist_hero::<Message>(&page_name, first.map(|a| a.title.as_str()).unwrap_or(&page_name), 152.0);
+    let info = app.artist_infos.get(&page_name);
+    let hero: El = match info.and_then(|i| i.1.as_ref()) {
+        Some(h) => iced::widget::image(h.clone()).width(152).height(152).into(),
+        None => ui::artist_hero::<Message>(&page_name, first.map(|a| a.title.as_str()).unwrap_or(&page_name), 152.0),
+    };
     let mut c = column![row![hero, head].spacing(28).align_y(Alignment::Center)].spacing(28);
+    if let Some(bio) = info.and_then(|i| i.0.as_ref()) {
+        c = c.push(column![container(text(bio.clone()).size(14).color(ui::TEXT_2())).max_width(720), ui::dim("From Wikipedia", 11)].spacing(6));
+    }
     if !p.songs.is_empty() {
         let top: Vec<&Track> = p.songs.iter().take(5).copied().collect();
         c = c.push(section("Songs", track_list(app, &top, &page_name, Numbers::Place, true, Rows::Plain)));

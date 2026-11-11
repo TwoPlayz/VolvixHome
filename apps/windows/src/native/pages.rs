@@ -1432,6 +1432,45 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 None => column![ui::dim("That song isn't here any more.", 14), close].spacing(14).into(),
             }
         }
+        Dialog::CoverLook { album, bg, font } => {
+            const BGS: [(&str, &str); 16] = [("sunset", "Sunset"), ("ocean", "Ocean"), ("midnight", "Midnight"), ("forest", "Forest"), ("grape", "Grape"), ("rose", "Rose"), ("ember", "Ember"), ("mono", "Graphite"), ("paper", "Paper"), ("stripes", "Stripes"), ("rings", "Rings"), ("grid", "Grid"), ("sunburst", "Sunburst"), ("checker", "Checker"), ("aurora", "Aurora"), ("dusk", "Dusk")];
+            const FONTS: [(&str, &str); 7] = [("display", "Modern"), ("serif", "Serif"), ("mono", "Typewriter"), ("rounded", "Rounded"), ("condensed", "Poster"), ("script", "Script"), ("slab", "Slab")];
+            let title = app.lib.album(album).map(|a| a.title.clone()).unwrap_or_default();
+            let mut swatches = Row::new().spacing(6);
+            let mut sw_rows = Column::new().spacing(6);
+            for (i, (k, name)) in BGS.iter().enumerate() {
+                let on = bg == k;
+                let b = button(ui::cover_look::<Message>("", 34.0, 5.0, k, "display")).padding(2).style(move |t, s| {
+                    let mut st = ui::flat(t, s);
+                    st.border = iced::Border { color: if on { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 8.0.into() };
+                    st
+                }).on_press(Message::CoverPick(false, k.to_string()));
+                swatches = swatches.push(ui::tip(b, name));
+                if i % 5 == 4 {
+                    sw_rows = sw_rows.push(std::mem::replace(&mut swatches, Row::new().spacing(6)));
+                }
+            }
+            sw_rows = sw_rows.push(swatches);
+            let mut fonts = Row::new().spacing(6);
+            for (k, name) in FONTS {
+                let on = font == k;
+                let (f, upper) = ui::look_font(k);
+                let label = if upper { name.to_uppercase() } else { name.to_string() };
+                fonts = fonts.push(button(text(label).font(f).size(15).wrapping(text::Wrapping::None)).padding([7, 10]).style(move |t, s| {
+                    let mut st = ui::secondary(t, s);
+                    st.border = iced::Border { color: if on { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 10.0.into() };
+                    st
+                }).on_press(Message::CoverPick(true, k.to_string())));
+            }
+            let pick = column![text("Background").size(13).font(ui::FONT_BOLD), sw_rows, text("Font").size(13).font(ui::FONT_BOLD), Row::with_children(vec![fonts.wrap().into()])].spacing(8).width(Length::Fill);
+            column![
+                ui::title("Customize cover", 22),
+                row![ui::cover_look::<Message>(&title, 150.0, 6.0, bg, font), pick].spacing(18),
+                row![ui::btn("Use the automatic look", ui::Btn::Secondary).on_press(Message::CoverReset), horizontal_space(), ui::btn("Cancel", ui::Btn::Secondary).on_press(Message::DialogCancel), ui::btn("Save", ui::Btn::Primary).on_press(Message::DialogOk)].spacing(10),
+            ]
+            .spacing(14)
+            .into()
+        }
         Dialog::AlbumInfo { album } => {
             let close = row![horizontal_space(), ui::btn("Close", ui::Btn::Secondary).on_press(Message::DialogCancel)];
             let Some(a) = app.lib.album(album) else { return column![ui::dim("That album isn't here any more.", 14), close].spacing(14).into() };

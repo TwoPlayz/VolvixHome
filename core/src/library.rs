@@ -8,6 +8,8 @@ pub struct Library {
     albums: Vec<Album>,
     tracks: Vec<Track>,
     album_index: HashMap<String, usize>,
+    /// the drawn look chosen for albums without art: album id -> (background, font)
+    looks: HashMap<String, (String, String)>,
     track_index: HashMap<String, usize>,
     /// artist names, A to Z (case-insensitive, "The " ignored for sorting)
     artists: Vec<String>,
@@ -37,6 +39,11 @@ fn sort_key(name: &str) -> String {
 impl Library {
     pub fn new(catalog: Catalog) -> Self {
         let mut lib = Library { albums: catalog.albums, tracks: catalog.tracks, scanning: catalog.scanning, ..Default::default() };
+        for (id, v) in &catalog.covers {
+            if let (Some(bg), Some(font)) = (v["bg"].as_str(), v["font"].as_str()) {
+                lib.looks.insert(id.clone(), (bg.to_string(), font.to_string()));
+            }
+        }
         lib.album_index = lib.albums.iter().enumerate().map(|(i, a)| (a.id.clone(), i)).collect();
         lib.track_index = lib.tracks.iter().enumerate().map(|(i, t)| (t.id.clone(), i)).collect();
         // the website lists artists from the albums' artist names (the catalog's artists list too)
@@ -78,6 +85,20 @@ impl Library {
     }
     pub fn artists(&self) -> &[String] {
         &self.artists
+    }
+    /// The drawn look someone chose for an album that has no cover art.
+    pub fn look(&self, id: &str) -> Option<(&str, &str)> {
+        self.looks.get(id).map(|(b, f)| (b.as_str(), f.as_str()))
+    }
+    pub fn set_look(&mut self, id: &str, look: Option<(String, String)>) {
+        match look {
+            Some(l) => {
+                self.looks.insert(id.to_string(), l);
+            }
+            None => {
+                self.looks.remove(id);
+            }
+        }
     }
     pub fn album(&self, id: &str) -> Option<&Album> {
         self.album_index.get(id).map(|&i| &self.albums[i])

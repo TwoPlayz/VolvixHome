@@ -264,6 +264,8 @@ pub enum Dialog {
     Credits { track: String },
     /// an album's info and who is credited on it
     AlbumInfo { album: String },
+    /// choosing how an album without art is drawn
+    CoverLook { album: String, bg: String, font: String },
     /// make a share link for an album or playlist: how long, then the link to copy
     Share { kind: String, name: String, tracks: Vec<String>, days: u32, link: Option<(String, String)>, error: Option<String>, busy: bool },
     /// who can edit a collaborative playlist (ticked = can edit, or invited)
@@ -347,6 +349,10 @@ pub enum Message {
     /// a song's credits in a window; a share link for an album ("album") or playlist: open, pick days, make it
     ShowCredits(String),
     ShowAlbumInfo(String),
+    CoverOpen(String),
+    CoverPick(bool, String),
+    CoverReset,
+    CoverSaved(String, Option<(String, String)>, Result<(), Error>),
     ShareOpen(String, String, Vec<String>),
     ShareDays(u32),
     ShareCreate,
@@ -446,6 +452,7 @@ pub enum Message {
     Requested(String, Result<(), Error>),
     RequestsLoaded(Result<Vec<Request>, Error>),
     QueueLoaded(Result<serde_json::Value, Error>),
+    ArtistInfoLoaded(String, Option<String>, Option<Vec<u8>>),
     CancelRequest(String),
 
     /* downloads */
@@ -681,6 +688,8 @@ pub struct App {
     /// Settings → Library and Share links (loaded when Settings opens)
     /// profile pictures by (person, version), cut round; and the ones being fetched
     avatars: HashMap<(String, u64), image::Handle>,
+    /// artist name -> (bio, round photo) as the server knows them
+    pub artist_infos: HashMap<String, (Option<String>, Option<image::Handle>)>,
     avatar_pending: HashSet<(String, u64)>,
     /// Settings → Lidarr: what the server says, and what is being typed / picked
     pub lidarr: Option<serde_json::Value>,
@@ -813,6 +822,7 @@ impl App {
             member_error: None,
             rewind_year: None,
             avatars: HashMap::new(),
+            artist_infos: HashMap::new(),
             avatar_pending: HashSet::new(),
             lidarr: None,
             lidarr_url: None,
@@ -967,6 +977,24 @@ impl App {
                     let c2 = c.clone();
                     tasks.push(Task::perform(blocking(move || c2.household()), Message::HouseholdLoaded));
                     tasks.push(Task::perform(blocking(move || c.shared()), Message::SharedLoaded));
+                }
+                Page::Artist(name) if self.me.as_ref().map(|m| m.artist_info).unwrap_or(false) && !self.artist_infos.contains_key(&name) => {
+                    let n = name.clone();
+                    tasks.push(Task::perform(
+                        blocking(move || {
+                            let v = c.artist_info(&n).map_err(|e| e.to_string())?;
+                            let bio = v["bio"].as_str().map(String::from);
+                            let img = match v["image"].as_str() {
+                                Some(p) => c.image_bytes(p).ok(),
+                                None => None,
+                            };
+                            Ok::<_, String>((bio, img))
+                        }),
+                        move |r| match r {
+                            Ok((bio, img)) => Message::ArtistInfoLoaded(name.clone(), bio, img),
+                            Err(_) => Message::ArtistInfoLoaded(name.clone(), None, None),
+                        },
+                    ));
                 }
                 Page::Notifications => tasks.push(Task::perform(blocking(move || c.notifications()), Message::NotesLoaded)),
                 Page::GetMusic => {
@@ -1722,6 +1750,28 @@ impl App {
                     self.pl_covers.insert((id, v), image::Handle::from_bytes(b));
                 }
             }
+            Message::CoverOpen(id) => {
+                let (bg, font) = self.lib.look(&id).map(|(b, f)| (b.to_string(), f.to_string())).unwrap_or(("sunset".into(), "display".into()));
+                self.dialog = Some(Dialog::CoverLook { album: id, bg, font });
+            }
+            Message::CoverPick(is_font, v) => {
+                if let Some(Dialog::CoverLook { bg, font, .. }) = &mut self.dialog {
+                    if is_font { *font = v } else { *bg = v }
+                }
+            }
+            Message::CoverReset => {
+                let Some(Dialog::CoverLook { album, .. }) = self.dialog.take() else { return Task::none() };
+                let Some(c) = self.client.clone() else { return Task::none() };
+                let id = album.clone();
+                return Task::perform(blocking(move || c.clear_album_look(&id)), move |r| Message::CoverSaved(album.clone(), None, r));
+            }
+            Message::CoverSaved(album, look, r) => match r {
+                Ok(()) => {
+                    std::sync::Arc::make_mut(&mut self.lib).set_look(&album, look);
+                    self.say("Cover saved for everyone");
+                }
+                Err(e) => self.say(e.to_string()),
+            },
             Message::ShowAlbumInfo(id) => self.dialog = Some(Dialog::AlbumInfo { album: id }),
             Message::ShowCredits(id) => {
                 self.dialog = Some(Dialog::Credits { track: id.clone() });
@@ -2356,7 +2406,14 @@ impl App {
                     Err(e) => self.say(e.to_string()),
                 }
             }
+            Message::ArtistInfoLoaded(name, bio, img) => {
+                let handle = img.and_then(|b| pictures::round_handle(&b));
+                self.artist_infos.insert(name, (bio, handle));
+            }
             Message::QueueLoaded(r) => {
+                if std::env::var("VH_DEMO").as_deref() == Ok("requests") {
+                    return Task::none(); // the demo shows made-up downloads
+                }
                 if let Ok(q) = r {
                     self.find.queue = Some(q);
                 }
@@ -2920,6 +2977,12 @@ impl App {
                 self.edit(vec![Edit::DeletePlaylist(id)])
             }
             Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } | Dialog::Folder { .. } | Dialog::Credits { .. } | Dialog::AlbumInfo { .. } | Dialog::Share { .. } => Task::none(),
+            Dialog::CoverLook { album, bg, font } => {
+                self.dialog = None;
+                let Some(c) = self.client.clone() else { return Task::none() };
+                let (id, b2, f2) = (album.clone(), bg.clone(), font.clone());
+                Task::perform(blocking(move || c.set_album_look(&id, &b2, &f2)), move |r| Message::CoverSaved(album.clone(), Some((bg.clone(), font.clone())), r))
+            }
             Dialog::Collab { id, picked } => {
                 self.dialog = None;
                 let Some(p) = self.playlist(&id) else { return Task::none() };
@@ -3038,6 +3101,16 @@ impl App {
                 tasks.push(self.go(Page::Playlist(id)));
             }
             "home" => tasks.push(self.go(Page::Home)),
+            "requests" => {
+                // pretend Lidarr is connected and downloading, to look at the Requests page
+                self.find.configured = true;
+                self.find.queue = Some(json!({ "items": [
+                    { "title": "Harbor Songs", "artist": "Harbor Lights", "progress": 0.42, "state": "downloading", "timeLeft": "00:12:30" },
+                    { "title": "Low Tide EP", "artist": "Low Orchard", "progress": 1.0, "state": "importPending", "timeLeft": null }
+                ] }));
+                tasks.push(self.go(Page::GetMusic));
+            }
+
             "settings" => tasks.push(self.go(Page::Settings)),
             "household" => tasks.push(self.go(Page::Household)),
             "notifications" => tasks.push(self.go(Page::Notifications)),

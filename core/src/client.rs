@@ -309,6 +309,11 @@ impl Client {
         self.get_json("/api/lidarr/queue")
     }
 
+    /// An artist's bio and photo address (from Wikipedia, kept by the server).
+    pub fn artist_info(&self, name: &str) -> Result<serde_json::Value> {
+        self.get_json(&format!("/api/artist/info?name={}", enc(name)))
+    }
+
     /// A server-relative picture (e.g. a found album's "/api/discover/image/…").
     pub fn image_bytes(&self, path: &str) -> Result<Vec<u8>> {
         let res = self.request("GET", path).call()?;
