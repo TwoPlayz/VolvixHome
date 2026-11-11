@@ -8,7 +8,7 @@
     'js/ui.js', 'js/data.js', 'js/store.js', 'js/downloads.js', 'js/shares.js', 'js/router.js', 'js/components.js', 'js/coverart.js', 'js/player.js', 'js/stats.js', 'js/mixes.js', 'js/fx.js', 'js/household.js',
     'js/playlists.js', 'js/nowplaying.js', 'js/lyrics.js', 'js/notifications.js', 'js/party.js', 'js/devices.js', 'js/cast.js', 'js/output.js', 'js/views/home.js', 'js/views/search.js',
     'js/views/library.js', 'js/views/album.js', 'js/views/browse.js', 'js/views/mix.js', 'js/views/artist.js', 'js/views/credit.js','js/views/playlist.js', 'js/views/household.js',
-    'js/views/notifications.js', 'js/views/rewind.js', 'js/views/account.js', 'js/views/requests.js', 'js/views/discover.js', 'js/intro.js', 'js/app.js'
+    'js/views/notifications.js', 'js/views/rewind.js', 'js/views/account.js', 'js/views/requests.js', 'js/views/discover.js', 'js/views/now.js', 'js/intro.js', 'js/app.js'
   ];
 
   const app = document.getElementById('app');

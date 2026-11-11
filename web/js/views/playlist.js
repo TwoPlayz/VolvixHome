@@ -51,7 +51,10 @@ Spin.views = Spin.views || {};
 
   S.views.playlist = {
     render: function (root, params) {
-      const pl = S.pl.get(params.id);
+      // Liked Songs is always there (as in the Windows app), even before the first heart
+      const pl = S.pl.get(params.id) || (params.id === 'pl_liked'
+        ? { id: 'pl_liked', name: 'Liked Songs', description: 'Songs you\'ve liked.', owner: 'u_me', collaborative: false, collaborators: [], liked: true, tracks: [] }
+        : null);
       if (!pl) {
         root.innerHTML = S.emptyState('music', 'Playlist not found', 'It may have been deleted.',
           '<a class="btn btn-secondary" href="#/library">Go to Library</a>');
@@ -82,8 +85,8 @@ Spin.views = Spin.views || {};
         '</header>' +
 
         '<div class="action-bar">' +
-          '<button class="play-lg" data-pl-play="' + pl.id + '"' + (ids.length ? '' : ' disabled') + ' aria-label="Play">' + S.icon('play', 24) + '</button>' +
-          '<button class="icon-btn icon-btn-lg" data-pl-shuffle aria-label="Shuffle" title="Shuffle: play this in a random order"' + (ids.length ? '' : ' disabled') + '>' + S.icon('shuffle', 22) + '</button>' +
+          '<button class="play-lg" data-pl-play="' + pl.id + '"' + (ids.length ? '' : ' disabled') + ' aria-label="Play">' + S.icon('play', 24) + '<span class="pill-label">Play</span></button>' +
+          '<button class="icon-btn icon-btn-lg" data-pl-shuffle aria-label="Shuffle" title="Shuffle: play this in a random order"' + (ids.length ? '' : ' disabled') + '>' + S.icon('shuffle', 22) + '<span class="pill-label">Shuffle</span></button>' +
           (isOwner && !pl.liked ? '<button class="icon-btn icon-btn-lg" data-pl-invite aria-label="' + (pl.shared ? 'Who can edit' : 'Invite people to edit') + '" title="' + (pl.shared ? 'Who can edit' : 'Invite people to edit') + '">' + S.icon('users', 22) + '</button>' : '') +
           (!isOwner ? '<button class="btn btn-sm ' + (following ? 'btn-secondary' : 'btn-primary') + '" data-pl-follow>' + (following ? S.icon('check', 15) + 'Following' : S.icon('plus', 15) + 'Follow') + '</button>' : '') +
           (S.dl && S.dl.supported && ids.length ? S.dl.button('data-dl-playlist="' + pl.id + '"', ids) : '') +

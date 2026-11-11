@@ -160,15 +160,15 @@ window.Spin = window.Spin || {};
   }, true);
 
   // the small cover in the player bar is a real button: on a phone it opens Now Playing, on a computer it goes to the album
-  function labelOpener() { S.$$('[data-np-open]').forEach(function (b) { b.setAttribute('aria-label', phone.matches ? 'Open Now Playing' : 'Go to album'); }); }
+  function labelOpener() { S.$$('[data-np-open]').forEach(function (b) { b.setAttribute('aria-label', 'Open Now Playing'); }); }
   labelOpener();
   phone.addEventListener && phone.addEventListener('change', labelOpener);
   S.player.hooks.push(labelOpener);
   document.addEventListener('click', function (e) {
     const b = e.target.closest('[data-np-open]');
     if (!b || phone.matches) return; // on a phone the click handler above opens it
-    const t = S.player.current();
-    if (t) { e.preventDefault(); location.hash = '#/album/' + t.albumId; }
+    // on a computer: the Now Playing page (cover, Up next, Lyrics, Credits)
+    if (S.player.current()) { e.preventDefault(); location.hash = '#/now'; }
   });
 
   document.addEventListener('click', function (e) {

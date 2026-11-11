@@ -9,15 +9,16 @@ window.Spin.views = window.Spin.views || {};
     return [
       { route: '/home', label: 'Home', icon: 'home' },
       { route: '/search', label: 'Search', icon: 'search' },
-      { route: '/library', label: 'Your Library', short: 'Library', icon: 'library' },
+      { route: '/library', label: 'Library', short: 'Library', icon: 'library' },
       { route: '/household', label: 'Household', icon: 'family' }
     ].concat(window.VH && window.VH.lidarr && window.VH.lidarr.configured ? [{ route: '/requests', label: 'Requests', icon: 'download' }] : []);
   }
   const sideNavHtml = function () { return buildNav().map(function (n) { return '<a class="nav-item" href="#' + n.route + '" data-route="' + n.route + '">' + S.icon(n.icon, 22) + '<span>' + n.label + '</span></a>'; }).join(''); };
   const tabNavHtml = function () { return buildNav().map(function (n) { return '<a class="tab" href="#' + n.route + '" data-route="' + n.route + '">' + S.icon(n.icon, 22) + '<span>' + (n.short || n.label) + '</span></a>'; }).join(''); };
+  // bottom of the sidebar (computers only): settings and account, like the Windows app
   const userChipHtml = function () {
     const me = S.data.me;
-    return S.avatar(me, 32) + '<span class="user-chip-text"><span class="user-chip-name">' + S.esc(me.name) + '</span><span class="user-chip-plan">' + (me.admin ? 'Admin' : 'Member') + '</span></span>' + S.icon('more', 18);
+    return S.icon('gear', 18) + '<span class="user-chip-text"><span class="user-chip-name">' + S.esc(me.name) + '</span><span class="user-chip-plan">Settings and account</span></span>';
   };
 
   let shellMounted = false;
@@ -32,7 +33,7 @@ window.Spin.views = window.Spin.views || {};
     appEl.innerHTML =
       '<div class="app">' +
         '<aside class="sidebar">' +
-          '<div class="sidebar-head"><a href="#/home" aria-label="Volvix Home">' + S.brand(28) + '</a></div>' +
+          '<div class="sidebar-head"><a href="#/home" class="brand" aria-label="Volvix Home">' + S.logoMark(22) + '<span>Volvix Home</span></a>' + S.notify.bellButton() + '</div>' +
           '<nav class="nav" aria-label="Main">' + sideNavHtml() + '</nav>' +
           '<div class="sidebar-section">' +
             '<div class="section-head"><span>Playlists</span>' +
@@ -72,9 +73,9 @@ window.Spin.views = window.Spin.views || {};
     return '<footer class="player" aria-label="Player">' +
       '<div class="player-track">' +
         '<span class="eq eq-player" data-p="eq" aria-hidden="true"><i></i><i></i><i></i></span>' +
-        '<button class="player-art" data-p="art" data-np-open aria-label="Open Now Playing">' + S.icon('disc', 22) + '</button>' +
-        '<div class="player-meta"><div class="player-title" data-p="title">Not playing</div>' +
-        '<div class="player-sub" data-p="sub">Pick something from your library</div></div>' +
+        '<button class="player-art" data-p="art" data-np-open aria-label="Open Now Playing">' + S.icon('music', 22) + '</button>' +
+        '<div class="player-meta"><div class="player-title" data-p="title">Nothing playing</div>' +
+        '<div class="player-sub" data-p="sub"></div></div>' +
         '<button class="ctrl like-btn player-like" data-p="like" data-like="" data-size="18" aria-label="Add to Liked Songs" title="Add to Liked Songs" hidden>' + S.icon('heart', 18) + '</button>' +
         '<button class="ctrl player-add" data-p="add" data-add-current aria-label="Add to playlist" title="Add to playlist" hidden>' + S.icon('plus', 18) + '</button>' +
         '<button class="ctrl player-more" data-p="more" data-player="info" aria-label="More" title="More" hidden>' + S.icon('more', 18) + '</button>' +
@@ -108,11 +109,16 @@ window.Spin.views = window.Spin.views || {};
   function renderSidebarPlaylists() {
     const host = S.$('[data-playlists]');
     if (!host) return;
-    host.innerHTML = S.pl.all().concat(S.pl.followed()).map(function (pl) {
+    // Liked Songs is always listed first, like in the Windows app (even before anything is liked)
+    const list = S.pl.all().concat(S.pl.followed());
+    if (!list.some(function (p) { return p.liked; })) list.unshift({ id: 'pl_liked', name: 'Liked Songs', liked: true, owner: 'u_me', tracks: [] });
+    host.innerHTML = list.map(function (pl) {
       const n = pl.tracks.length + (pl.tracks.length === 1 ? ' song' : ' songs');
       const sub = pl.owner !== 'u_me' ? 'By ' + S.esc(S.data.person(pl.owner).name.split(' ')[0]) + ' · ' + n : (pl.collaborative ? 'Collaborative · ' : 'Playlist · ') + n;
+      // like the Windows app: a red heart for Liked Songs, people for shared playlists, a list for the rest
+      const mark = pl.liked ? S.icon('heartFill', 16) : (pl.collaborative || pl.owner !== 'u_me') ? S.icon('users', 16) : S.icon('list', 16);
       return '<a class="playlist-link" href="#/playlist/' + pl.id + '" data-route="/playlist/' + pl.id + '">' +
-        S.playlistCover(pl, 'thumb') +
+        '<span class="pl-mark' + (pl.liked ? ' pl-liked' : '') + '">' + mark + '</span>' +
         '<span class="pl-text"><span class="pl-name">' + S.esc(pl.name) + '</span><span class="pl-sub">' + sub + '</span></span></a>';
     }).join('') || '<p class="pl-empty">Create your first playlist with +</p>';
     setActive(S.router.current());
@@ -211,6 +217,7 @@ window.Spin.views = window.Spin.views || {};
       view.onclick = view.onchange = view.oninput = view.onsubmit = view.ondragstart = view.ondragover = view.ondrop = view.ondragend = view.onpointerdown = null;
       S.trackList.lists = {};
       match.view.render(view, match.params);
+      if (S.placeActions) S.placeActions();
       S.$$(SIDE_SCROLLERS, view).forEach(function (r) {
         if (rowScroll[r.className] != null) r.scrollLeft = rowScroll[r.className];
         const on = r.querySelector('.on, .active, [aria-current="page"], [aria-selected="true"]');
@@ -258,6 +265,8 @@ window.Spin.views = window.Spin.views || {};
   } };
 
   S.router.add('/home', S.views.home);
+  S.router.add('/now', S.views.now);
+  S.router.add('/now/:tab', S.views.now);
   S.router.add('/search', S.views.search);
   S.router.add('/search/:q', S.views.search);
   S.router.add('/library', S.views.library);

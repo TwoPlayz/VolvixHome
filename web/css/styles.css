@@ -694,6 +694,9 @@ a.c-album:hover { color: var(--text); text-decoration: underline; }
 .play-lg:hover { background: var(--accent-hover); transform: scale(1.03); }
 .play-lg:disabled, .icon-btn:disabled { opacity: .35; cursor: not-allowed; transform: none; }
 .icon-btn-lg { width: 44px; height: 44px; }
+.pill-label { display: none; } /* the words on Play / Shuffle: shown on computers (see the native-look block) */
+.t-album { display: none; }     /* " · Album" under a song's title: computers only, where there's no Album column */
+.mix-tile { display: none; }    /* the Windows app's Made-for-you tile: computers only (phones show the collage) */
 
 .banner {
   display: flex; align-items: center; gap: 14px; margin-bottom: 20px; padding: 14px 16px;
@@ -2916,3 +2919,206 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 .gm-skel-art, .gm-skel-lines i { animation: gm-pulse 1.2s ease-in-out infinite; }
 @keyframes gm-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .gm-skel-art, .gm-skel-lines i { animation: none; } }
+
+
+/* =====================================================================================================
+   Computers: the same look as the native Windows app (sizes from its design notes: apps/windows/src/native,
+   ui.rs / views.rs / pages.rs). Phones keep their own layout: everything here is above the 760px phone width.
+   ===================================================================================================== */
+@media (min-width: 761px) {
+  /* ---------- frame: 8 around and between, 240 sidebar, 84 player on black, 10 radius panels ---------- */
+  :root { --sidebar-w: 240px; --player-h: 84px; --gap: 8px; --radius-lg: 10px; }
+  .icon { stroke-width: 1.6; } /* thin, Windows-style strokes */
+
+  /* back / forward at the top left of the content panel (32 round, black, hover surface-3) */
+  .topbar { padding: 16px 24px 0; background: none; -webkit-backdrop-filter: none; backdrop-filter: none; position: static; }
+  .topbar .bell, .topbar .avatar-btn, .topbar .mobile-back, .topbar .mobile-brand { display: none; }
+  .nav-arrow { width: 32px; height: 32px; background: var(--frame); color: var(--text); }
+  .nav-arrow:hover { background: var(--surface-3); }
+  .nav-arrow:disabled { color: var(--text-3); cursor: default; background: var(--frame); }
+  .view { padding: 8px 28px 56px; }
+
+  /* ---------- type: Segoe UI Variable, semibold titles ---------- */
+  h1, h2, h3, .page-title, .section-title h2, .album-title { font-weight: 600; letter-spacing: -0.01em; }
+  .page-title { font-size: 32px; line-height: 1.15; margin: 0 0 8px; }
+  .page-head { margin-bottom: 20px; }
+  .section { margin-top: 28px; }
+  .section-title { margin-bottom: 10px; }
+  .section-title h2 { font-size: 22px; }
+  .eyebrow { text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 400; color: var(--text-2); }
+  .see-all { font-weight: 400; }
+
+  /* ---------- sidebar (240) ---------- */
+  .sidebar-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 12px 12px 20px; }
+  .sidebar-head .brand { gap: 10px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+  .sidebar-head .bell { width: 32px; height: 32px; }
+  .bell-badge { min-width: 16px; height: 16px; padding: 0 4px; font-size: 11px; line-height: 16px; border-radius: 999px; background: var(--accent); color: #fff; }
+  .nav { gap: 2px; padding: 0 8px; }
+  .nav-item { height: auto; padding: 9px 14px; gap: 14px; border-radius: 8px; font-weight: 400; font-size: 15px; color: var(--text-2); }
+  .nav-item .icon { width: 18px; height: 18px; }
+  .nav-item.active { background: var(--active); color: var(--text); }
+  .nav-item.active .icon { color: inherit; }
+  .sidebar-section { margin-top: 12px; padding-top: 0; border-top: 0; }
+  .section-head { padding: 0 10px 4px 22px; font-size: 13px; font-weight: 400; color: var(--text-2); text-transform: none; letter-spacing: 0; }
+  .playlist-list { padding: 0 8px 10px; }
+  .playlist-link { gap: 12px; padding: 7px 14px; border-radius: 8px; }
+  .pl-mark { display: grid; place-items: center; width: 16px; flex: none; color: var(--text-2); }
+  .pl-mark.pl-liked { color: var(--accent); }
+  .playlist-link .pl-sub { display: none; }
+  .playlist-link .pl-name { font-weight: 400; font-size: 14px; color: var(--text-2); }
+  .playlist-link:hover .pl-name, .playlist-link.active .pl-name { color: var(--text); }
+  .sidebar-foot { border-top: 0; padding: 8px; }
+  .user-chip { gap: 12px; padding: 8px 14px; }
+  .user-chip > .icon { margin-left: 0; color: var(--text-2); width: 18px; height: 18px; }
+  .user-chip-name { font-weight: 400; font-size: 13px; }
+  .user-chip-plan { font-size: 11px; color: var(--text-2); }
+
+  /* ---------- player bar (84, black): left 300, middle, right 260 ---------- */
+  .player { grid-template-columns: 300px minmax(0, 1fr) 260px; gap: 16px; padding: 0 12px; background: var(--frame); }
+  .player-track { gap: 12px; }
+  .player-art { width: 56px; height: 56px; border-radius: 4px; }
+  .player-title { font-size: 14px; font-weight: 400; }
+  .player-sub { font-size: 12px; }
+  .player-controls { gap: 10px; }
+  .player-controls .ctrl { width: 32px; height: 32px; }
+  .player-controls .ctrl .icon { width: 16px; height: 16px; }
+  .ctrl-play { width: 36px; height: 36px; }
+  .ctrl-play .icon { width: 16px; height: 16px; }
+  .player-center { gap: 4px; }
+  .player-right { gap: 2px; }
+  .player-right .q-btn, .player-right .party-btn, .player-more { display: none !important; } /* not in the app's player bar */
+  /* the bar stays when nothing's playing ("Nothing playing"), like the app */
+  html.player-empty .player { display: grid; }
+  html.player-empty .app { grid-template-rows: minmax(0, 1fr) var(--player-h); padding-bottom: 0; }
+  /* outline play / pause glyph on the white button, like Windows' own icons */
+  .ctrl-play .icon [fill] { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+  /* nothing playing: a note on the app's muted blue tile */
+  .player-art { background: #2B2F4A; color: var(--text); }
+  .mix-card .card-title, .card .card-title { font-weight: 400; }
+  .volume .bar { width: 110px; }
+  /* sliders: 4 rail at 20%, filled part white (red while hovered), round 12 handle while hovered */
+  .bar { height: 4px; background: rgba(245, 245, 247, .2); }
+  .bar-fill::after { content: ""; position: absolute; right: -6px; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; background: var(--text); opacity: 0; transition: opacity .1s; }
+  .bar:hover .bar-fill::after, .bar:active .bar-fill::after { opacity: 1; }
+  .bar:active .bar-fill { background: var(--accent); }
+
+  /* ---------- song rows: no table head, "artist · album" under the title, actions then length ---------- */
+  .track-head { display: none; }
+  .tracks, .tracks.with-album, .tracks.with-added { --cols: 32px minmax(0, 1fr) auto 52px; }
+  .tracks.editable, .tracks.editable.with-added { --cols: 22px 32px minmax(0, 1fr) auto 52px; }
+  .track { min-height: 0; padding: 6px 12px; gap: 12px; }
+  .track .c-album, .track .c-added { display: none; }
+  .t-album { display: inline; }
+  .t-name { font-size: 15px; font-weight: 400; }
+  .album-head ~ .tracks, .album-head ~ .empty { margin-top: 24px; }
+  .t-sub { font-size: 13px; }
+  .c-num { font-size: 15px; }
+  .c-act { order: 5; gap: 2px; }
+  .c-dur { order: 6; font-size: 13px; }
+  .row-like, .row-add, .row-more { opacity: 1; width: 32px; height: 32px; }
+  .row-cover { width: 40px; }
+  .row-cover .cover { border-radius: 4px; }
+
+  /* ---------- cards: 164 cover, wrapping grid, hover background ---------- */
+  .shelf { display: flex; flex-wrap: wrap; gap: 4px; overflow: visible; padding-bottom: 0; scroll-snap-type: none; }
+  .shelf > .card, .shelf > a, .shelf > div { width: 180px; flex: none; }
+  .grid { grid-template-columns: repeat(auto-fill, 180px); gap: 4px; }
+  .card { padding: 8px; border-radius: 8px; transition: background-color .12s; }
+  .card:hover { background: var(--hover); }
+  .card-art .cover, .card-art .mosaic { border-radius: 6px; }
+  /* card text: white 14 title, grey 13 line under it, one line each */
+  .card-title { display: block; margin-top: 8px; font-size: 14px; font-weight: 400; color: var(--text); }
+  .card-meta, .card-sub, .mix-card .card-sub { display: block; margin-top: 4px; font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: unset; }
+
+  /* Made for you: red fading to the mix's own colour, its icon (30) and name (16 semibold) in the middle */
+  .mix-card .card-art { border-radius: 6px; }
+  .mix-card .card-art > .cover, .mix-card .card-art > .mosaic, .mix-card .mix-label { display: none; }
+  .mix-card .mix-tile { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 12px;
+    border-radius: 6px; background: linear-gradient(46deg, var(--accent), var(--tint, #2B2F4A)); color: var(--text); text-align: center; }
+  .mix-tile .icon { width: 30px; height: 30px; }
+  .mix-tile span { font-family: var(--font-display); font-size: 16px; font-weight: 600; line-height: 1.25; }
+  .mix-hero { width: 220px; height: 220px; border-radius: 6px; background: linear-gradient(46deg, var(--accent), var(--tint, #2B2F4A)); }
+  .mix-hero .icon { width: 64px; height: 64px; }
+  .cover--liked { background: linear-gradient(46deg, var(--accent), var(--tint, #3A2A4F)); }
+  .cover--liked .icon { width: 36%; height: 36%; }
+
+  /* Home: quick tiles 300 wide, cover 56, surface-2, radius 6 */
+  .quick-grid { grid-template-columns: repeat(auto-fill, 300px); gap: 8px; }
+  .quick { height: 56px; border-radius: 6px; background: var(--surface-2); }
+  .quick:hover { background: var(--surface-3); }
+  .quick-art { width: 56px; }
+  .quick-title { font-size: 15px; font-weight: 400; padding: 0 14px; }
+
+  /* ---------- chips and search ---------- */
+  .chips { gap: 8px; }
+  .chip { height: auto; padding: 7px 16px; font-size: 14px; font-weight: 400; background: var(--surface-2); }
+  .chip:hover { background: var(--surface-3); }
+  .chip.active { background: var(--text); color: var(--frame); }
+  .search-box { height: auto; padding: 12px; border-radius: 8px; background: var(--input-bg); border: 1px solid var(--border); }
+  .search-input { font-size: 16px; }
+
+  /* ---------- album / playlist / mix header: cover 220, title 40, buttons under the title ---------- */
+  .album-head { align-items: flex-end; gap: 24px; padding-top: 0; }
+  .album-cover { width: 220px; }
+  .album-cover .cover, .album-cover .mosaic { border-radius: 6px; box-shadow: none; }
+  .album-title { font-size: 40px; line-height: 1.1; margin: 6px 0 6px; }
+  .album-artist { font-size: 15px; font-weight: 400; }
+  .album-meta { font-size: 13px; }
+  .album-info .action-bar { margin: 16px 0 0; flex-wrap: wrap; }
+  .action-bar { gap: 10px; }
+  .action-bar .play-lg { width: auto; height: auto; padding: 10px 22px 10px 18px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 400; }
+  .action-bar .play-lg:hover { transform: none; }
+  .action-bar .play-lg .icon { width: 16px; height: 16px; }
+  .action-bar .pill-label { display: inline; }
+  .action-bar .icon-btn-lg { width: 42px; height: 42px; border: 1px solid var(--border-strong); color: var(--text); }
+  .action-bar .icon-btn-lg:hover { background: var(--hover); }
+  .action-bar .icon-btn-lg .icon { width: 18px; height: 18px; }
+  .action-bar [data-album-shuffle], .action-bar [data-pl-shuffle] { width: auto; height: auto; padding: 10px 20px 10px 16px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px;
+    background: var(--surface-2); font-size: 15px; font-weight: 400; }
+  .action-bar [data-album-shuffle].on::after, .action-bar [data-pl-shuffle].on::after { display: none; }
+  .action-bar [data-album-shuffle].on, .action-bar [data-pl-shuffle].on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .profile-actions .btn { font-weight: 400; }
+
+  /* ---------- Now Playing page: cover up to 360 on the left, Up next / Lyrics / Credits on the right ---------- */
+  .np-page { display: grid; grid-template-columns: minmax(240px, 360px) minmax(0, 1fr); gap: 40px; align-items: start; padding-top: 8px; }
+  .np-main { position: sticky; top: 16px; display: flex; flex-direction: column; min-width: 0; }
+  .np-page-art .cover { border-radius: 8px; }
+  .np-page-title { margin: 20px 0 4px; font-size: 28px; line-height: 1.2; font-weight: 600; }
+  .np-page-artist { font-size: 16px; color: var(--text-2); }
+  .np-page-album { margin-top: 2px; font-size: 14px; color: var(--text-3); }
+  .np-page-actions { display: flex; gap: 6px; margin-top: 14px; }
+  .np-page-btn { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--border-strong); color: var(--text); }
+  .np-page-btn:hover { background: var(--hover); }
+  .np-page-btn.on { color: var(--accent); }
+  .np-aside { min-width: 0; }
+  .np-tabs { margin-bottom: 16px; }
+  .np-queue { padding: 0; overflow: visible; }
+  .np-lyrics .np-ly-body { max-height: calc(100vh - var(--player-h) - 200px); overflow-y: auto; padding: 0; }
+  .np-lyrics .ly-line { font-size: 22px; font-weight: 600; }
+  .np-lyrics .ly-line.now { font-size: 26px; color: var(--text); transform: none; }
+  .np-lyrics .ly-line.past { color: var(--text-3); }
+  .np-lyrics .ly-line:not(.now):not(.past) { color: var(--text-2); }
+  .np-credits .credits-head { display: none; }
+  .np-credits .credit-row { grid-template-columns: 150px minmax(0, 1fr); }
+  .np-credits dt { color: var(--text-2); font-size: 14px; }
+  .np-credits dd { font-size: 15px; }
+
+  /* ---------- settings: plain rows (no boxes or row icons), title 15 + hint 13, control on the right ---------- */
+  .set-group h2 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+  .set-body { background: none; border: 0; border-radius: 0; padding: 0 4px; }
+  .set-row { min-height: 0; padding: 10px 0; }
+  .set-row + .set-row, .q-block + .set-row, .set-row + .q-block, .q-block + .q-block, .set-row + .storage { border-top: 0; }
+  .set-icon { display: none; }
+  .set-text strong, .set-row .set-label { font-size: 15px; font-weight: 400; }
+  .set-text > span, .set-hint { font-size: 13px; color: var(--text-2); }
+  .acct-nav .nav-item, .acct-nav a { font-weight: 400; }
+  .acct-nav .icon { color: inherit; }
+
+  /* ---------- dialogs and toasts ---------- */
+  .modal { width: min(440px, 100%); padding: 24px; border-radius: 14px; }
+  .modal h2 { font-size: 22px; font-weight: 600; }
+  .toast { padding: 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 400; background: var(--text); color: var(--frame); }
+
+  .btn { font-weight: 400; }
+}

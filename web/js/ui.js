@@ -115,6 +115,8 @@ window.Spin = window.Spin || {};
     chevronRight: '<path d="m9 18 6-6-6-6"/>',
     chevronDown: '<path d="m6 9 6 6 6-6"/>',
     settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
     history: '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
     logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
@@ -241,6 +243,15 @@ window.Spin = window.Spin || {};
       '</div>';
   };
 
+  /** The muted colour a mix tile fades to (same formula as the Windows app's tint_for, so both pick the same colour). */
+  const TINTS = ['#3A2A4F', '#1F3B4D', '#4A2C2C', '#244034', '#453A22', '#2B2F4A'];
+  S.tintFor = function (seed) {
+    let h = 5381;
+    const bytes = new TextEncoder().encode(String(seed));
+    for (let i = 0; i < bytes.length; i++) h = (Math.imul(h, 33) ^ bytes[i]) >>> 0;
+    return TINTS[h % TINTS.length];
+  };
+
   /** A collage of up to four album covers: 4 = a 2×2 grid, 3 = one big and two small, 2 = side by side, 1 = just that cover. */
   S.collage = function (albumIds, extraClass) {
     const albums = albumIds.map(function (id) { return S.data.album(id); }).filter(Boolean).slice(0, 4);
@@ -251,19 +262,23 @@ window.Spin = window.Spin || {};
     return '<div class="cover cover--empty ' + (extraClass || '') + '">' + S.icon('music', 22) + '</div>';
   };
 
-  /** A playlist's cover: a collage of the albums its songs come from (Spotify-style). */
+  /** A playlist's cover. Computers: its first song's album, like the Windows app. Phones: a collage of the albums
+   *  its songs come from. */
+  const wideScreen = window.matchMedia('(min-width: 761px)');
   S.playlistCover = function (playlist, extraClass) {
     // Liked Songs has its own cover: a heart on a red-to-purple wash
     if (playlist && playlist.liked) {
-      return '<div class="cover cover--liked ' + (extraClass || '') + '" aria-hidden="true">' + S.icon('heartFill', 40) + '</div>';
+      return '<div class="cover cover--liked ' + (extraClass || '') + '" style="--tint:' + S.tintFor('liked') + '" aria-hidden="true">' + S.icon('heartFill', 40) + '</div>';
     }
     const albums = [];
     (playlist.tracks || []).forEach(function (entry) {
       const t = S.data.track(entry.id || entry);
       if (t && albums.indexOf(t.albumId) === -1) albums.push(t.albumId);
     });
-    return S.collage(albums, extraClass);
+    return S.collage(wideScreen.matches ? albums.slice(0, 1) : albums, extraClass);
   };
+  // crossing the phone width: redraw the page so playlist covers switch between the two looks
+  if (wideScreen.addEventListener) wideScreen.addEventListener('change', function () { if (S.app && S.app.refresh) S.app.refresh(); });
 
   const AVATAR_COLORS = ['#5E548E', '#335C67', '#9E2A2B', '#BC6C25', '#3D5A80', '#6B4F3A', '#4A6C2F', '#7A4069'];
   /** Someone's uploaded picture, if they have one (me, or a household member by server id). */

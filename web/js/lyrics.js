@@ -14,7 +14,9 @@ window.Spin = window.Spin || {};
   let wordFrame = 0;           // requestAnimationFrame id while words are being filled in
   let lastPos = -1, lastPosAt = 0;
 
-  function panel() { return S.$('[data-p="lyrics-panel"]'); }
+  // the computer Now Playing page can host the lyrics instead of the side panel (S.lyrics.mount)
+  let inline = null;
+  function panel() { return inline || S.$('[data-p="lyrics-panel"]'); }
 
   function note(icon, title, text, retry) {
     return '<div class="ly-note">' + S.icon(icon, 28) + '<strong>' + S.esc(title) + '</strong><p>' + text + '</p>' +
@@ -46,22 +48,38 @@ window.Spin = window.Spin || {};
   function paint() {
     const el = panel();
     if (!el) return;
-    el.hidden = !open;
-    document.documentElement.classList.toggle('lyrics-open', open);
-    S.$$('[data-lyrics-toggle]').forEach(function (b) { b.classList.toggle('on', open); });
+    if (inline && !document.body.contains(inline)) { unmount(); return; } // the page went away
+    if (!inline) {
+      el.hidden = !open;
+      document.documentElement.classList.toggle('lyrics-open', open);
+      S.$$('[data-lyrics-toggle]').forEach(function (b) { b.classList.toggle('on', open); });
+    }
     if (!open) return;
     const t = S.player.current();
-    if (!t) { open = false; el.hidden = true; return; }
+    if (!t) { if (inline) { el.innerHTML = note('lyrics', 'Nothing playing', 'Play a song to see its lyrics.'); return; } open = false; el.hidden = true; return; }
     const res = cache[t.id];
     lines = res && res.lyrics && res.lyrics.synced ? res.lyrics.synced : [];
     active = -1;
     shownId = t.id;
-    el.innerHTML =
-      '<div class="q-head"><div class="ly-title"><h2>Lyrics</h2><span>' + S.esc(t.title) + ' · ' + S.esc(t.artist) + '</span></div>' +
-        '<button class="icon-btn" data-lyrics-close aria-label="Close lyrics">' + S.icon('x', 18) + '</button></div>' +
-      '<div class="q-body ly-body" data-lyrics-body>' + body(t, res) + '</div>';
+    el.innerHTML = inline
+      ? '<div class="ly-body np-ly-body" data-lyrics-body>' + body(t, res) + '</div>'
+      : '<div class="q-head"><div class="ly-title"><h2>Lyrics</h2><span>' + S.esc(t.title) + ' · ' + S.esc(t.artist) + '</span></div>' +
+          '<button class="icon-btn" data-lyrics-close aria-label="Close lyrics">' + S.icon('x', 18) + '</button></div>' +
+        '<div class="q-body ly-body" data-lyrics-body>' + body(t, res) + '</div>';
     follow(true);
   }
+
+  /** Show the lyrics inside `host` (the computer Now Playing page) instead of the side panel. */
+  function mount(host) {
+    const side = S.$('[data-p="lyrics-panel"]');
+    if (side) { side.hidden = true; side.innerHTML = ''; }
+    document.documentElement.classList.remove('lyrics-open');
+    inline = host; open = true;
+    const t = S.player.current();
+    if (t) load(t);
+    paint();
+  }
+  function unmount() { if (!inline) return; inline = null; open = false; lines = []; }
 
   function load(t, force) {
     if (!force && cache[t.id]) return;
@@ -150,7 +168,7 @@ window.Spin = window.Spin || {};
     const tog = e.target.closest('[data-lyrics-toggle]');
     if (tog) { open ? close() : openFor(); return; }
     const line = e.target.closest('.ly-line');
-    if (line && line.closest('[data-p="lyrics-panel"]')) {
+    if (line && line.closest('[data-p="lyrics-panel"], [data-np-lyrics]')) {
       const l = lines[parseInt(line.dataset.ly, 10)];
       const wEl = e.target.closest('.ly-w');
       const w = wEl && l && l.words ? l.words[parseInt(wEl.dataset.lw, 10)] : null;
@@ -159,14 +177,20 @@ window.Spin = window.Spin || {};
   });
   // the reader scrolled by hand: leave them be for a few seconds
   ['wheel', 'touchmove'].forEach(function (ev) {
-    document.addEventListener(ev, function (e) { if (e.target.closest && e.target.closest('[data-p="lyrics-panel"]')) userScrolledAt = Date.now(); }, { passive: true });
+    document.addEventListener(ev, function (e) { if (e.target.closest && e.target.closest('[data-p="lyrics-panel"], [data-np-lyrics]')) userScrolledAt = Date.now(); }, { passive: true });
   });
   document.addEventListener('keydown', function (e) {
-    if (open && e.key === 'Escape' && !document.querySelector('.modal-scrim, .popover')) close();
+    if (open && !inline && e.key === 'Escape' && !document.querySelector('.modal-scrim, .popover')) close();
   });
 
   // new song, or the queue panel opened: keep the panel honest
   S.player.hooks.push(function () {
+    if (inline) {
+      if (!document.body.contains(inline)) { unmount(); return; }
+      const t = S.player.current();
+      if (!t || t.id !== shownId) { if (t) load(t); paint(); }
+      return;
+    }
     if (!open) return;
     const t = S.player.current();
     if (!t) { close(); return; }
@@ -176,5 +200,5 @@ window.Spin = window.Spin || {};
   // every progress tick also refreshes the words, so they keep up even when the browser skips animation frames
   S.player.progressHooks.push(function () { follow(false); words(); });
 
-  S.lyrics = { open: openFor, close: close, isOpen: function () { return open; } };
+  S.lyrics = { open: openFor, close: close, isOpen: function () { return open && !inline; }, mount: mount, unmount: unmount };
 })(window.Spin);

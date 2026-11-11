@@ -41,8 +41,8 @@ Spin.views = Spin.views || {};
           '</div>' +
         '</header>' +
         '<div class="action-bar">' +
-          '<button class="play-lg" data-album-play="' + album.id + '" aria-label="Play">' + S.icon('play', 24) + '</button>' +
-          '<button class="icon-btn icon-btn-lg" data-album-shuffle aria-label="Shuffle" aria-pressed="false" title="Shuffle: play this in a random order">' + S.icon('shuffle', 22) + '</button>' +
+          '<button class="play-lg" data-album-play="' + album.id + '" aria-label="Play">' + S.icon('play', 24) + '<span class="pill-label">Play</span></button>' +
+          '<button class="icon-btn icon-btn-lg" data-album-shuffle aria-label="Shuffle" aria-pressed="false" title="Shuffle: play this in a random order">' + S.icon('shuffle', 22) + '<span class="pill-label">Shuffle</span></button>' +
           '<button class="icon-btn icon-btn-lg" data-album-add aria-label="Add album to playlist" title="Add to playlist">' + S.icon('plus', 22) + '</button>' +
           (S.dl && S.dl.supported ? S.dl.button('data-dl-album="' + album.id + '"', album.trackIds) : '') +
           '<button class="icon-btn icon-btn-lg" data-album-more aria-label="More options">' + S.icon('more', 22) + '</button>' +

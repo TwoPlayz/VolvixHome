@@ -501,11 +501,11 @@ window.Spin = window.Spin || {};
     document.documentElement.classList.toggle('player-empty', !t && !remote); // the player only goes away when nothing's playing and you're not in a party
     if (!art) return;
 
-    art.innerHTML = album ? S.cover(album) : S.icon('disc', 22);
+    art.innerHTML = album ? S.cover(album) : S.icon('music', 22);
     S.$('[data-p="title"]').innerHTML = t
       ? '<a href="#/album/' + album.id + '">' + S.esc(t.title) + '</a>' + (t.explicit ? ' ' + S.explicitBadge() : '')
-      : 'Not playing';
-    S.$('[data-p="sub"]').innerHTML = t ? S.artistLink(t.artist) : 'Pick something from your library';
+      : 'Nothing playing';
+    S.$('[data-p="sub"]').innerHTML = t ? S.artistLink(t.artist) : '';
     const like = S.$('[data-p="like"]');
     if (like) { like.hidden = !t; like.dataset.like = t ? t.id : ''; }
     const bars = S.$('[data-p="eq"]');
@@ -567,11 +567,22 @@ window.Spin = window.Spin || {};
   }
 
   function renderQueue() {
+    // the computer Now Playing page's "Up next" shows the same rows
+    const np = S.$('[data-np-queue]');
+    if (np) np.innerHTML = queueBody();
     const panel = S.$('[data-p="queue-panel"]');
     if (!panel) return;
     panel.hidden = !st.queueOpen;
     if (!st.queueOpen) return;
+    panel.innerHTML =
+      '<div class="q-head"><h2>Queue</h2><div class="q-head-actions">' +
+        (st.queue.length - st.index - 1 > 1 ? '<button class="btn btn-secondary btn-sm" data-q-reshuffle title="Shuffle the songs coming up">' + S.icon('shuffle', 14) + 'Reshuffle</button>' : '') +
+        '<button class="icon-btn" data-player="queue" aria-label="Close queue">' + S.icon('x', 18) + '</button></div></div>' +
+      '<div class="q-body">' + queueBody() + '</div>';
+  }
 
+  /** The queue's rows: now playing, what you queued, then what's next from the album / playlist. */
+  function queueBody() {
     const t = current();
     function row(id, i) {
       const tr = S.data.track(id);
@@ -590,16 +601,10 @@ window.Spin = window.Spin || {};
     const upcoming = [], mineRows = [];
     for (let i = st.index + 1; i < st.queue.length; i++) (i <= st.index + st.userQ ? mineRows : upcoming).push(row(st.queue[i], i));
 
-    panel.innerHTML =
-      '<div class="q-head"><h2>Queue</h2><div class="q-head-actions">' +
-        (upcoming.length > 1 ? '<button class="btn btn-secondary btn-sm" data-q-reshuffle title="Shuffle the songs coming up">' + S.icon('shuffle', 14) + 'Reshuffle</button>' : '') +
-        '<button class="icon-btn" data-player="queue" aria-label="Close queue">' + S.icon('x', 18) + '</button></div></div>' +
-      '<div class="q-body">' +
-        (t ? '<div class="q-label">Now playing</div>' + row(st.queue[st.index], st.index) : '<p class="q-empty">Nothing playing.</p>') +
-        (mineRows.length ? '<div class="q-label">Next in queue</div>' + mineRows.join('') : '') +
-        (upcoming.length ? '<div class="q-label">Next' + (st.context && st.context.name ? ' from ' + S.esc(st.context.name) : '') + '</div>' + upcoming.join('') : '') +
-        (t && !upcoming.length && !mineRows.length ? '<p class="q-empty">' + (st.repeat === 'all' ? 'Repeat is on: the queue starts over.' : 'Nothing else queued.') + '</p>' : '') +
-      '</div>';
+    return (t ? '<div class="q-label">Now playing</div>' + row(st.queue[st.index], st.index) : '<p class="q-empty">Nothing playing.</p>') +
+      (mineRows.length ? '<div class="q-label">Next in queue</div>' + mineRows.join('') : '') +
+      (upcoming.length ? '<div class="q-label">Next' + (st.context && st.context.name ? ' from ' + S.esc(st.context.name) : '') + '</div>' + upcoming.join('') : '') +
+      (t && !upcoming.length && !mineRows.length ? '<p class="q-empty">' + (st.repeat === 'all' ? 'Repeat is on: the queue starts over.' : 'Nothing else queued.') + '</p>' : '');
   }
 
   /* ---------- input ---------- */
@@ -618,7 +623,14 @@ window.Spin = window.Spin || {};
       case 'prev': prev(); break;
       case 'shuffle': setShuffle(!st.shuffle); break;
       case 'repeat': cycleRepeat(); break;
-      case 'queue': st.queueOpen = !st.queueOpen; render(); break;
+      case 'queue':
+        // computers: the queue is the Now Playing page's "Up next" (pressing it again goes back); phones: the queue panel
+        if (!b.closest('.np, [data-p="queue-panel"]') && window.matchMedia('(min-width: 761px)').matches) {
+          if (st.queueOpen) { st.queueOpen = false; render(); }
+          if (/^\/now/.test(S.router.current())) history.back(); else location.hash = '#/now/queue';
+          break;
+        }
+        st.queueOpen = !st.queueOpen; render(); break;
       case 'mute': st.muted = !st.muted; render(); break;
       case 'quality': qualityMenu(b); break;
     }
@@ -755,6 +767,7 @@ window.Spin = window.Spin || {};
     isCurrent: function (id) { const t = current(); return !!t && t.id === id; },
     current: current,
     render: render,
+    renderQueue: renderQueue,
     /** Shuffle on/off for the whole player (it never starts or stops anything by itself). */
     toggleShuffle: function () { setShuffle(!st.shuffle); },
     audio: audio,

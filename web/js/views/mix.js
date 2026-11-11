@@ -9,7 +9,9 @@ Spin.views = Spin.views || {};
     const albums = [];
     m.ids.forEach(function (id) { const t = S.data.track(id); if (t && albums.indexOf(t.albumId) === -1 && albums.length < 4) albums.push(t.albumId); });
     // the mix's name is printed on its cover, so you can tell the mixes apart at a glance
-    const art = S.collage(albums) + '<span class="mix-label" aria-hidden="true">' + S.icon(m.icon || 'music', 14) + '<span>' + S.esc(m.title) + '</span></span>';
+    const art = S.collage(albums) + '<span class="mix-label" aria-hidden="true">' + S.icon(m.icon || 'music', 14) + '<span>' + S.esc(m.title) + '</span></span>' +
+      // computers: the Windows app's tile instead (red fading to the mix's own colour, its icon and name in the middle)
+      '<span class="mix-tile" style="--tint:' + S.tintFor(m.id) + '" aria-hidden="true">' + S.icon(m.icon || 'music', 30) + '<span>' + S.esc(m.title) + '</span></span>';
     return '<a class="card mix-card" href="#/mix/' + m.id + '"><span class="card-art">' + art + '</span>' +
       '<span class="card-title">' + S.esc(m.title) + '</span><span class="card-sub">' + S.esc(m.sub) + '</span></a>';
   };
@@ -20,7 +22,7 @@ Spin.views = Spin.views || {};
       if (!m) { root.innerHTML = S.emptyState('music', 'That mix isn\'t available', 'Mixes change as you listen. Open Made for you on Home.', '<a class="btn btn-secondary" href="#/home">Home</a>'); return; }
       const ctx = { type: 'mix', name: m.title };
       root.innerHTML =
-        '<header class="profile-head"><span class="artist-hero mix-hero">' + S.icon(m.icon, 40) + '</span>' +
+        '<header class="profile-head"><span class="artist-hero mix-hero" style="--tint:' + S.tintFor(m.id) + '">' + S.icon(m.icon, 40) + '</span>' +
           '<div class="profile-info"><div class="eyebrow">Made for you</div><h1 class="album-title">' + S.esc(m.title) + '</h1>' +
           '<div class="album-meta">' + S.esc(m.sub) + ' · ' + m.ids.length + ' songs</div>' +
           '<div class="profile-actions"><button class="btn btn-primary" data-mix-play>' + S.icon('play', 16) + 'Play</button>' +

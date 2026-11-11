@@ -58,6 +58,19 @@ window.Spin = window.Spin || {};
     '</section>';
   };
 
+  /** Album / playlist pages: on computers the Play / Shuffle row sits in the header under the title (as in the Windows
+   *  app); on phones it stays below the header. Moves the row when the window crosses the phone width. */
+  const wide = window.matchMedia('(min-width: 761px)');
+  S.placeActions = function () {
+    const bar = S.$('#view .action-bar');
+    const info = S.$('#view .album-head .album-info');
+    const head = S.$('#view .album-head');
+    if (!bar || !info || !head) return;
+    if (wide.matches && bar.parentNode !== info) info.appendChild(bar);
+    else if (!wide.matches && bar.parentNode === info) head.insertAdjacentElement('afterend', bar);
+  };
+  if (wide.addEventListener) wide.addEventListener('change', S.placeActions);
+
   S.emptyState = function (icon, title, text, actionHtml) {
     return '<div class="empty">' +
       '<div class="empty-icon">' + S.icon(icon, 28) + '</div>' +
@@ -112,7 +125,8 @@ window.Spin = window.Spin || {};
               (t.explicit ? S.explicitBadge() : '') + (owned ? '' : S.icon('lock', 11));
             return hide
               ? '<span class="t-text"><span class="t-name t-name-marks">' + S.esc(t.title) + (marks ? '<span class="t-marks">' + marks + '</span>' : '') + '</span></span>'
-              : '<span class="t-text"><span class="t-name">' + S.esc(t.title) + '</span><span class="t-sub">' + marks + S.artistLink(t.artist) + '</span></span>';
+              : '<span class="t-text"><span class="t-name">' + S.esc(t.title) + '</span><span class="t-sub">' + marks + S.artistLink(t.artist) +
+                  (opts.showAlbum && album ? '<span class="t-album"> · ' + S.esc(album.title) + '</span>' : '') + '</span></span>';
           })() +
         '</span>' +
         (opts.showAlbum ? '<a class="c-album" href="#/album/' + album.id + '">' + S.esc(album.title) + '</a>' : '') +
@@ -142,7 +156,7 @@ window.Spin = window.Spin || {};
     if (btn) {
       const cur = S.player.current();
       const playingThis = !!cur && cur.albumId === btn.dataset.albumPlay && S.player.state.playing;
-      btn.innerHTML = S.icon(playingThis ? 'pause' : 'play', 24);
+      btn.innerHTML = S.icon(playingThis ? 'pause' : 'play', 24) + '<span class="pill-label">' + (playingThis ? 'Pause' : 'Play') + '</span>';
       btn.setAttribute('aria-label', playingThis ? 'Pause' : 'Play');
     }
     const st = S.player.state, ctx = st.context || {}, live = !!S.player.current() && st.playing;
@@ -150,7 +164,7 @@ window.Spin = window.Spin || {};
     const pb = S.$('[data-pl-play]');
     if (pb) {
       const on = live && ctx.id === pb.dataset.plPlay;
-      pb.innerHTML = S.icon(on ? 'pause' : 'play', 24);
+      pb.innerHTML = S.icon(on ? 'pause' : 'play', 24) + '<span class="pill-label">' + (on ? 'Pause' : 'Play') + '</span>';
       pb.setAttribute('aria-label', on ? 'Pause' : 'Play');
     }
     // artist page
@@ -337,12 +351,15 @@ window.Spin = window.Spin || {};
 
   /** Who made a song: what's tagged in the file, plus what MusicBrainz knows. */
   S.creditsDialog = function (trackId) {
+    const m = S.modal({ title: 'Credits', body: S.creditsHtml(trackId), actions: [{ label: 'Close', kind: 'secondary' }] });
+    S.creditsFill(m.el, trackId);
+  };
+  /** The credits of a song (the dialog's content; the computer Now Playing page shows it too). */
+  S.creditsHtml = function (trackId) {
     const t = S.data.track(trackId), al = S.data.album(t.albumId);
     const q = S.lib.quality(al);
     const own = t.credits || [];
-    const m = S.modal({
-      title: 'Credits',
-      body: '<div class="credits">' +
+    return '<div class="credits">' +
         '<div class="credits-head"><a class="credits-art" href="#/album/' + al.id + '" aria-label="Go to the album">' + S.cover(al) + '</a><div>' +
           '<strong>' + S.esc(t.title) + '</strong>' +
           '<span class="credits-artist">' + S.personLink(t.artist) + '</span>' +
@@ -360,24 +377,28 @@ window.Spin = window.Spin || {};
           return '<div class="q-label">Your listening</div><dl class="credit-list">' + (mine
             ? detailRows([['Plays', String(mine.n)], ['First played', S.fmtDay(mine.first)], ['Last played', S.fmtDay(mine.last)]])
             : detailRows([['Plays', 'Not played yet']])) + '</dl>';
-        })() + '</div>',
-      actions: [{ label: 'Close', kind: 'secondary' }]
-    });
+        })() + '</div>';
+  };
+  /** Fill in what MusicBrainz knows about the song's credits, inside `el` (where S.creditsHtml was put). */
+  S.creditsFill = function (el, trackId) {
+    const own = (S.data.track(trackId) || {}).credits || [];
     S.server.json('GET', '/api/credits/' + encodeURIComponent(trackId)).then(function (r) {
-      if (!document.body.contains(m.el)) return;
+      const slot = S.$('[data-mb]', el), note = S.$('[data-mb-note]', el);
+      if (!document.body.contains(el) || !slot) return;
       // MusicBrainz fills in what the file doesn't say
       const have = own.map(function (c) { return c.role; });
       const extra = r.credits.filter(function (c) { return have.indexOf(c.role) === -1; });
-      S.$('[data-mb]', m.el).outerHTML = creditRows(extra);
+      slot.outerHTML = creditRows(extra);
       const chip = '<span class="chip-src">MusicBrainz</span> ';
-      S.$('[data-mb-note]', m.el).innerHTML = r.credits.length
+      note.innerHTML = r.credits.length
         ? chip + (extra.length ? 'Added credits the file doesn\'t have.' : 'Matches what\'s in the file.')
         : (own.length ? '' : 'No credits found for this song in the file or on MusicBrainz.');
-      if (!own.length && !r.credits.length) S.$('[data-mb-note]', m.el).classList.add('credits-none');
+      if (!own.length && !r.credits.length) note.classList.add('credits-none');
     }).catch(function (x) {
-      if (!document.body.contains(m.el)) return;
-      S.$('[data-mb]', m.el).remove();
-      S.$('[data-mb-note]', m.el).textContent = own.length ? '' : (x.message || 'Couldn\'t reach MusicBrainz.');
+      const slot = S.$('[data-mb]', el), note = S.$('[data-mb-note]', el);
+      if (!document.body.contains(el) || !slot) return;
+      slot.remove();
+      note.textContent = own.length ? '' : (x.message || 'Couldn\'t reach MusicBrainz.');
     });
   };
 
