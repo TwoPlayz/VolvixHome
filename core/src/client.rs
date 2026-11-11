@@ -14,6 +14,8 @@ pub struct Client {
     base: String,
     token: Option<String>,
     agent: ureq::Agent,
+    /// songs are asked for at this quality ("high", "normal" or "low": smaller files made by the server); None = as they are
+    quality: Option<String>,
 }
 
 impl std::fmt::Debug for Client {
@@ -38,7 +40,7 @@ impl Client {
             .timeout_read(Duration::from_secs(30))
             .user_agent(concat!("VolvixHomeNative/", env!("CARGO_PKG_VERSION")))
             .build();
-        Client { base: base.trim_end_matches('/').to_string(), token, agent }
+        Client { base: base.trim_end_matches('/').to_string(), token, agent, quality: None }
     }
 
     /// Find the server someone typed ("nas.local:4747", "music.example.com", "https://…"): checks it
@@ -74,7 +76,21 @@ impl Client {
         self.token.as_deref()
     }
     pub fn with_token(&self, token: Option<String>) -> Client {
-        Client { base: self.base.clone(), token, agent: self.agent.clone() }
+        Client { base: self.base.clone(), token, agent: self.agent.clone(), quality: self.quality.clone() }
+    }
+    /// The same client, asking for songs at a quality ("original" or empty = as they are). Needs ffmpeg on the server.
+    pub fn with_quality(&self, quality: &str) -> Client {
+        let q = match quality {
+            "high" | "normal" | "low" => Some(quality.to_string()),
+            _ => None,
+        };
+        Client { quality: q, ..self.clone() }
+    }
+    fn stream_path(&self, track_id: &str) -> String {
+        match &self.quality {
+            Some(q) => format!("/api/stream/{}?q={q}", enc(track_id)),
+            None => format!("/api/stream/{}", enc(track_id)),
+        }
     }
 
     fn url(&self, path: &str) -> String {
@@ -303,7 +319,7 @@ impl Client {
 
     /// Where a song streams from. Players that can send headers use [`Client::auth_header`] with it.
     pub fn stream_url(&self, track_id: &str) -> String {
-        self.url(&format!("/api/stream/{}", enc(track_id)))
+        self.url(&self.stream_path(track_id))
     }
 
     /// The `Authorization` header value for requests made outside this client (e.g. AVPlayer).
@@ -315,7 +331,7 @@ impl Client {
     /// server said, and whether the server honoured the range.
     pub fn open_stream(&self, track_id: &str, start: u64) -> Result<(Box<dyn Read + Send + Sync>, Option<u64>, bool)> {
         // no overall timeout (a song can take a while to listen through); each read still times out
-        let mut req = self.request("GET", &format!("/api/stream/{}", enc(track_id)));
+        let mut req = self.request("GET", &self.stream_path(track_id));
         if start > 0 {
             req = req.set("Range", &format!("bytes={start}-"));
         }

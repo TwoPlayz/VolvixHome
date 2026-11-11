@@ -240,7 +240,11 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 }
                 was_busy = false;
                 let mut st = status.lock().unwrap();
+                st.track = None; // nothing is loaded any more
                 st.playing = false;
+                st.loading = false;
+                st.finished = false;
+                st.duration = None;
                 st.position = Duration::ZERO;
             }
             Err(RecvTimeoutError::Timeout) => {}

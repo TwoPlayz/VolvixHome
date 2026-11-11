@@ -558,7 +558,7 @@ pub fn notifications(app: &App) -> El<'_> {
 
 /* ---------- settings ---------- */
 
-fn setting_row<'a>(title: &'a str, sub: &'a str, control: El<'a>) -> El<'a> {
+fn setting_row<'a>(title: impl text::IntoFragment<'a>, sub: impl text::IntoFragment<'a>, control: El<'a>) -> El<'a> {
     container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).width(Length::Fill), control].spacing(16).align_y(Alignment::Center)).padding([10, 4]).into()
 }
 
@@ -577,7 +577,7 @@ pub const PERMISSIONS: [(&str, &str, &str); 6] = [
 ];
 
 /// A row with a button: the button sits right after the text, not pushed to the far edge.
-fn action_row<'a>(title: &'a str, sub: &'a str, control: El<'a>) -> El<'a> {
+fn action_row<'a>(title: impl text::IntoFragment<'a>, sub: impl text::IntoFragment<'a>, control: El<'a>) -> El<'a> {
     container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).max_width(520), control].spacing(24).align_y(Alignment::Center)).padding([10, 4]).into()
 }
 
@@ -858,8 +858,8 @@ fn members(app: &App) -> El<'_> {
 }
 
 fn settings(app: &App) -> El<'_> {
-    let user = app.me.as_ref().map(|m| m.user.clone()).unwrap_or_default();
     let leveling = app.setting_str("leveling", "off") != "off";
+    let transcoding = app.me.as_ref().map(|m| m.transcoding).unwrap_or(false);
     let server = app.client.as_ref().map(|c| c.base().to_string()).unwrap_or_default();
     let server_line = match &app.server_status {
         Some(s) => format!("{server} · Volvix Home {} · {} albums, {} songs", s.version, s.albums, s.tracks),
@@ -870,70 +870,156 @@ fn settings(app: &App) -> El<'_> {
         Some(crate::update::State::Checking) => "Checking…".into(),
         Some(crate::update::State::UpToDate) => "You have the latest version.".into(),
         Some(crate::update::State::Downloading(v)) => format!("Downloading version {v}…"),
-        Some(crate::update::State::Ready(v)) => format!("Version {v} is ready. Restart from the tray menu to finish."),
+        Some(crate::update::State::Ready(v)) => format!("Version {v} is installed. The app restarts to use it."),
         Some(crate::update::State::Failed(m)) => m.clone(),
     };
-    let _ = user;
-    let col = column![
-        section(
-            "Privacy",
-            column![
-                setting_row("Share what I'm listening to", "Others in your household see your current song on the Household page.", switch(app.setting_bool("shareActivity", true), Message::SetShare)),
-                setting_row("Private session", "Stops sharing, and keeps what you play out of Recently played, until you turn it off.", switch(app.setting_bool("privateSession", false), Message::SetPrivate)),
-            ]
-            .into()
-        ),
-        section(
-            "Playback",
-            column![
-                setting_row("Volume leveling", "Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren't changed.", switch(leveling, Message::SetLeveling)),
-                setting_row(
-                    "Sleep timer",
-                    match app.sleep_choice.as_str() {
-                        "song" => "Pauses when this song ends.",
-                        "0" => "Pause the music after a while, so you can fall asleep to it.",
-                        _ => "Pauses when the time is up.",
-                    },
-                    ui::seg(&[("0", "Off"), ("15", "15 min"), ("30", "30 min"), ("60", "1 hour"), ("song", "End of song")], &app.sleep_choice, Message::SetSleep)
-                ),
-                setting_row("Resume where I left off", "Reopening Volvix shows the last song and spot, paused.", switch(app.setting_bool("resumeLast", true), Message::SetResume)),
-            ]
-            .into()
-        ),
-        section(
-            "Downloads",
-            column![
-                setting_row(
-                    "Download on a metered connection",
-                    "Off: downloads wait while Windows says this connection is metered (a mobile hotspot, or one you marked as metered), so a big album can't use up a data plan.",
-                    switch(app.settings.download_metered, Message::SetDownloadMetered)
-                ),
-                action_row(
-                    Box::leak(format!("{} songs on this computer", app.downloaded.len()).into_boxed_str()),
-                    Box::leak(format!("{} used. Albums and playlists you download play without the server.", human_size(app.downloads.size())).into_boxed_str()),
-                    button(text("Remove all").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe((!app.saved.is_empty() || !app.downloaded.is_empty()).then_some(Message::RemoveAllDownloads)).into()
-                ),
-            ]
-            .into()
-        ),
-        section(
-            "Windows app",
-            column![
-                setting_row("Start with Windows", "Open in the tray when you sign in to Windows.", switch(app.settings.start_with_windows, Message::SetStartWithWindows)),
-                setting_row("Close to the system tray", "The close button hides the window and the music keeps playing.", switch(app.settings.close_to_tray, Message::SetCloseToTray)),
-                setting_row("Update automatically", "Look for a new version every few hours.", switch(app.settings.auto_update, Message::SetAutoUpdate)),
-                action_row("Updates", Box::leak(update_line.into_boxed_str()), button(text("Check now").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::CheckUpdate).into()),
-            ]
-            .into()
-        ),
-        section(
-            "Server",
-            column![action_row("Connected to", Box::leak(server_line.into_boxed_str()), button(text("Switch server").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::SwitchServer).into())].into()
-        ),
-    ]
-    .spacing(24)
-    .max_width(820);
-    col.into()
+    let btn = |label: &'static str, m: Option<Message>| -> El<'static> { button(text(label).size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe(m).into() };
+    let nothing = || -> El<'static> { iced::widget::Space::new(0, 0).into() };
+
+    let privacy = column![
+        setting_row("Share what I'm listening to", "Others in your household see your current song on the Household page.", switch(app.setting_bool("shareActivity", true), Message::SetShare)),
+        setting_row("Private session", "Stops sharing, and keeps what you play out of Recently played, until you turn it off.", switch(app.setting_bool("privateSession", false), Message::SetPrivate)),
+    ];
+
+    let mut playback = Column::new();
+    if transcoding {
+        playback = playback
+            .push(setting_row(
+                "Streaming quality (this device)",
+                "Smaller files use less data. Original sends the file as it is. Converted songs are made once on the server and kept. Downloads use this too.",
+                ui::seg(&[("original", "Original"), ("high", "High"), ("normal", "Normal"), ("low", "Data saver")], &app.settings.stream_quality, Message::SetStreamQuality),
+            ))
+            .push(setting_row("Use less data on a metered connection", "Switches to Data saver whenever Windows says the connection is metered.", switch(app.settings.data_saver, Message::SetDataSaver)));
+    } else {
+        playback = playback.push(setting_row("Streaming quality", "Smaller files need ffmpeg on the server (the Docker image includes it). Right now songs stream in original quality.", nothing()));
+    }
+    playback = playback
+        .push(setting_row("Volume leveling", "Uses ReplayGain tags in your files so songs play at the same loudness. Files without the tags aren't changed.", switch(leveling, Message::SetLeveling)))
+        .push(setting_row(
+            "Sleep timer",
+            match app.sleep_choice.as_str() {
+                "song" => "Pauses when this song ends.",
+                "0" => "Pause the music after a while, so you can fall asleep to it.",
+                _ => "Pauses when the time is up.",
+            },
+            ui::seg(&[("0", "Off"), ("15", "15 min"), ("30", "30 min"), ("60", "1 hour"), ("song", "End of song")], &app.sleep_choice, Message::SetSleep),
+        ))
+        .push(setting_row("Resume where I left off", "Reopening Volvix shows the last song and spot, paused.", switch(app.setting_bool("resumeLast", true), Message::SetResume)));
+
+    let windows = column![
+        setting_row("Start with Windows", "Open in the tray when you sign in to Windows.", switch(app.settings.start_with_windows, Message::SetStartWithWindows)),
+        setting_row("Close to the system tray", "The close button hides the window and the music keeps playing.", switch(app.settings.close_to_tray, Message::SetCloseToTray)),
+        setting_row("Update automatically", "Look for a new version every few hours.", switch(app.settings.auto_update, Message::SetAutoUpdate)),
+        action_row("Check for updates", update_line, btn("Check now", Some(Message::CheckUpdate))),
+    ];
+
+    let mut downloads = Column::new().push(setting_row(
+        "Download on a metered connection",
+        "Off: downloads wait while Windows says this connection is metered (a mobile hotspot, or one you marked as metered), so a big album can't use up a data plan.",
+        switch(app.settings.download_metered, Message::SetDownloadMetered),
+    ));
+    if transcoding {
+        downloads = downloads.push(setting_row(
+            "Download quality",
+            "Smaller downloads use less storage and data. \"Same as streaming\" follows the streaming quality above. Songs already downloaded stay as they are.",
+            ui::seg(&[("stream", "Same as streaming"), ("original", "Original"), ("high", "High"), ("normal", "Normal"), ("low", "Data saver")], &app.settings.download_quality, Message::SetDownloadQuality),
+        ));
+    }
+    downloads = downloads.push(action_row(
+        format!("{} songs on this computer", app.downloaded.len()),
+        format!("{} used. Albums and playlists you download play without the server.", human_size(app.downloads.size())),
+        btn("Remove all", (!app.saved.is_empty() || !app.downloaded.is_empty()).then_some(Message::RemoveAllDownloads)),
+    ));
+
+    let mut library = Column::new();
+    if app.can("settings") {
+        let line = match &app.folder {
+            Some(f) => format!("{}{}{}", f.path, if f.exists { "" } else { " · folder not found" }, if f.is_default { "" } else { " · custom" }),
+            None => "…".to_string(),
+        };
+        library = library.push(action_row("Music folder", line, btn("Change", Some(Message::PickFolder))));
+    }
+    let counts = match &app.server_status {
+        Some(s) => format!("{} albums · {} songs{}. You're told when to reload.", s.albums, s.tracks, if s.scanning { " · checking the folder…" } else { "" }),
+        None => "…".to_string(),
+    };
+    let scanning = app.server_status.as_ref().map(|s| s.scanning).unwrap_or(false);
+    library = library.push(action_row("Music on this server", counts, btn("Check now", (app.can("rescan") && !scanning).then_some(Message::Rescan))));
+
+    let mut page = column![section("Privacy", privacy.into()), section("Playback", playback.into()), section("Windows app", windows.into())].spacing(24);
+    if app.can("share") || app.can("members") {
+        let now = volvix_core::userdata::now();
+        let mut shares = Column::new().spacing(0);
+        match &app.shares {
+            Some(list) if !list.is_empty() => {
+                for s in list {
+                    let count = format!("{} · {} song{} · by {} · {}", s.kind, s.count, if s.count == 1 { "" } else { "s" }, s.by, s.time_left(now));
+                    shares = shares.push(
+                        container(
+                            row![
+                                column![text(s.name.clone()).size(15), ui::dim(count, 13)].spacing(2).width(Length::Fill),
+                                button(row![ic(icon::LINK, 13), text("Copy link").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press(Message::ShareCopy(s.path.clone())),
+                                button(text("Cancel").size(13)).padding([6, 14]).style(ui::flat).on_press(Message::ShareCancel(s.token.clone())),
+                            ]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                        )
+                        .padding([8, 4]),
+                    );
+                }
+            }
+            Some(_) => shares = shares.push(ui::dim("No links are open. Share an album or playlist from its ⋯ menu.", 13)),
+            None => shares = shares.push(ui::dim("Loading…", 13)),
+        }
+        page = page.push(column![ui::title("Share links", 22), ui::dim("Open links, newest first. Cancelling one stops it working straight away.", 13), container(shares).padding([6, 0])].spacing(6));
+    }
+    page = page.push(section("Downloads", downloads.into())).push(section("Library", library.into()));
+    page = page.push(section("Server", column![action_row("Connected to", server_line, btn("Switch server", Some(Message::SwitchServer)))].into()));
+    page.max_width(820).into()
+}
+
+/// Pick the server's music folder: the folders in the one you're in, and "Use this folder".
+fn folder_dialog<'a>(browse: &'a Option<volvix_core::admin::Browse>, error: &'a Option<String>) -> El<'a> {
+    let mut c = column![ui::title("Music folder", 22), ui::dim("Choose the folder on the server where your music is.", 13)].spacing(8);
+    match browse {
+        None => c = c.push(ui::dim("Loading…", 13)),
+        Some(b) => {
+            if b.denied {
+                c = c.push(container(text("Volvix isn't allowed to read this folder. The user the server runs as needs read access to it.").size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+            }
+            if b.missing {
+                c = c.push(ui::dim("That folder doesn't exist on the server, so this is the closest one that does.", 12));
+            }
+            if b.docker {
+                c = c.push(ui::dim("Volvix is running in Docker, so it only sees folders you mounted into the container.", 12));
+            }
+            c = c.push(row![ic(icon::LIBRARY, 14), text(b.path.clone()).size(13)].spacing(8).align_y(Alignment::Center));
+            c = c.push(ui::dim(if b.songs_here > 0 { format!("{} song{} directly in this folder", b.songs_here, if b.songs_here == 1 { "" } else { "s" }) } else { "No songs directly in this folder (subfolders count too)".to_string() }, 12));
+            let mut list = Column::new().spacing(2);
+            if let Some(p) = &b.parent {
+                list = list.push(button(row![ic(icon::BACK, 13), text("Up one level").size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([8, 10]).style(ui::flat).on_press(Message::BrowseTo(p.clone())));
+            }
+            for d in &b.dirs {
+                list = list.push(button(row![ic(icon::LIBRARY, 13), text(d.name.clone()).size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([8, 10]).style(ui::flat).on_press(Message::BrowseTo(d.path.clone())));
+            }
+            if b.dirs.is_empty() {
+                list = list.push(ui::dim("No folders in here.", 12));
+            }
+            c = c.push(scrollable(list).style(ui::scroller).height(Length::Fixed(260.0)));
+        }
+    }
+    if let Some(e) = error {
+        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+    }
+    c.push(
+        row![
+            horizontal_space(),
+            button(text("Cancel").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel),
+            button(text("Use this folder").size(14)).padding([8, 18]).style(ui::primary).on_press_maybe(browse.as_ref().map(|_| Message::ChooseFolder)),
+        ]
+        .spacing(10),
+    )
+    .into()
 }
 
 /* ---------- dialogs ---------- */
@@ -1014,6 +1100,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             c.push(buttons("Save", !name.trim().is_empty())).into()
         }
         Dialog::PlayOn => play_on(app),
+        Dialog::Folder { browse, error } => folder_dialog(browse, error),
         Dialog::Manage { id, password, error, confirm_remove } => manage_dialog(app, id, password, error, *confirm_remove),
         Dialog::AddCast { host, error, busy } => {
             let mut c = column![

@@ -185,6 +185,8 @@ pub enum Dialog {
     PartyInvite { invite: Vec<String> },
     /// an admin's controls for one member: explicit songs, what they may do, a new password, remove
     Manage { id: String, password: String, error: Option<String>, confirm_remove: bool },
+    /// pick the server's music folder
+    Folder { browse: Option<volvix_core::admin::Browse>, error: Option<String> },
 }
 
 /// Playing on a TV or speaker: the app keeps the queue and the clock but stays silent, and tells the TV
@@ -344,6 +346,9 @@ pub enum Message {
     AccountMenu(bool),
     SetResume(bool),
     SetSleep(String),
+    SetStreamQuality(String),
+    SetDownloadQuality(String),
+    SetDataSaver(bool),
     /// a text box on the Profile or Members tab: 0 your name, 1 current password, 2 new password, 3 member name, 4 member password
     ProfileField(u8, String),
     SaveName,
@@ -351,6 +356,19 @@ pub enum Message {
     AddMember,
     MembersLoaded(Result<Vec<volvix_core::members::Member>, Error>),
     RewindYear(i32),
+    FolderLoaded(Result<volvix_core::admin::LibraryFolder, Error>),
+    SharesLoaded(Result<Vec<volvix_core::admin::Share>, Error>),
+    Rescan,
+    RescanDone(Result<(), Error>),
+    /// the music folder picker: open it, go into a folder, use this folder
+    PickFolder,
+    BrowseTo(String),
+    Browsed(Result<volvix_core::admin::Browse, Error>),
+    ChooseFolder,
+    FolderSaved(Result<(), Error>),
+    ShareCopy(String),
+    ShareCancel(String),
+    ShareCancelled(Result<(), Error>),
     /// the Manage window: open it for a member, switch one of its options, set a password, remove the member
     ManageMember(String),
     /// "hideExplicit" or one permission (request, rescan, parties, members, settings, share)
@@ -491,6 +509,9 @@ pub struct App {
     pub new_member_pw: String,
     pub member_error: Option<String>,
     pub rewind_year: Option<i32>,
+    /// Settings → Library and Share links (loaded when Settings opens)
+    pub folder: Option<volvix_core::admin::LibraryFolder>,
+    pub shares: Option<Vec<volvix_core::admin::Share>>,
 }
 
 fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> impl std::future::Future<Output = T> {
@@ -599,6 +620,8 @@ impl App {
             new_member_pw: String::new(),
             member_error: None,
             rewind_year: None,
+            folder: None,
+            shares: None,
         };
         app.apply_volume();
         let mut tasks = vec![window::get_oldest().map(Message::WindowReady)];
@@ -725,7 +748,14 @@ impl App {
                 }
                 Page::Notifications => tasks.push(Task::perform(blocking(move || c.notifications()), Message::NotesLoaded)),
                 Page::GetMusic => tasks.push(Task::perform(blocking(move || c.requests()), Message::RequestsLoaded)),
-                Page::Settings => tasks.push(Task::perform(blocking(move || c.status()), Message::ServerStatus)),
+                Page::Settings => {
+                    let (c2, c3) = (c.clone(), c.clone());
+                    tasks.push(Task::perform(blocking(move || c3.shares()), Message::SharesLoaded));
+                    if self.can("settings") {
+                        tasks.push(Task::perform(blocking(move || c2.library_folder()), Message::FolderLoaded));
+                    }
+                    tasks.push(Task::perform(blocking(move || c.status()), Message::ServerStatus));
+                }
                 Page::Members => tasks.push(Task::perform(blocking(move || c.members()), Message::MembersLoaded)),
                 Page::Profile => self.profile_name = None,
                 _ => {}
@@ -821,6 +851,11 @@ impl App {
     }
 
     /// Whether this account may start listening parties (admins always).
+    /// Is this person allowed to do `what` (admins can do everything)?
+    pub fn can(&self, what: &str) -> bool {
+        self.me.as_ref().map(|m| m.user.admin || m.user.perms.iter().any(|p| p == what)).unwrap_or(false)
+    }
+
     fn may_party(&self) -> bool {
         self.me.as_ref().map(|m| m.user.admin || m.user.perms.iter().any(|p| p == "parties")).unwrap_or(false)
     }
@@ -876,7 +911,7 @@ impl App {
             return Task::none();
         }
         self.player.set_gain(self.gain_for(&id));
-        self.player.load(&c, &id, local, play);
+        self.player.load(&self.stream_client(&c), &id, local, play);
         self.status.track = Some(id.clone());
         self.status.position = Duration::ZERO;
         self.status.duration = None;
@@ -957,6 +992,25 @@ impl App {
         self.pump_downloads()
     }
 
+    /// The client with the streaming quality chosen in Settings (the data saver drops to "low" on a metered connection).
+    fn stream_client(&self, c: &Client) -> Client {
+        if !self.me.as_ref().map(|m| m.transcoding).unwrap_or(false) {
+            return c.clone();
+        }
+        if self.settings.data_saver && system::on_metered_connection() {
+            return c.with_quality("low");
+        }
+        c.with_quality(&self.settings.stream_quality)
+    }
+
+    /// The client for downloads: their own quality, or the streaming one.
+    fn download_client(&self, c: &Client) -> Client {
+        if !self.me.as_ref().map(|m| m.transcoding).unwrap_or(false) || self.settings.download_quality == "stream" {
+            return self.stream_client(c);
+        }
+        c.with_quality(&self.settings.download_quality)
+    }
+
     fn pump_downloads(&mut self) -> Task<Message> {
         if self.dl_active.is_some() || self.offline {
             return Task::none();
@@ -965,7 +1019,7 @@ impl App {
         if !self.settings.download_metered && !self.dl_queue.is_empty() && system::on_metered_connection() {
             return Task::none();
         }
-        let Some(c) = self.client.clone() else { return Task::none() };
+        let Some(c) = self.client.clone().map(|c| self.download_client(&c)) else { return Task::none() };
         while let Some(id) = self.dl_queue.pop_front() {
             if self.downloaded.contains(&id) || self.dl_active.as_deref() == Some(&id) {
                 continue;
@@ -1774,6 +1828,78 @@ impl App {
                 }
             }
             Message::RewindYear(y) => self.rewind_year = Some(y),
+            Message::FolderLoaded(r) => self.folder = r.ok(),
+            Message::SharesLoaded(r) => self.shares = Some(r.unwrap_or_default()),
+            Message::Rescan => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                self.say("Checking the music folder…");
+                return Task::perform(blocking(move || c.rescan()), Message::RescanDone);
+            }
+            Message::RescanDone(r) => {
+                match r {
+                    Ok(()) => self.say("Checking the music folder"),
+                    Err(e) => self.say(e.to_string()),
+                }
+                if let Some(c) = self.client.clone() {
+                    return Task::perform(blocking(move || c.status()), Message::ServerStatus);
+                }
+            }
+            Message::PickFolder => {
+                self.dialog = Some(Dialog::Folder { browse: None, error: None });
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(blocking(move || c.browse_folders("")), Message::Browsed);
+            }
+            Message::BrowseTo(path) => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(blocking(move || c.browse_folders(&path)), Message::Browsed);
+            }
+            Message::Browsed(r) => {
+                if let Some(Dialog::Folder { browse, error }) = &mut self.dialog {
+                    match r {
+                        Ok(b) => {
+                            *browse = Some(b);
+                            *error = None;
+                        }
+                        Err(e) => *error = Some(e.to_string()),
+                    }
+                }
+            }
+            Message::ChooseFolder => {
+                let (Some(c), Some(Dialog::Folder { browse: Some(b), .. })) = (self.client.clone(), self.dialog.clone()) else { return Task::none() };
+                return Task::perform(blocking(move || c.set_library_folder(&b.path)), Message::FolderSaved);
+            }
+            Message::FolderSaved(r) => match r {
+                Ok(()) => {
+                    self.dialog = None;
+                    self.say("Music folder changed");
+                    if let Some(c) = self.client.clone() {
+                        return Task::perform(blocking(move || c.library_folder()), Message::FolderLoaded);
+                    }
+                }
+                Err(e) => {
+                    if let Some(Dialog::Folder { error, .. }) = &mut self.dialog {
+                        *error = Some(e.to_string());
+                    }
+                }
+            },
+            Message::ShareCopy(path) => {
+                let base = self.client.as_ref().map(|c| c.base().to_string()).unwrap_or_default();
+                self.say("Link copied");
+                return iced::clipboard::write(format!("{base}{path}"));
+            }
+            Message::ShareCancel(token) => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(blocking(move || c.cancel_share(&token)), Message::ShareCancelled);
+            }
+            Message::ShareCancelled(r) => {
+                match r {
+                    Ok(()) => self.say("Link cancelled"),
+                    Err(e) => self.say(e.to_string()),
+                }
+                if let Some(c) = self.client.clone() {
+                    return Task::perform(blocking(move || c.shares()), Message::SharesLoaded);
+                }
+            }
             Message::ManageMember(id) => self.dialog = Some(Dialog::Manage { id, password: String::new(), error: None, confirm_remove: false }),
             Message::ManageToggle(key) => {
                 let (Some(c), Some(Dialog::Manage { id, .. })) = (self.client.clone(), self.dialog.clone()) else { return Task::none() };
@@ -1861,6 +1987,15 @@ impl App {
                 }
                 Err(e) => self.member_error = Some(e.to_string()),
             },
+            Message::SetStreamQuality(q) => {
+                self.settings.set_text("streamQuality", &q);
+                self.say(if q == "original" { "Streaming in original quality" } else { "Streaming smaller files from the next song" });
+            }
+            Message::SetDownloadQuality(q) => {
+                self.settings.set_text("downloadQuality", &q);
+                self.say("New downloads use this quality");
+            }
+            Message::SetDataSaver(v) => self.settings.set("dataSaver", v),
             Message::SetResume(v) => return self.edit(vec![Edit::Setting("resumeLast".into(), json!(v))]),
             Message::SetSleep(choice) => {
                 self.sleep_song = choice == "song";
@@ -2007,7 +2142,7 @@ impl App {
                 }
                 self.edit(vec![Edit::DeletePlaylist(id)])
             }
-            Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } => Task::none(),
+            Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } | Dialog::Folder { .. } => Task::none(),
             Dialog::AddCast { host, busy, .. } => {
                 let Some(c) = self.client.clone() else { return Task::none() };
                 if busy || host.trim().is_empty() {
@@ -2156,8 +2291,19 @@ impl App {
             self.sleep_song = false;
             self.sleep_choice = "0".into();
             self.say("Sleep timer: paused");
-        } else if ended && self.queue.next(true).is_some() {
-            tasks.push(self.start_current(true));
+        } else if ended {
+            if self.queue.next(true).is_some() {
+                tasks.push(self.start_current(true));
+            } else {
+                // the last song finished: the player goes back to "Nothing playing" (like the website)
+                self.player.stop();
+                self.queue.clear();
+                self.status.track = None;
+                self.status.playing = false;
+                self.status.position = Duration::ZERO;
+                self.status.duration = None;
+                let _ = std::fs::remove_file(self.dir.join("resume.json"));
+            }
         }
         tasks.push(self.resume_last());
         // keep the sung line in view

@@ -11,6 +11,7 @@
 //! Everything is blocking and thread-safe to call from worker threads; no async runtime needed,
 //! which keeps it simple to call from Swift later (UniFFI).
 
+pub mod admin;
 pub mod cast;
 pub mod client;
 pub mod covers;

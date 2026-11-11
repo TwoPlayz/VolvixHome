@@ -15,6 +15,12 @@ pub struct Settings {
     pub auto_update: bool,
     /// download songs even on a metered connection (off: they wait for an ordinary one)
     pub download_metered: bool,
+    /// "original", "high", "normal" or "low" (needs ffmpeg on the server)
+    pub stream_quality: String,
+    /// the same, or "stream" = as streaming
+    pub download_quality: String,
+    /// stream "low" while the connection is metered
+    pub data_saver: bool,
     /// the first-run default for "start with Windows" has been applied (so turning it off sticks)
     autostart_seen: bool,
 }
@@ -35,6 +41,9 @@ impl Settings {
             close_to_tray: flag("closeToTray", true),
             auto_update: flag("autoUpdate", true),
             download_metered: flag("downloadMetered", false),
+            stream_quality: v.get("streamQuality").and_then(|x| x.as_str()).unwrap_or("original").to_string(),
+            download_quality: v.get("downloadQuality").and_then(|x| x.as_str()).unwrap_or("stream").to_string(),
+            data_saver: flag("dataSaver", false),
             autostart_seen: flag("autostartSeen", false),
         }
     }
@@ -42,7 +51,7 @@ impl Settings {
     fn save(&self) {
         let body = json!({
             "server": self.server, "startWithWindows": self.start_with_windows, "closeToTray": self.close_to_tray,
-            "autoUpdate": self.auto_update, "downloadMetered": self.download_metered, "autostartSeen": self.autostart_seen
+            "autoUpdate": self.auto_update, "downloadMetered": self.download_metered, "streamQuality": self.stream_quality, "downloadQuality": self.download_quality, "dataSaver": self.data_saver, "autostartSeen": self.autostart_seen
         });
         let _ = std::fs::write(path(), serde_json::to_string_pretty(&body).unwrap_or_default());
     }
@@ -62,6 +71,16 @@ impl Settings {
             "closeToTray" => self.close_to_tray = value,
             "autoUpdate" => self.auto_update = value,
             "downloadMetered" => self.download_metered = value,
+            "dataSaver" => self.data_saver = value,
+            _ => return,
+        }
+        self.save();
+    }
+
+    pub fn set_text(&mut self, key: &str, value: &str) {
+        match key {
+            "streamQuality" => self.stream_quality = value.to_string(),
+            "downloadQuality" => self.download_quality = value.to_string(),
             _ => return,
         }
         self.save();

@@ -59,6 +59,8 @@ pub mod icon {
     pub const CLOSE: char = '\u{E711}';
     pub const PERSON: char = '\u{E77B}';
     pub const HISTORY: char = '\u{E81C}';
+    pub const LINK: char = '\u{E71B}';
+    pub const BACK: char = '\u{E72B}';
     pub const SIGN_OUT: char = '\u{E7E8}';
 }
 
@@ -257,7 +259,8 @@ pub fn splash<'a, M: 'a>() -> Element<'a, M> {
         .center_x(Length::Fill)
         .center_y(Length::Fill)
         .padding(iced::Padding { top: 144.0 + (1.0 - word) * 12.0, ..Default::default() });
-    container(iced::widget::stack![mark, name]).width(Length::Fill).height(Length::Fill).style(|_: &Theme| container::Style { background: Some(SURFACE.into()), ..Default::default() }).into()
+    // no panel colour of its own: it is the window's frame colour, the same as the title bar above it
+    container(iced::widget::stack![mark, name]).width(Length::Fill).height(Length::Fill).into()
 }
 
 /// The website's segmented control: a few choices in one pill, the chosen one raised.
