@@ -1,7 +1,7 @@
 //! Playlists, mixes, lyrics, Get more music, household, notifications, downloads, settings and the
 //! dialogs.
 use iced::widget::{button, checkbox, column, container, horizontal_space, image, row, scrollable, text, text_input, toggler, Column, Row};
-use iced::{Alignment, Length};
+use iced::{Alignment, Color, Length};
 use volvix_core::mixes::Mix;
 use volvix_core::playlists::Kind;
 use volvix_core::{FoundItem, Track};
@@ -32,7 +32,7 @@ pub fn playlist_page<'a>(app: &'a App, id: &str) -> El<'a> {
     let mut extra = vec![download_button(app, "playlist", id, &ids)];
     // like the website: who can edit, download, and one ⋯ button that has the rest (edit, picture, queue, share, delete)
     if p.can_manage() {
-        extra.insert(0, round_icon(icon::PEOPLE, p.is_shared(), if p.is_shared() { "Who can edit" } else { "Make collaborative" }, Some(Message::CollabOpen(p.id.clone()))));
+        extra.insert(0, round_icon(icon::PEOPLE, p.is_shared(), "Who can edit", Some(Message::CollabOpen(p.id.clone()))));
         extra.push(round_icon(icon::MORE, false, "More", Some(Message::PopMenuOpen(crate::MenuKind::Playlist(p.id.clone())))));
     }
     if let Kind::Shared { mine: false } = p.kind {
@@ -92,27 +92,24 @@ fn add_songs<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView) -> El<'
     .into()
 }
 
+/// A "Made for you" card: red fading to the mix's own colour, its icon and its name in the middle (as the website draws it).
 pub fn mix_card(m: &Mix) -> El<'_> {
-    let art: El = container(column![ic(mix_icon(m.icon), 30), text(clip(&m.title, 18)).size(16).font(ui::FONT_BOLD)].spacing(10).align_x(Alignment::Center))
-        .width(164)
-        .height(164)
-        .center_x(164)
-        .center_y(164)
-        .style(ui::mix_tile(&m.id))
-        .into();
+    let art: El = container(
+        column![
+            ui::wi(m.icon, 30.0, Color::WHITE),
+            text(m.title.clone()).size(16).font(ui::FONT_BOLD).color(Color::WHITE).align_x(iced::alignment::Horizontal::Center).width(Length::Fill).wrapping(text::Wrapping::Word),
+        ]
+        .spacing(10)
+        .align_x(Alignment::Center),
+    )
+    .width(164)
+    .height(164)
+    .padding(12)
+    .center_x(164)
+    .center_y(164)
+    .style(ui::mix_tile(&m.id))
+    .into();
     card(art, m.title.clone(), m.sub.clone(), Message::Go(Page::Mix(m.id.clone())))
-}
-
-fn mix_icon(name: &str) -> char {
-    match name {
-        "repeat" => icon::REPEAT_ALL,
-        "heart" => icon::HEART_FILL,
-        "history" => '\u{E81C}',
-        "user" => icon::PEOPLE,
-        "plus" => icon::ADD,
-        "search" => icon::SEARCH,
-        _ => '\u{E8D6}',
-    }
 }
 
 pub fn mix_page<'a>(app: &'a App, id: &str) -> El<'a> {
@@ -127,7 +124,7 @@ pub fn mix_page<'a>(app: &'a App, id: &str) -> El<'a> {
         header_buttons(Message::PlayTracks(m.ids.clone(), 0, m.title.clone()), Message::ShuffleTracks(m.ids.clone(), m.title.clone()), vec![round_icon(icon::PLAYLIST, false, "Save as a playlist", Some(Message::NewPlaylist(m.ids.clone())))]),
     ]
     .spacing(6);
-    let art = container(ic(mix_icon(m.icon), 64)).width(220).height(220).center_x(220).center_y(220).style(ui::mix_tile(&m.id));
+    let art = container(ui::wi(m.icon, 64.0, Color::WHITE)).width(220).height(220).center_x(220).center_y(220).style(ui::mix_tile(&m.id));
     column![row![art, info].spacing(28).align_y(Alignment::End), track_list(app, &tracks, &m.title, Numbers::Place, true, Rows::Plain)].spacing(28).into()
 }
 
@@ -575,30 +572,71 @@ fn ago(at: u64) -> String {
     }
 }
 
+/// Notifications, like the website's: cards with a round icon, the text and how long ago, and what you can do about it.
 pub fn notifications(app: &App) -> El<'_> {
-    let mut c = column![ui::title("Notifications", 32)].spacing(16);
+    let head = row![ui::title("Notifications", 32), horizontal_space(), ui::btn_sm("Mark all as read", ui::Btn::Secondary).on_press(Message::MarkAllRead)].align_y(Alignment::End);
     if app.notes.items.is_empty() {
-        return c.push(ui::dim("Nothing yet. Playlist invites and music you asked for show up here.", 15)).into();
+        return column![head, crate::views::empty_state("bell", "Nothing new", "Playlist invites, party invites and music you requested show up here.", None)].spacing(20).into();
     }
-    for n in &app.notes.items {
-        let mut line = row![
-            container(ic(if n.kind.contains("invite") { icon::PEOPLE } else if n.kind.contains("request") { icon::GLOBE } else { icon::BELL }, 18)).width(28),
-            column![text(n.text.clone()).size(15).color(if n.read { ui::TEXT_2() } else { ui::TEXT() }), ui::dim(ago(n.at), 12)].spacing(2).width(Length::Fill),
-        ]
-        .spacing(12)
-        .align_y(Alignment::Center);
-        if n.kind == "playlist_invite" && n.done.is_none() {
-            if let Some(pl) = n.data["playlistId"].as_str() {
-                line = line
-                    .push(button(text("Accept").size(13)).padding([6, 16]).style(ui::primary).on_press(Message::SharedOp(pl.to_string(), serde_json::json!({ "op": "accept" }))))
-                    .push(button(text("Decline").size(13)).padding([6, 16]).style(ui::secondary).on_press(Message::SharedOp(pl.to_string(), serde_json::json!({ "op": "decline" }))));
-            }
-        } else if let Some(d) = &n.done {
-            line = line.push(ui::dim(d.clone(), 13));
+    let state = |label: &'static str, tick: bool| -> El<'_> {
+        let mut r = Row::new().spacing(6).align_y(Alignment::Center);
+        if tick {
+            r = r.push(ui::wi("check", 14.0, ui::TEXT_2()));
         }
-        c = c.push(container(line).padding([10, 12]));
+        r.push(text(label).size(13).font(ui::FONT_BOLD).color(ui::TEXT_2())).into()
+    };
+    let mut list = Column::new().spacing(6);
+    for n in &app.notes.items {
+        let icon_name = match n.kind.as_str() {
+            "playlist_invite" => "users",
+            "playlist_joined" => "check",
+            "party_invite" => "party",
+            "request_ready" => "download",
+            _ => "bell",
+        };
+        let pl = n.data["playlistId"].as_str().map(String::from);
+        let mut actions = Row::new().spacing(6).align_y(Alignment::Center);
+        match (n.kind.as_str(), n.done.as_deref()) {
+            ("playlist_invite", None) => {
+                if let Some(pl) = pl {
+                    actions = actions
+                        .push(ui::btn_sm("Accept", ui::Btn::Primary).on_press(Message::SharedOp(pl.clone(), serde_json::json!({ "op": "accept" }))))
+                        .push(ui::btn_sm("Decline", ui::Btn::Secondary).on_press(Message::SharedOp(pl, serde_json::json!({ "op": "decline" }))));
+                }
+            }
+            ("playlist_invite", Some(d)) => actions = actions.push(if d == "accepted" { state("Joined", true) } else { state("Declined", false) }),
+            ("playlist_joined", _) => {
+                if let Some(pl) = pl {
+                    actions = actions.push(ui::btn_sm("Open", ui::Btn::Secondary).on_press(Message::Go(Page::Playlist(pl))));
+                }
+            }
+            ("party_invite", Some(d)) => actions = actions.push(if d == "joined" { state("Joined", true) } else { state("Over", false) }),
+            ("request_ready", _) => {
+                if let Some(id) = n.data["albumId"].as_str() {
+                    let page = if n.data["kind"].as_str() == Some("artist") { Page::Artist(id.to_string()) } else { Page::Album(id.to_string()) };
+                    actions = actions.push(ui::btn_sm("Open", ui::Btn::Secondary).on_press(Message::Go(page)));
+                }
+            }
+            _ => {}
+        }
+        let unread = !n.read;
+        let dot: El = container(iced::widget::Space::new(6, 6)).style(move |_| container::Style { background: unread.then(|| ui::ACCENT().into()), border: iced::border::rounded(3.0), ..Default::default() }).into();
+        list = list.push(
+            container(
+                row![
+                    dot,
+                    container(ui::wi(icon_name, 18.0, ui::TEXT_2())).width(36).height(36).center_x(36).center_y(36).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(18.0), ..Default::default() }),
+                    column![text(n.text.clone()).size(15), text(ago(n.at)).size(12).color(ui::TEXT_3())].spacing(2).width(Length::Fill),
+                    actions,
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            )
+            .padding(iced::Padding { top: 12.0, bottom: 12.0, left: 4.0, right: 14.0 })
+            .style(|_| container::Style { background: Some(ui::SURFACE_2().into()), border: iced::Border { radius: 12.0.into(), width: 1.0, color: ui::BORDER() }, ..Default::default() }),
+        );
     }
-    c.into()
+    column![head, container(list).max_width(760)].spacing(20).into()
 }
 
 /* ---------- settings ---------- */
@@ -1336,7 +1374,8 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 c = c.push(ui::dim("No one else is in your household yet. An admin can add people under Account → Members.", 14));
                 c.push(row![horizontal_space(), ui::btn("Done", ui::Btn::Primary).on_press(Message::DialogCancel)]).into()
             } else {
-                c = c.push(ui::dim("People you pick get an invite. Once they accept they can add, remove and reorder songs.", 14));
+                let shared = p.as_ref().map(|p| p.is_shared()).unwrap_or(false);
+                c = c.push(ui::dim(if shared { "People you pick get an invite. Once they accept they can add, remove and reorder songs." } else { "Tick someone to make this a collaborative playlist. They get an invite, and once they accept they can add, remove and reorder songs." }, 14));
                 for (uid, uname) in others {
                     let state = match &p {
                         Some(p) if p.collaborators.contains(&uid) => "Can edit",
@@ -1351,7 +1390,14 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                             .align_y(Alignment::Center),
                     );
                 }
-                c.push(buttons("Save", true)).into()
+                let shared = p.as_ref().map(|p| p.is_shared()).unwrap_or(false);
+                let mut foot = Row::new().spacing(10).align_y(Alignment::Center);
+                if shared {
+                    // one place for all of it: taking everyone off again is here too
+                    foot = foot.push(ui::tip(button(text("Stop sharing").size(14).color(ui::ACCENT())).padding([10.9, 4.0]).style(ui::link).on_press(Message::Unshare(id.clone())), "It becomes just yours again. Everyone you invited loses access."));
+                }
+                foot = foot.push(horizontal_space()).push(ui::btn("Cancel", ui::Btn::Secondary).on_press(Message::DialogCancel)).push(ui::btn("Save", ui::Btn::Primary).on_press(Message::DialogOk));
+                c.push(foot).into()
             }
         }
         Dialog::Folder { browse, error } => folder_dialog(browse, error),

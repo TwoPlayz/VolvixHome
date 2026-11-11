@@ -73,7 +73,8 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                 ids.extend(app.playlists().iter().flat_map(|p| first_albums(&p.tracks)));
             }
             Page::Library => match app.lib_tab {
-                LibTab::Albums => ids.extend(lib.albums().iter().map(|a| a.id.clone())),
+                LibTab::Albums | LibTab::Songs => ids.extend(lib.albums().iter().map(|a| a.id.clone())),
+                LibTab::Browse => {}
                 LibTab::Artists => ids.extend(lib.artists().iter().filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone())),
                 LibTab::Playlists => ids.extend(app.playlists().iter().flat_map(|p| first_albums(&p.tracks))),
                 LibTab::Downloaded => {
@@ -119,6 +120,7 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
             }
             Page::Notifications | Page::Profile | Page::Members | Page::Settings => {}
             Page::GetMusic => {}
+            Page::Browse(..) => ids.extend(lib.albums().iter().map(|a| a.id.clone())),
             Page::Rewind => {
                 // the top songs' covers
                 if let Some(y) = pages::rewind_year(app) {
@@ -528,6 +530,17 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                 items.push(item("user", "Go to artist", Message::Go(Page::Artist(t.artist.clone())), false));
             }
         }
+        crate::MenuKind::Album(id) => {
+            if let Some(a) = app.lib.album(id) {
+                let ids: Vec<String> = app.lib.album_tracks(id).iter().map(|t| t.id.clone()).collect();
+                items.push(item("queue", "Add to queue", Message::QueueMany(ids.clone()), false));
+                items.push(item("queue", "Play next", Message::PlayNextMany(ids.clone()), false));
+                if app.can("share") {
+                    items.push(item("send", "Share link…", Message::ShareOpen("album".into(), a.title.clone(), ids), false));
+                }
+                items.push(item("user", "Go to artist", Message::Go(Page::Artist(a.artist.clone())), false));
+            }
+        }
         crate::MenuKind::Playlist(id) => {
             if let Some(p) = app.playlist(id) {
                 if p.can_manage() {
@@ -538,7 +551,7 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                     }
                 }
                 if p.can_manage() {
-                    items.push(item("users", if p.is_shared() { "Who can edit" } else { "Make collaborative" }, Message::CollabOpen(p.id.clone()), false));
+                    items.push(item("users", "Who can edit", Message::CollabOpen(p.id.clone()), false));
                 }
                 if !p.tracks.is_empty() {
                     items.push(item("queue", "Add to queue", Message::QueueMany(p.tracks.clone()), false));
@@ -818,6 +831,7 @@ fn page(app: &App) -> El<'_> {
         Page::Notifications => pages::notifications(app),
         Page::Profile | Page::Members | Page::Settings => pages::account(app),
         Page::Rewind => pages::rewind(app),
+        Page::Browse(kind, value) => browse_page(app, kind, value),
     }
 }
 
@@ -859,28 +873,29 @@ fn home_quick(app: &App) -> Vec<&Album> {
     }
 }
 
-fn home(app: &App) -> El<'_> {
+fn home<'a>(app: &'a App) -> El<'a> {
     let lib = &app.lib;
     if lib.is_empty() {
         return column![ui::title(greeting(), 32), ui::dim("No music yet. Music added to the server shows up here on its own.", 15)].spacing(12).into();
     }
-    // quick tiles: jump back in
-    let tiles: Vec<El> = home_quick(app)
-        .into_iter()
-        .map(|a| {
-            button(row![cover_of(app, Some(a), 56.0), text(clip(&a.title, 26)).size(15).color(ui::TEXT()), horizontal_space()].spacing(14).align_y(Alignment::Center))
-                .width(300)
-                .padding(0)
-                .style(|t, s| {
-                    let mut st = ui::flat(t, s);
-                    st.background = Some(if matches!(s, button::Status::Hovered) { ui::SURFACE_3() } else { ui::SURFACE_2() }.into());
-                    st.border = iced::border::rounded(6.0);
-                    st
-                })
-                .on_press(Message::Go(Page::Album(a.id.clone())))
-                .into()
-        })
-        .collect();
+    // quick tiles: jump back in (four albums, then your first two playlists), like the website's
+    let quick = |art: El<'a>, title: &str, to: Message| -> El<'a> {
+        button(row![art, text(clip(title, 26)).size(15).color(ui::TEXT()), horizontal_space()].spacing(14).align_y(Alignment::Center))
+            .width(300)
+            .padding(0)
+            .style(|t, s| {
+                let mut st = ui::flat(t, s);
+                st.background = Some(if matches!(s, button::Status::Hovered | button::Status::Pressed) { ui::SURFACE_3() } else { ui::SURFACE_2() }.into());
+                st.border = iced::border::rounded(6.0);
+                st
+            })
+            .on_press(to)
+            .into()
+    };
+    let mut tiles: Vec<El> = home_quick(app).into_iter().take(4).map(|a| quick(cover_of(app, Some(a), 56.0), &a.title, Message::Go(Page::Album(a.id.clone())))).collect();
+    for p in app.playlists().iter().filter(|p| !matches!(p.kind, Kind::Household { .. })).take(2) {
+        tiles.push(quick(playlist_art(app, p, 56.0), &p.name, Message::Go(Page::Playlist(p.id.clone()))));
+    }
     let mut c = column![ui::title(greeting(), 32), Row::with_children(tiles).spacing(10).wrap()].spacing(24);
     if !app.mixes.is_empty() {
         let cards: Vec<El> = app.mixes.iter().map(|m| pages::mix_card(m)).collect();
@@ -908,43 +923,203 @@ fn home(app: &App) -> El<'_> {
     c.into()
 }
 
+/// Albums in the order the Library's Sort box says (the website's four ways).
+fn sorted_albums(app: &App) -> Vec<&Album> {
+    let mut list: Vec<&Album> = app.lib.albums().iter().collect();
+    match app.lib_sort.as_str() {
+        "title" => list.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
+        "artist" => list.sort_by(|a, b| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()).then(a.year.unwrap_or(0).cmp(&b.year.unwrap_or(0)))),
+        "year" => list.sort_by(|a, b| b.year.unwrap_or(0).cmp(&a.year.unwrap_or(0))),
+        _ => list.sort_by(|a, b| b.added.cmp(&a.added)),
+    }
+    list
+}
+
+/// "Artist · 2024" under an album card.
+fn artist_year(a: &Album) -> String {
+    match a.year {
+        Some(y) => format!("{} · {y}", a.artist),
+        None => a.artist.clone(),
+    }
+}
+
+/// The albums of each genre, decade and label (from the files' tags), biggest first (decades newest first).
+fn browse_groups<'a>(app: &'a App, kind: &str) -> Vec<(String, Vec<&'a Album>)> {
+    let mut map: std::collections::BTreeMap<String, Vec<&Album>> = Default::default();
+    for a in app.lib.albums() {
+        if let Some(v) = browse_value(a, kind) {
+            map.entry(v).or_default().push(a);
+        }
+    }
+    let mut v: Vec<(String, Vec<&Album>)> = map.into_iter().collect();
+    if kind == "decade" {
+        v.sort_by(|a, b| b.0.cmp(&a.0));
+    } else {
+        v.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
+    }
+    v
+}
+
+fn browse_value(a: &Album, kind: &str) -> Option<String> {
+    match kind {
+        "genre" => a.genre.clone().filter(|g| !g.is_empty()),
+        "decade" => a.year.map(|y| format!("{}s", y / 10 * 10)),
+        _ => a.label.clone().filter(|l| !l.is_empty()),
+    }
+}
+
+/// Your Library, like the website's: Albums, Artists, Songs, Playlists and Browse (plus what's downloaded here).
 fn library(app: &App) -> El<'_> {
-    let tab = |label: &'static str, t: LibTab| button(text(label).size(14).wrapping(text::Wrapping::None)).padding([7, 16]).style(ui::chip(app.lib_tab == t)).on_press(Message::LibTab(t));
-    let head = column![ui::title("Library", 32), row![tab("Playlists", LibTab::Playlists), tab("Albums", LibTab::Albums), tab("Artists", LibTab::Artists), tab("Downloaded", LibTab::Downloaded)].spacing(8)].spacing(14);
+    let lib = &app.lib;
+    let (a, t) = (lib.albums().len(), lib.tracks().len());
+    let summary = format!("{a} album{} · {t} song{} · {} artists", if a == 1 { "" } else { "s" }, if t == 1 { "" } else { "s" }, lib.artists().len());
+    // tabs: words with a line under the chosen one, over a hairline
+    let tab = |label: &'static str, tb: LibTab| -> El<'_> {
+        let on = app.lib_tab == tb;
+        button(
+            column![
+                container(text(label).size(15).font(ui::FONT_BOLD).color(if on { ui::TEXT() } else { ui::TEXT_2() })).height(40).center_y(40),
+                container(Space::new(label.len() as f32 * 8.4, 2)).style(move |_| container::Style { background: on.then(|| ui::TEXT().into()), border: iced::border::rounded(2.0), ..Default::default() }),
+            ]
+            .align_x(Alignment::Center),
+        )
+        .padding(0)
+        .style(ui::link)
+        .on_press(Message::LibTab(tb))
+        .into()
+    };
+    let tabs = column![
+        row![tab("Albums", LibTab::Albums), tab("Artists", LibTab::Artists), tab("Songs", LibTab::Songs), tab("Playlists", LibTab::Playlists), tab("Browse", LibTab::Browse), tab("Downloaded", LibTab::Downloaded)].spacing(24),
+        container(Space::new(Length::Fill, 1)).style(|_| container::Style { background: Some(ui::BORDER().into()), ..Default::default() }),
+    ];
+    let mut page = column![column![ui::title("Your Library", 32), ui::dim(summary, 15)].spacing(8), ui::gap(20), tabs, ui::gap(18)];
+    if matches!(app.lib_tab, LibTab::Albums | LibTab::Songs) {
+        const SORTS: [(&str, &str); 4] = [("added", "Recently added"), ("title", "Title"), ("artist", "Artist"), ("year", "Release year")];
+        let names: Vec<&'static str> = SORTS.iter().map(|s| s.1).collect();
+        let chosen = SORTS.iter().find(|s| s.0 == app.lib_sort).map(|s| s.1);
+        page = page.push(
+            row![
+                horizontal_space(),
+                ui::dim("Sort", 13),
+                iced::widget::pick_list(names, chosen, |n: &'static str| Message::LibSort(SORTS.iter().find(|s| s.1 == n).map(|s| s.0).unwrap_or("added").to_string())).padding([6, 10]).text_size(13).style(ui::pick_style).menu_style(ui::pick_menu),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
+        page = page.push(ui::gap(22));
+    }
+    let nothing = lib.albums().is_empty();
     let body: El = match app.lib_tab {
-        LibTab::Albums => album_grid(app, app.lib.albums_by_title(), true),
         LibTab::Playlists => {
-            let new = card(
-                container(ic(icon::ADD, 40)).width(164).height(164).center_x(164).center_y(164).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(6.0), ..Default::default() }).into(),
-                "New playlist".into(),
-                "Make one".into(),
-                Message::NewPlaylist(vec![]),
-            );
-            let mut cards = vec![new];
-            cards.extend(app.playlists().iter().map(|p| playlist_card(app, p)));
-            Row::with_children(cards).spacing(4).wrap().into()
+            let pls = app.playlists();
+            if pls.is_empty() {
+                empty_state("music", "No playlists yet", "Make one with the + next to Playlists, or from any song's + button.", Some(ui::btn_icon("plus", "New playlist", ui::Btn::Primary, false).on_press(Message::NewPlaylist(vec![])).into()))
+            } else {
+                Row::with_children(pls.iter().map(|p| playlist_card(app, p)).collect::<Vec<El>>()).spacing(4).wrap().into()
+            }
+        }
+        LibTab::Downloaded => pages::downloaded(app),
+        _ if nothing => empty_state("music", "No music yet", "Music added to the server shows up here on its own.", None),
+        LibTab::Albums => Row::with_children(sorted_albums(app).into_iter().map(|a| album_card(app, a, artist_year(a))).collect::<Vec<El>>()).spacing(4).wrap().into(),
+        LibTab::Songs => {
+            let tracks: Vec<&Track> = sorted_albums(app).into_iter().flat_map(|a| lib.album_tracks(&a.id)).take(2000).collect();
+            track_list(app, &tracks, "Your Library", Numbers::Place, true, Rows::Plain)
+        }
+        LibTab::Browse => {
+            const PALETTE: [(u8, u8, u8); 8] = [(0xE5, 0x48, 0x4D), (0x5E, 0x54, 0x8E), (0x33, 0x5C, 0x67), (0xBC, 0x6C, 0x25), (0x3D, 0x5A, 0x80), (0x4A, 0x6C, 0x2F), (0x7A, 0x40, 0x69), (0x9E, 0x2A, 0x2B)];
+            let mut c = Column::new().spacing(28);
+            let mut any = false;
+            for (kind, title, most) in [("genre", "Genres", 40), ("decade", "Decades", 40), ("label", "Labels", 24)] {
+                let groups = browse_groups(app, kind);
+                if groups.is_empty() {
+                    continue;
+                }
+                let tiles: Vec<El> = groups
+                    .into_iter()
+                    .take(most)
+                    .enumerate()
+                    .map(|(i, (value, albums))| {
+                        let (r, g, b) = PALETTE[i % PALETTE.len()];
+                        let n = albums.len();
+                        button(
+                            container(column![text(value.clone()).size(18).font(ui::FONT_BOLD).color(Color::WHITE), iced::widget::vertical_space(), text(format!("{n} album{}", if n == 1 { "" } else { "s" })).size(12).color(Color { a: 0.85, ..Color::WHITE })])
+                                .width(180)
+                                .height(96)
+                                .padding(14)
+                                .style(move |_| container::Style { background: Some(Color::from_rgb8(r, g, b).into()), border: iced::border::rounded(12.0), ..Default::default() }),
+                        )
+                        .padding(0)
+                        .style(ui::link)
+                        .on_press(Message::Go(Page::Browse(kind.to_string(), value)))
+                        .into()
+                    })
+                    .collect();
+                c = c.push(section(title, Row::with_children(tiles).spacing(12).wrap().into()));
+                any = true;
+            }
+            if !any {
+                empty_state("library", "Nothing to browse yet", "Genres, years and labels come from your files' tags.", None)
+            } else {
+                c.into()
+            }
         }
         LibTab::Artists => {
-            let rows: Vec<El> = app
-                .lib
-                .artists()
-                .iter()
-                .map(|n| {
-                    let count = app.lib.albums_by(n).len();
-                    let sub = if count == 0 { "Appears on albums".to_string() } else { format!("{count} album{}", if count == 1 { "" } else { "s" }) };
-                    button(row![cover_of(app, app.lib.artist_cover_album(n), 48.0), column![text(n.as_str()).size(15).color(ui::TEXT()), ui::dim(sub, 13)].spacing(2)].spacing(14).align_y(Alignment::Center))
+            // the ones you follow (Follow is on each artist's page), or everyone on the server
+            let chip = |label: &'static str, all: bool| button(text(label).size(14)).padding([7, 16]).style(ui::chip(app.lib_all_artists == all)).on_press(Message::LibScope(all));
+            let chips = row![chip("Following", false), chip("All artists", true)].spacing(8);
+            let names: Vec<&String> = lib.artists().iter().filter(|n| app.lib_all_artists || app.follows(n)).collect();
+            if names.is_empty() {
+                column![chips, empty_state("user", "You're not following any artists yet", "Open an artist and press Follow. They'll be here.", Some(ui::btn("Browse all artists", ui::Btn::Secondary).on_press(Message::LibScope(true)).into()))].spacing(24).into()
+            } else {
+                let rows: Vec<El> = names
+                    .into_iter()
+                    .map(|n| {
+                        let count = lib.albums_by(n).len();
+                        let sub = if count == 0 { "Appears on albums".to_string() } else { format!("{count} album{}", if count == 1 { "" } else { "s" }) };
+                        button(
+                            row![cover_of(app, lib.artist_cover_album(n), 56.0), column![text(n.as_str()).size(15).color(ui::TEXT()), ui::dim(sub, 13)].spacing(2).width(Length::Fill), ui::wi("chevronRight", 18.0, ui::TEXT_2())]
+                                .spacing(14)
+                                .align_y(Alignment::Center),
+                        )
                         .width(Length::Fill)
-                        .padding([6, 10])
+                        .padding([8, 12])
                         .style(ui::flat)
                         .on_press(Message::Go(Page::Artist(n.clone())))
                         .into()
-                })
-                .collect();
-            Column::with_children(rows).spacing(2).into()
+                    })
+                    .collect();
+                column![chips, Column::with_children(rows).spacing(2)].spacing(24).into()
+            }
         }
-        LibTab::Downloaded => pages::downloaded(app),
     };
-    column![head, body].spacing(20).into()
+    page.push(body).into()
+}
+
+/// One genre, decade or label: its albums, with Play and Shuffle for all of them.
+fn browse_page<'a>(app: &'a App, kind: &'a str, value: &'a str) -> El<'a> {
+    let mut albums: Vec<&Album> = app.lib.albums().iter().filter(|a| browse_value(a, kind).as_deref() == Some(value)).collect();
+    albums.sort_by(|a, b| b.year.unwrap_or(0).cmp(&a.year.unwrap_or(0)));
+    let label = match kind {
+        "genre" => "Genre",
+        "decade" => "Decade",
+        _ => "Label",
+    };
+    if albums.is_empty() {
+        return empty_state("library", "Nothing here", "No albums like that.", Some(ui::btn("Browse", ui::Btn::Secondary).on_press(Message::LibTab(LibTab::Browse)).into()));
+    }
+    let ids: Vec<String> = albums.iter().flat_map(|a| app.lib.album_track_ids(&a.id)).collect();
+    let n = albums.len();
+    column![
+        column![ui::dim(label, 13), ui::title(value, 32), ui::dim(format!("{n} album{} · {} songs", if n == 1 { "" } else { "s" }, ids.len()), 15)].spacing(6),
+        row![
+            ui::btn_icon("play", "Play", ui::Btn::Primary, false).on_press(Message::PlayTracks(ids.clone(), 0, value.to_string())),
+            ui::btn_icon("shuffle", "Shuffle", ui::Btn::Secondary, false).on_press(Message::ShuffleTracks(ids, value.to_string())),
+        ]
+        .spacing(8),
+        Row::with_children(albums.into_iter().map(|a| album_card(app, a, artist_year(a))).collect::<Vec<El>>()).spacing(4).wrap(),
+    ]
+    .spacing(16)
+    .into()
 }
 
 fn album_page<'a>(app: &'a App, id: &str) -> El<'a> {
@@ -962,10 +1137,32 @@ fn album_page<'a>(app: &'a App, id: &str) -> El<'a> {
         .align_y(Alignment::Center),
     ]
     .spacing(6);
+    // quality tags like the website's (Lossless / Hi-Res Lossless / High Quality…, then the genre)
+    let q = &a.quality;
+    let (label, hires) = if q.lossless {
+        let hi = q.bits.unwrap_or(16) >= 24 || q.khz.unwrap_or(44.1) > 48.0;
+        (if hi { "HI-RES LOSSLESS" } else { "LOSSLESS" }, hi)
+    } else {
+        let k = q.kbps.unwrap_or(0);
+        (if k >= 256 { "HIGH QUALITY" } else if k >= 128 { "NORMAL" } else { "LOW" }, false)
+    };
+    let tag = |s: String, strong: bool| -> El<'a> {
+        container(text(s).size(11).font(ui::FONT_BOLD).color(if strong { ui::TEXT() } else { ui::TEXT_2() }))
+            .padding([3, 8])
+            .style(move |_: &iced::Theme| container::Style { border: iced::Border { color: if strong { ui::BORDER_STRONG() } else { ui::BORDER() }, width: 1.0, radius: 4.0.into() }, ..Default::default() })
+            .into()
+    };
+    let mut tags = Row::new().spacing(6);
+    tags = tags.push(tag(label.to_string(), hires));
     if let Some(g) = &a.genre {
-        info = info.push(ui::dim(g.as_str(), 13));
+        tags = tags.push(tag(g.to_uppercase(), false));
     }
-    let extra = vec![download_button(app, "album", id, &ids), round_icon(icon::PLAYLIST, false, "Add to a playlist", Some(Message::AddToPlaylist(ids.clone())))];
+    info = info.push(tags);
+    let extra = vec![
+        round_icon(icon::ADD, false, "Add to playlist", Some(Message::AddToPlaylist(ids.clone()))),
+        download_button(app, "album", id, &ids),
+        round_icon(icon::MORE, false, "More options", Some(Message::PopMenuOpen(crate::MenuKind::Album(id.to_string())))),
+    ];
     info = info.push(ui::gap(10)).push(header_buttons(Message::PlayAlbum(id.to_string(), 0), Message::ShuffleAlbum(id.to_string()), extra));
     let head = row![cover_of(app, Some(a), 220.0), info].spacing(28).align_y(Alignment::End);
     let mut c = column![head, track_list(app, &tracks, &a.title, Numbers::TrackNo, false, Rows::Plain)].spacing(24);
@@ -1003,7 +1200,11 @@ fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
         ui::title(page_name.clone(), 48),
         ui::dim(sub, 15),
         ui::gap(6),
-        header_buttons(Message::PlayTracks(ids.clone(), 0, page_name.clone()), Message::ShuffleTracks(ids, page_name.clone()), vec![]),
+        header_buttons(Message::PlayTracks(ids.clone(), 0, page_name.clone()), Message::ShuffleTracks(ids, page_name.clone()), vec![{
+            // follow: they show up in Library → Artists
+            let f = app.follows(name);
+            ui::tip(ui::btn_icon(if f { "check" } else { "plus" }, if f { "Following" } else { "Follow" }, ui::Btn::Secondary, false).on_press(Message::FollowArtist(name.to_string())), if f { "Stop following" } else { "Follow: they show up in Library → Artists" })
+        }]),
     ]
     .spacing(6);
     let mut c = column![head].spacing(28);

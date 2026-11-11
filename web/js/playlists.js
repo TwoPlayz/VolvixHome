@@ -363,19 +363,16 @@ window.Spin = window.Spin || {};
 
   /** Choose who can edit a playlist. People you pick get an invite and join when they accept. */
   S.pl.inviteDialog = function (id) {
+    // one dialog for everything about who can edit. Until you tick someone it's still just yours: inviting someone is what
+    // makes it collaborative (it moves to the server then), and Stop sharing is in here too.
     let pl = get(id);
-    if (!pl.shared) {
-      // it only becomes shared (and moves to the server) once you invite someone
-      S.pl.makeShared(id).then(function (sh) { S.pl.inviteDialog(sh.id); }).catch(function (e) { S.toast(e.message, 'x'); });
-      return;
-    }
     const people = S.data.others();
     const collab = pl.collaborators || [], invited = pl.invited || [];
     const state = function (p) { return collab.indexOf(p.id) !== -1 ? 'collab' : invited.indexOf(p.id) !== -1 ? 'invited' : 'none'; };
     const m = S.modal({
       title: 'Who can edit "' + pl.name + '"?',
       body: people.length
-        ? '<p class="modal-text">People you pick get an invite. Once they accept they can add, remove and reorder songs.</p>' +
+        ? '<p class="modal-text">' + (pl.shared ? 'People you pick get an invite. Once they accept they can add, remove and reorder songs.' : 'Tick someone to make this a collaborative playlist. They get an invite, and once they accept they can add, remove and reorder songs.') + '</p>' +
           '<div class="pick-list">' + people.map(function (p) {
             const st = state(p);
             return '<label class="pick-row pick-check">' + S.avatar(p, 40) +
@@ -385,9 +382,23 @@ window.Spin = window.Spin || {};
           }).join('') + '</div>'
         : '<p class="modal-text">No one else is in your household yet. An admin can add people under Account → People.</p>',
       actions: [
+        pl.shared ? { label: 'Stop sharing', kind: 'ghost danger-text', onClick: function (close) { close(); S.pl.toggleCollaborative(id); } } : null,
         { label: 'Cancel', kind: 'secondary' },
         people.length ? { label: 'Save', kind: 'primary', onClick: function (close) {
           const chosen = S.$$('input[type=checkbox]:checked', m.el).map(function (c) { return c.value; });
+          if (!pl.shared) {
+            close();
+            if (!chosen.length) return;
+            // becoming collaborative moves it to the server under a new address: follow it there, then invite
+            S.pl.makeShared(id).then(function (sh) {
+              if (S.router.current() === '/playlist/' + id) S.router.go('/playlist/' + sh.id);
+              return S.shared.op(sh.id, { op: 'invite', userIds: chosen }).then(function () {
+                redraw();
+                S.toast('Invited ' + chosen.map(function (u) { return S.data.person(u).name.split(' ')[0]; }).join(', '), 'users');
+              });
+            }).catch(function (e) { sharedFailed(e); });
+            return;
+          }
           const current = collab.concat(invited);
           const add = chosen.filter(function (x) { return current.indexOf(x) === -1; });
           const drop = current.filter(function (x) { return chosen.indexOf(x) === -1; });
@@ -400,7 +411,7 @@ window.Spin = window.Spin || {};
               else if (drop.length) S.toast('Updated who can edit');
             }).catch(sharedFailed);
         } } : { label: 'Done', kind: 'primary' }
-      ]
+      ].filter(Boolean)
     });
   };
 

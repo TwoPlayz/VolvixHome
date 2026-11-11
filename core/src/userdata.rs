@@ -36,6 +36,8 @@ pub enum Edit {
     Setting(String, Value),
     /// the website's theme: "system", "dark" or "light"
     Theme(String),
+    /// follow or stop following an artist (Library → Artists → Following)
+    FollowArtist { name: String, on: bool },
     /// the picture chosen for one of your playlists (0 removes it)
     PlaylistCover { id: String, version: u64 },
 }
@@ -241,6 +243,17 @@ pub fn apply(d: &mut UserData, e: &Edit) {
         }
         Edit::Theme(t) => {
             d.rest.insert("theme".into(), json!(t));
+        }
+        Edit::FollowArtist { name, on } => {
+            let list = d.rest.entry("followedArtists").or_insert_with(|| json!([]));
+            if !list.is_array() {
+                *list = json!([]);
+            }
+            let list = list.as_array_mut().expect("array");
+            list.retain(|n| n.as_str().map(|n| n.to_lowercase() != name.to_lowercase()).unwrap_or(false));
+            if *on {
+                list.push(json!(name));
+            }
         }
         Edit::PlaylistCover { id, version } => {
             if let Some(p) = d.playlists.iter_mut().find(|p| p.id == *id) {

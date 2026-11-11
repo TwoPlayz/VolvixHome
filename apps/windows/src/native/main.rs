@@ -94,13 +94,18 @@ pub enum Page {
     Settings,
     /// your year in music (opens once the year has ended)
     Rewind,
+    /// the albums of one genre, decade or label (from Library → Browse): the kind, then the value
+    Browse(String, String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LibTab {
-    Playlists,
     Albums,
     Artists,
+    Songs,
+    Playlists,
+    Browse,
+    /// only in the app: what's kept on this computer
     Downloaded,
 }
 
@@ -175,6 +180,8 @@ pub enum MenuKind {
     /// a song: `in_playlist` = (the playlist, its place in it) when it can be taken out
     Track { id: String, in_playlist: Option<(String, usize)> },
     Playlist(String),
+    /// an album's ⋯ (its id)
+    Album(String),
 }
 
 #[derive(Debug, Clone)]
@@ -341,9 +348,16 @@ pub enum Message {
     ShareCreated(Result<volvix_core::admin::Share, Error>),
     /// who can edit a playlist (your own one becomes collaborative first)
     CollabOpen(String),
+    /// make a collaborative playlist just yours again (everyone else loses access)
+    Unshare(String),
+    Unshared(Result<SharedOpResult, Error>),
+    LibSort(String),
+    LibScope(bool),
+    FollowArtist(String),
     RowLeave(u64, usize),
     /// add every song of a playlist to the queue
     QueueMany(Vec<String>),
+    PlayNextMany(Vec<String>),
     /// a playlist's own picture: pick a file, it was saved on the server, remove it; and one arriving from the server
     PickPlaylistPicture(String),
     PlaylistPictureChosen(String, Option<std::path::PathBuf>),
@@ -596,7 +610,11 @@ pub struct App {
     pub pop_menu: Option<PopMenu>,
     /// the row under the pointer: which list on the page (see `views::list_key`) and which row
     pub hover_row: Option<(u64, usize)>,
-    collab_after: bool,
+    /// people to invite once a playlist of yours has become collaborative
+    collab_invite: Vec<String>,
+    /// Library: how albums and songs are sorted (added, title, artist, year), and whether Artists shows everyone
+    pub lib_sort: String,
+    pub lib_all_artists: bool,
     scroll_y: [f32; 2],
     pub add_q: String,
     pub cache: Cache,
@@ -735,7 +753,9 @@ impl App {
             pl_cover_pending: HashSet::new(),
             pop_menu: None,
             hover_row: None,
-            collab_after: false,
+            collab_invite: vec![],
+            lib_sort: "added".into(),
+            lib_all_artists: false,
             scroll_y: [0.0; 2],
             add_q: String::new(),
             cache: Cache::default(),
@@ -1049,6 +1069,11 @@ impl App {
     }
 
     /// Whether this account may start listening parties (admins always).
+    /// Do you follow this artist (Library → Artists → Following)?
+    pub fn follows(&self, name: &str) -> bool {
+        self.data.rest.get("followedArtists").and_then(|l| l.as_array()).map(|l| l.iter().any(|n| n.as_str().map(|n| n.eq_ignore_ascii_case(name)).unwrap_or(false))).unwrap_or(false)
+    }
+
     /// Is this person allowed to do `what` (admins can do everything)?
     pub fn can(&self, what: &str) -> bool {
         self.me.as_ref().map(|m| m.user.admin || m.user.perms.iter().any(|p| p == what)).unwrap_or(false)
@@ -1621,6 +1646,12 @@ impl App {
                 }
                 self.say(format!("Added {n} song{} to the queue", if n == 1 { "" } else { "s" }));
             }
+            Message::PlayNextMany(ids) => {
+                for id in ids.iter().rev() {
+                    self.queue.play_next(id);
+                }
+                self.say("Playing next");
+            }
             Message::PickPlaylistPicture(id) => {
                 return Task::perform(
                     blocking(|| rfd::FileDialog::new().set_title("Choose a picture").add_filter("Pictures", &["jpg", "jpeg", "png", "webp"]).pick_file()),
@@ -1718,12 +1749,36 @@ impl App {
                         return Task::perform(blocking(move || c.household()), Message::HouseholdLoaded);
                     }
                 } else {
-                    // it only becomes shared (and moves to the server) once you choose who can edit it
-                    let (Some(c), Some(pl)) = (self.client.clone(), self.data.playlists.iter().find(|x| x.id == id).cloned()) else { return Task::none() };
-                    let ids = pl.track_ids();
-                    self.collab_after = true;
-                    return Task::perform(blocking(move || c.create_shared(&pl.name, &pl.description, pl.public, &ids)), move |r| Message::SharedCreated(r, id.clone()));
+                    // still just yours: it becomes collaborative when you save this with someone ticked
+                    self.dialog = Some(Dialog::Collab { id, picked: vec![] });
+                    if let Some(c) = self.client.clone() {
+                        return Task::perform(blocking(move || c.household()), Message::HouseholdLoaded);
+                    }
                 }
+            }
+            Message::Unshare(id) => {
+                self.dialog = None;
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(blocking(move || c.shared_op(&id, json!({ "op": "unshare" }))), Message::Unshared);
+            }
+            Message::Unshared(r) => match r {
+                Ok(res) => {
+                    // it comes back as one of your own playlists, under the same address
+                    let p = res.playlist;
+                    self.shared.retain(|x| x.id != p.id);
+                    let ids: Vec<String> = p.tracks.iter().map(|t| t.id.clone()).collect();
+                    let pl = Playlist { id: p.id.clone(), name: p.name.clone(), description: p.description.clone(), public: p.public, owner: userdata::ME.into(), ..Default::default() };
+                    self.say("Playlist is no longer collaborative");
+                    return self.edit(vec![Edit::CreatePlaylist(pl), Edit::AddTracks { id: p.id, tracks: ids, at: userdata::now() }]);
+                }
+                Err(e) => self.say(e.to_string()),
+            },
+            Message::LibSort(s) => self.lib_sort = s,
+            Message::LibScope(all) => self.lib_all_artists = all,
+            Message::FollowArtist(name) => {
+                let on = !self.follows(&name);
+                self.say(if on { format!("Following {name}. They're in Library → Artists.") } else { format!("Unfollowed {name}") });
+                return self.edit(vec![Edit::FollowArtist { name, on }]);
             }
             Message::PlayNext(id) => {
                 self.queue.play_next(&id);
@@ -2129,9 +2184,13 @@ impl App {
                     self.shared.push(res.playlist);
                     let t = self.edit(vec![Edit::DeletePlaylist(old_id)]);
                     let page = self.go(Page::Playlist(id.clone()));
-                    // then choose who can edit it
-                    self.collab_after = false;
-                    return Task::batch([t, page, self.update(Message::CollabOpen(id))]);
+                    // then invite the people who were ticked
+                    let invite = std::mem::take(&mut self.collab_invite);
+                    if invite.is_empty() {
+                        return Task::batch([t, page]);
+                    }
+                    self.say("Invites sent");
+                    return Task::batch([t, page, self.update(Message::SharedOp(id, json!({ "op": "invite", "userIds": invite })))]);
                 }
                 Err(e) => self.say(e.to_string()),
             },
@@ -2830,6 +2889,16 @@ impl App {
             Dialog::Collab { id, picked } => {
                 self.dialog = None;
                 let Some(p) = self.playlist(&id) else { return Task::none() };
+                if !p.is_shared() {
+                    // inviting someone is what makes it collaborative (it moves to the server, then they're invited)
+                    if picked.is_empty() {
+                        return Task::none();
+                    }
+                    let (Some(c), Some(pl)) = (self.client.clone(), self.data.playlists.iter().find(|x| x.id == id).cloned()) else { return Task::none() };
+                    let ids = pl.track_ids();
+                    self.collab_invite = picked;
+                    return Task::perform(blocking(move || c.create_shared(&pl.name, &pl.description, pl.public, &ids)), move |r| Message::SharedCreated(r, id.clone()));
+                }
                 let current: Vec<String> = p.collaborators.iter().chain(p.invited.iter()).cloned().collect();
                 let add: Vec<String> = picked.iter().filter(|x| !current.contains(x)).cloned().collect();
                 let drop: Vec<String> = current.iter().filter(|x| !picked.contains(x)).cloned().collect();
