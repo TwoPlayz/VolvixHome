@@ -3214,3 +3214,10 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 .cover.cover--liked .icon { width: 40cqw !important; height: 40cqw !important; }
 .cover.cover--liked .icon.glyph { font-size: 36cqw !important; }/* the base .cover pushes its content to the bottom-right (for generated art): centred art must not */
 .cover.cover--liked, .cover.cover--tile { justify-content: center; align-content: center; padding: 0; }
+/* ---- round 9: Account / Settings like the Windows app: the arrows, the title and the tabs stay; only the content scrolls ---- */
+@media (min-width: 761px) {
+  .main:has(.acct-layout) .topbar { position: sticky; top: 0; z-index: 6; background: var(--surface); padding-bottom: 8px; }
+  .view:has(.acct-layout) > .page-head { position: sticky; top: 56px; z-index: 5; background: var(--surface); margin: 0; padding: 0 0 20px; }
+  .view:has(.acct-layout) .acct-nav { position: sticky; top: 113px; }
+  .view:has(.acct-layout) { padding-top: 0; }
+}

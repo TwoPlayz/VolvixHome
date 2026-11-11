@@ -7,7 +7,7 @@ use volvix_core::playlists::Kind;
 use volvix_core::{FoundItem, Track};
 
 use crate::ui::{self, icon, icon as ic};
-use crate::views::{card, clip, cover_of, download_button, header_buttons, playlist_art, playlist_card, playlist_cover, round_icon, section, track_list, El, Rows};
+use crate::views::{card, clip, cover_of, download_button, header_buttons, playlist_art, playlist_card, playlist_cover, round_icon, section, track_list, El, Numbers, Rows};
 use crate::{lyrics_scroller, App, Dialog, Message, Page};
 
 /* ---------- playlists and mixes ---------- */
@@ -30,8 +30,9 @@ pub fn playlist_page<'a>(app: &'a App, id: &str) -> El<'a> {
     info = info.push(ui::dim(format!("{} song{} · {} min", tracks.len(), if tracks.len() == 1 { "" } else { "s" }, mins), 14));
     let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
     let mut extra = vec![download_button(app, "playlist", id, &ids)];
-    // like the website: download and one ⋯ button that has the rest (edit, picture, queue, delete)
+    // like the website: who can edit, download, and one ⋯ button that has the rest (edit, picture, queue, share, delete)
     if p.can_manage() {
+        extra.insert(0, round_icon(icon::PEOPLE, p.is_shared(), if p.is_shared() { "Who can edit" } else { "Make collaborative" }, Some(Message::CollabOpen(p.id.clone()))));
         extra.push(round_icon(icon::MORE, false, "More", Some(Message::PopMenuOpen(crate::MenuKind::Playlist(p.id.clone())))));
     }
     if let Kind::Shared { mine: false } = p.kind {
@@ -42,7 +43,7 @@ pub fn playlist_page<'a>(app: &'a App, id: &str) -> El<'a> {
     let body: El = if tracks.is_empty() {
         ui::dim(if p.kind == Kind::Liked { "Songs you like (the heart) show up here." } else { "No songs yet. Use the playlist button on any song to add it here." }, 15).into()
     } else {
-        track_list(app, &tracks, &p.name, false, true, if p.can_edit() { Rows::Playlist { id, liked: p.kind == Kind::Liked } } else { Rows::Plain })
+        track_list(app, &tracks, &p.name, Numbers::Place, true, if p.can_edit() { Rows::Playlist { id, liked: p.kind == Kind::Liked } } else { Rows::Plain })
     };
     let mut page = column![head, body].spacing(28);
     if p.can_edit() {
@@ -127,7 +128,7 @@ pub fn mix_page<'a>(app: &'a App, id: &str) -> El<'a> {
     ]
     .spacing(6);
     let art = container(ic(mix_icon(m.icon), 64)).width(220).height(220).center_x(220).center_y(220).style(ui::mix_tile(&m.id));
-    column![row![art, info].spacing(28).align_y(Alignment::End), track_list(app, &tracks, &m.title, false, true, Rows::Plain)].spacing(28).into()
+    column![row![art, info].spacing(28).align_y(Alignment::End), track_list(app, &tracks, &m.title, Numbers::Place, true, Rows::Plain)].spacing(28).into()
 }
 
 /// Library → Downloaded: what you chose to keep on this computer.
@@ -1293,6 +1294,66 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             c.push(buttons("Save", !name.trim().is_empty())).into()
         }
         Dialog::PlayOn => play_on(app),
+        Dialog::Credits { track } => {
+            let close = row![horizontal_space(), ui::btn("Close", ui::Btn::Secondary).on_press(Message::DialogCancel)];
+            match app.lib.track(track) {
+                Some(t) => column![scrollable(credits(app, t)).style(ui::scroller).height(Length::Fixed(420.0)), close].spacing(14).into(),
+                None => column![ui::dim("That song isn't here any more.", 14), close].spacing(14).into(),
+            }
+        }
+        Dialog::Share { kind, name, tracks, days, link, error, busy } => {
+            let what = if kind == "album" { "this album" } else { "this playlist" };
+            let mut c = column![
+                ui::title(format!("Share {what}"), 22),
+                ui::dim(format!("Anyone with the link can play {name} ({} song{}) in their browser. They can't see anything else on your server, and you can cancel the link any time in Settings.", tracks.len(), if tracks.len() == 1 { "" } else { "s" }), 14),
+            ]
+            .spacing(12);
+            let day = days.to_string();
+            match link {
+                None => {
+                    c = c.push(ui::seg(&[("1", "1 day"), ("7", "7 days"), ("30", "30 days")], &day, |v| Message::ShareDays(v.parse().unwrap_or(7))));
+                    if let Some(e) = error {
+                        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+                    }
+                    c = c.push(row![horizontal_space(), ui::btn("Close", ui::Btn::Secondary).on_press(Message::DialogCancel), ui::btn("Create link", ui::Btn::Primary).on_press_maybe((!*busy).then_some(Message::ShareCreate))].spacing(10));
+                }
+                Some((url, left)) => {
+                    let path = url.find("/s/").or(url.find("/share")).map(|i| url[i..].to_string()).unwrap_or_default();
+                    c = c
+                        .push(row![text_input("", url).padding(10).size(14).style(ui::input), ui::btn_icon("copy", "Copy", ui::Btn::Secondary, true).on_press(Message::ShareCopy(path))].spacing(8).align_y(Alignment::Center))
+                        .push(ui::dim(format!("Works for {left}."), 12))
+                        .push(row![horizontal_space(), ui::btn("Close", ui::Btn::Secondary).on_press(Message::DialogCancel)]);
+                }
+            }
+            c.into()
+        }
+        Dialog::Collab { id, picked } => {
+            let name = app.playlist(id).map(|p| p.name).unwrap_or_default();
+            let p = app.playlist(id);
+            let mut c = column![ui::title(format!("Who can edit \"{name}\"?"), 22)].spacing(12);
+            let others = app.others();
+            if others.is_empty() {
+                c = c.push(ui::dim("No one else is in your household yet. An admin can add people under Account → Members.", 14));
+                c.push(row![horizontal_space(), ui::btn("Done", ui::Btn::Primary).on_press(Message::DialogCancel)]).into()
+            } else {
+                c = c.push(ui::dim("People you pick get an invite. Once they accept they can add, remove and reorder songs.", 14));
+                for (uid, uname) in others {
+                    let state = match &p {
+                        Some(p) if p.collaborators.contains(&uid) => "Can edit",
+                        Some(p) if p.invited.contains(&uid) => "Invited, waiting to accept",
+                        _ => "Not invited",
+                    };
+                    let on = picked.contains(&uid);
+                    let u2 = uid.clone();
+                    c = c.push(
+                        row![ui::avatar::<Message>(&uname, 40.0), column![text(uname.clone()).size(15), ui::dim(state, 13)].spacing(1).width(Length::Fill), checkbox("", on).size(18).on_toggle(move |v| Message::PartyPick(u2.clone(), v))]
+                            .spacing(12)
+                            .align_y(Alignment::Center),
+                    );
+                }
+                c.push(buttons("Save", true)).into()
+            }
+        }
         Dialog::Folder { browse, error } => folder_dialog(browse, error),
         Dialog::Manage { id, password, error, confirm_remove } => manage_dialog(app, id, password, error, *confirm_remove),
         Dialog::AddCast { host, error, busy } => {

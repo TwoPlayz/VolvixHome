@@ -38,6 +38,8 @@ themed!(TEXT_3, rgb(0x86, 0x86, 0x8E), rgb(0x74, 0x74, 0x7A));
 themed!(HOVER, rgb(0x20, 0x20, 0x23), rgb(0xF4, 0xF4, 0xF5));
 themed!(ACTIVE, rgb(0x2A, 0x2A, 0x2D), rgb(0xEC, 0xEC, 0xED));
 themed!(BORDER, rgb(0x2B, 0x2B, 0x2F), rgb(0xE6, 0xE6, 0xE9));
+// the stronger outline (round buttons): white / black at 16% over the panel
+themed!(BORDER_STRONG, rgb(0x38, 0x38, 0x3A), rgb(0xD6, 0xD6, 0xD6));
 pub const RADIUS: f32 = 10.0;
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color {
@@ -84,6 +86,48 @@ pub mod icon {
     pub const PICTURE: char = '\u{E91B}';
     pub const BACK: char = '\u{E72B}';
     pub const SIGN_OUT: char = '\u{E7E8}';
+}
+
+/// The website's icon by the name it has there (`S.icon(name, size)` in web/js/ui.js), in an explicit colour. On
+/// Windows the website shows the system glyph for some names and its own drawing for the rest; this shows the same one.
+pub fn wi<'a, M: 'a>(name: &str, size: f32, color: Color) -> Element<'a, M> {
+    if let Some((_, c)) = crate::webicons::GLYPHS.iter().find(|(n, _)| *n == name) {
+        return container(text(c.to_string()).font(ICONS).size((size * 0.9).round()).color(color).line_height(1.0)).width(size).height(size).center_x(size).center_y(size).into();
+    }
+    match web_svg(name) {
+        Some(h) => iced::widget::svg(h).width(size).height(size).style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(color) }).into(),
+        None => Space::new(size, size).into(),
+    }
+}
+
+/// The same icon inside a button: it takes the button's colour (grey, lighter under the pointer, red when `on`).
+pub fn wi_btn<'a, M: 'a>(name: &str, size: f32, on: bool) -> Element<'a, M> {
+    if let Some((_, c)) = crate::webicons::GLYPHS.iter().find(|(n, _)| *n == name) {
+        // a glyph is text: it follows the button's text colour by itself
+        return container(text(c.to_string()).font(ICONS).size((size * 0.9).round()).line_height(1.0)).width(size).height(size).center_x(size).center_y(size).into();
+    }
+    match web_svg(name) {
+        Some(h) => iced::widget::svg(h)
+            .width(size)
+            .height(size)
+            .style(move |_: &Theme, s| iced::widget::svg::Style { color: Some(if on { ACCENT() } else if matches!(s, iced::widget::svg::Status::Hovered) { TEXT() } else { TEXT_2() }) })
+            .into(),
+        None => Space::new(size, size).into(),
+    }
+}
+
+/// One of the website's drawn icons as a picture (made once, then kept).
+fn web_svg(name: &str) -> Option<iced::widget::svg::Handle> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, iced::widget::svg::Handle>>> = std::sync::OnceLock::new();
+    let mut cache = CACHE.get_or_init(Default::default).lock().ok()?;
+    if let Some(h) = cache.get(name) {
+        return Some(h.clone());
+    }
+    let body = crate::webicons::ICONS.iter().find(|(n, _)| *n == name)?.1;
+    let doc = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#);
+    let h = iced::widget::svg::Handle::from_memory(doc.into_bytes());
+    cache.insert(name.to_string(), h.clone());
+    Some(h)
 }
 
 pub fn icon<'a>(c: char, size: u16) -> iced::widget::Text<'a, Theme> {
@@ -240,13 +284,86 @@ pub fn primary(_: &Theme, s: button::Status) -> button::Style {
         shadow: Shadow { color: Color::TRANSPARENT, offset: Vector::ZERO, blur_radius: 0.0 },
     }
 }
+/// The website's secondary button: a grey pill with a hairline around it.
 pub fn secondary(_: &Theme, s: button::Status) -> button::Style {
     button::Style {
-        background: Some(if matches!(s, button::Status::Hovered) { SURFACE_3() } else { SURFACE_2() }.into()),
-        text_color: TEXT(),
+        background: Some(if matches!(s, button::Status::Hovered | button::Status::Pressed) { ACTIVE() } else { SURFACE_3() }.into()),
+        text_color: if matches!(s, button::Status::Disabled) { TEXT_3() } else { TEXT() },
         border: Border { radius: 100.0.into(), width: 1.0, color: BORDER() },
         ..Default::default()
     }
+}
+
+/// The website's ghost button: just words, lighter (with a soft background) under the pointer.
+pub fn ghost(_: &Theme, s: button::Status) -> button::Style {
+    let hot = matches!(s, button::Status::Hovered | button::Status::Pressed);
+    button::Style { background: hot.then(|| HOVER().into()), text_color: if hot { TEXT() } else { TEXT_2() }, border: border::rounded(100.0), ..Default::default() }
+}
+
+/// A red button for something that can't be undone.
+pub fn danger(_: &Theme, s: button::Status) -> button::Style {
+    button::Style {
+        background: Some(if matches!(s, button::Status::Hovered | button::Status::Pressed) { rgb(0xC2, 0x28, 0x2E) } else { rgb(0xD9, 0x30, 0x36) }.into()),
+        text_color: Color::WHITE,
+        border: border::rounded(100.0),
+        ..Default::default()
+    }
+}
+
+/// Words that act as a link (a song's album, its artist): no background, even under the pointer.
+pub fn link(_: &Theme, _: button::Status) -> button::Style {
+    button::Style { background: None, text_color: TEXT(), ..Default::default() }
+}
+
+/// A round outlined button (the website's 40–42 px ones on album, playlist and Now Playing pages); red when `on`.
+pub fn ring_btn(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, s| button::Style {
+        background: matches!(s, button::Status::Hovered | button::Status::Pressed).then(|| HOVER().into()),
+        text_color: if on {
+            ACCENT()
+        } else if matches!(s, button::Status::Disabled) {
+            TEXT_3()
+        } else {
+            TEXT()
+        },
+        border: Border { radius: 100.0.into(), width: 1.0, color: BORDER_STRONG() },
+        ..Default::default()
+    }
+}
+
+/// Which of the website's buttons.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Btn {
+    Primary,
+    Secondary,
+    Ghost,
+    Danger,
+}
+
+fn btn_style(kind: Btn) -> fn(&Theme, button::Status) -> button::Style {
+    match kind {
+        Btn::Primary => primary,
+        Btn::Secondary => secondary,
+        Btn::Ghost => ghost,
+        Btn::Danger => danger,
+    }
+}
+
+/// The website's button: a pill 40 tall with 14 px words.
+pub fn btn<'a>(label: impl text::IntoFragment<'a>, kind: Btn) -> iced::widget::Button<'a, crate::Message> {
+    button(text(label).size(14).wrapping(text::Wrapping::None)).padding([10.9, 18.0]).style(btn_style(kind))
+}
+
+/// The website's small button: 32 tall with 13 px words.
+pub fn btn_sm<'a>(label: impl text::IntoFragment<'a>, kind: Btn) -> iced::widget::Button<'a, crate::Message> {
+    button(text(label).size(13).wrapping(text::Wrapping::None)).padding([7.55, 14.0]).style(btn_style(kind))
+}
+
+/// The same with one of the website's icons in front of the words.
+pub fn btn_icon<'a>(icon_name: &str, label: impl text::IntoFragment<'a>, kind: Btn, small: bool) -> iced::widget::Button<'a, crate::Message> {
+    let color = if kind == Btn::Ghost { TEXT_2() } else if matches!(kind, Btn::Primary | Btn::Danger) { Color::WHITE } else { TEXT() };
+    let (size, icon_size, pad) = if small { (13.0, 14.0, [7.55, 14.0]) } else { (14.0, 16.0, [10.9, 18.0]) };
+    button(iced::widget::row![wi(icon_name, icon_size, color), text(label).size(size).wrapping(text::Wrapping::None)].spacing(if small { 6 } else { 8 }).align_y(iced::Alignment::Center)).padding(pad).style(btn_style(kind))
 }
 /// Seconds since the app started (drives the launch screen's animation).
 pub fn since_start() -> f32 {

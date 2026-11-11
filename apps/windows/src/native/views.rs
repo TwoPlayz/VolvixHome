@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use iced::widget::{button, column, container, horizontal_space, mouse_area, opaque, row, scrollable, stack, text, text_input, Column, Row, Space};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Color, Element, Length, Padding};
 use volvix_core::playlists::Kind;
 use volvix_core::{format_duration, search, Album, Repeat, Track};
 
@@ -241,105 +241,269 @@ pub enum Rows<'a> {
     Playlist { id: &'a str, liked: bool },
 }
 
-/// A row you can pick up anywhere and move, like the website's: the whole card lights up under the pointer, its grip
-/// shows only then, and letting go on the same row is a click.
-pub fn draggable_row<'a>(app: &App, list: crate::DragList, index: usize, content: El<'a>, click: Message) -> El<'a> {
-    let lit = app.hover_row == Some(index) || app.drag.as_ref().map(|d| d.list == list && d.from == index).unwrap_or(false);
-    let grip: El = if lit { ic('\u{E700}', 13).color(ui::TEXT_3()).into() } else { Space::new(13, 13).into() };
-    let card = container(row![container(grip).width(22).center_x(22), content].align_y(Alignment::Center))
-        .padding([6, 6])
-        .width(Length::Fill)
-        .style(move |_| container::Style { background: lit.then(|| ui::HOVER().into()), border: iced::border::rounded(8.0), ..Default::default() });
-    mouse_area(card)
-        .interaction(iced::mouse::Interaction::Pointer)
-        .on_press(Message::DragStart(list, index, Some(Box::new(click))))
-        .on_enter(Message::RowHover(Some(index)))
-        .on_exit(Message::RowLeave(index))
-        .into()
+/// Song rows are this tall on the website (40 cover with 6 above and below, plus its line spacing); queue rows are 52.
+pub const TRACK_ROW_H: f32 = 52.6;
+pub const QUEUE_ROW_H: f32 = 52.0;
+/// The label between two parts of the queue ("Next from …") is this tall.
+pub const LABEL_H: f32 = 38.8;
+
+/// A number that tells one list on the page from another (which row the pointer is over is kept per list).
+pub fn list_key(name: &str, kind: u64) -> u64 {
+    name.bytes().fold(0xcbf2_9ce4_8422_2325u64 ^ kind, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
 }
 
-/// While dragging: the row under the pointer reports itself, and a red line shows where it lands.
-pub fn drop_target<'a>(app: &App, list: &crate::DragList, index: usize, row: El<'a>) -> El<'a> {
-    let Some(d) = app.drag.as_ref().filter(|d| d.list == *list) else { return row };
-    let line = |show: bool| -> El<'a> {
-        container(Space::new(Length::Fill, 2))
-            .style(move |_| container::Style { background: show.then(|| ui::ACCENT().into()), ..Default::default() })
+/// A list whose rows can be picked up anywhere and moved, like the website's.
+pub struct DragRows<'a> {
+    pub list: crate::DragList,
+    pub key: u64,
+    /// each row's content, and what a plain click on it does
+    pub rows: Vec<(El<'a>, Message)>,
+    /// the picked-up row's content again, without working buttons (only needed while this list is being dragged)
+    pub ghost: Option<El<'a>>,
+    /// a label that sits before one of the rows (the queue's "Next from …")
+    pub divider: Option<(usize, El<'a>)>,
+    pub row_h: f32,
+    /// space left of the grip, and between the grip and the row's content
+    pub lead: (f32, f32),
+    /// the hand cursor over rows (playlists); otherwise the pointing finger (the queue's rows are buttons on the website)
+    pub grab_cursor: bool,
+}
+
+/// The rows of a list you can reorder. The row under the pointer lights up and shows its grip. Picked up (after the
+/// pointer has moved a little), it follows the pointer as a lifted card while the others slide out of its way, and it
+/// lands in the gap. Letting go without having moved is a click.
+pub fn drag_list<'a>(app: &'a App, r: DragRows<'a>) -> El<'a> {
+    let n = r.rows.len();
+    let h = r.row_h;
+    let (lead, grip_gap) = r.lead;
+    let div_at = r.divider.as_ref().map(|d| d.0);
+    let drag = app.drag.as_ref().filter(|d| d.list == r.list);
+    let lifted = drag.filter(|d| d.active && d.from < n && d.count == n);
+    let card = move |content: El<'a>, lit: bool, floating: bool| -> El<'a> {
+        let grip: El<'a> = if lit { ui::wi("grip", if h > 52.5 { 18.0 } else { 16.0 }, Color { a: 0.85, ..ui::TEXT_3() }) } else { Space::new(16, 16).into() };
+        container(row![container(grip).width(22).center_x(22), content].spacing(grip_gap).align_y(Alignment::Center))
+            .padding(Padding { left: lead, right: 12.0, ..Padding::ZERO })
+            .width(Length::Fill)
+            .height(h)
+            .center_y(h)
+            .style(move |_| container::Style {
+                background: if floating { Some(Color { a: 0.9, ..ui::SURFACE_3() }.into()) } else { lit.then(|| ui::HOVER().into()) },
+                border: iced::border::rounded(if floating { 10.0 } else { 8.0 }),
+                shadow: if floating { iced::Shadow { color: Color { a: 0.45, ..Color::BLACK }, offset: iced::Vector::new(0.0, 12.0), blur_radius: 32.0 } } else { iced::Shadow::default() },
+                ..Default::default()
+            })
             .into()
     };
-    let above = d.over == index && d.over < d.from;
-    let below = d.over == index && d.over > d.from;
-    let faded: El = if d.from == index { container(row).style(|_| container::Style { background: Some(ui::ACTIVE().into()), border: iced::border::rounded(8.0), ..Default::default() }).into() } else { row };
-    mouse_area(column![line(above), faded, line(below)]).on_enter(Message::DragOver(index)).into()
-}
-
-/// A list of songs. Clicking one plays the list from there; the ⋯ button has the rest (play next, queue, playlist…).
-pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered: bool, show_album: bool, rows: Rows<'_>) -> El<'a> {
-    let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
-    let discs = tracks.iter().map(|t| t.disc.max(1)).max().unwrap_or(1);
-    let current = app.status.track.as_deref();
-    let mut col = Column::new().spacing(2);
-    let mut last_disc = 0;
-    for (i, t) in tracks.iter().enumerate() {
-        if numbered && discs > 1 && t.disc.max(1) != last_disc {
-            last_disc = t.disc.max(1);
-            col = col.push(container(ui::dim(format!("Disc {last_disc}"), 13)).padding(Padding { top: 10.0, bottom: 4.0, left: 12.0, right: 0.0 }));
-        }
-        let playing = current == Some(t.id.as_str());
-        let lead: El = if playing {
-            // the playing bars, as on the website (still while paused)
-            marks::eq(app.status.playing, 12.0)
-        } else if numbered {
-            ui::dim(if t.no > 0 { t.no.to_string() } else { "–".into() }, 14).into()
-        } else {
-            cover_of(app, app.lib.album_of(t), 40.0)
-        };
-        let mut title_line = row![text(clip(&t.title, 60)).size(15).color(if playing { ui::ACCENT() } else { ui::TEXT() })].spacing(6).align_y(Alignment::Center);
-        if t.explicit {
-            title_line = title_line.push(container(text("E").size(10).color(ui::FRAME())).padding([0, 4]).style(|_| container::Style { background: Some(ui::TEXT_2().into()), border: iced::border::rounded(3.0), ..Default::default() }));
-        }
-        if app.downloaded.contains(&t.id) {
-            title_line = title_line.push(ic(icon::DOWNLOADED, 11).color(ui::ACCENT()));
-        }
-        let mut sub = t.artist.clone();
-        if show_album {
-            if let Some(a) = app.lib.album_of(t) {
-                sub = format!("{sub} · {}", a.title);
+    let mut divider = r.divider;
+    let mut col = Column::new();
+    match lifted {
+        None => {
+            for (i, (content, click)) in r.rows.into_iter().enumerate() {
+                if div_at == Some(i) {
+                    if let Some((_, label)) = divider.take() {
+                        col = col.push(label);
+                    }
+                }
+                let lit = app.hover_row == Some((r.key, i));
+                col = col.push(
+                    mouse_area(card(content, lit, false))
+                        .interaction(if r.grab_cursor { iced::mouse::Interaction::Grab } else { iced::mouse::Interaction::Pointer })
+                        .on_press(Message::DragStart(r.list.clone(), i, n, div_at.map(|at| (at, LABEL_H)), h, Some(Box::new(click))))
+                        .on_enter(Message::RowHover(Some((r.key, i))))
+                        .on_exit(Message::RowLeave(r.key, i)),
+                );
+            }
+            let area = mouse_area(col);
+            // pressed, not yet moved far: watch the pointer to see whether this becomes a drag
+            if drag.is_some() {
+                area.on_move(|p| Message::DragAt(p.y)).into()
+            } else {
+                area.into()
             }
         }
+        Some(d) => {
+            // the other rows in order, with room opening where the card would land (and closing where it was)
+            let label_before = div_at.map(|at| if d.from < at { at - 1 } else { at });
+            let gap = |k: usize| -> El<'a> { Space::new(Length::Fill, d.gaps.get(k).copied().unwrap_or(0.0) * h).into() };
+            let mut k = 0;
+            for (i, (content, _)) in r.rows.into_iter().enumerate() {
+                if i == d.from {
+                    continue;
+                }
+                if label_before == Some(k) {
+                    // a row that stays one of your picks lands above the label; one that leaves them, below it
+                    let label = divider.take().map(|x| x.1);
+                    if div_at.map(|at| d.from < at).unwrap_or(false) {
+                        col = col.push(gap(k)).push_maybe(label);
+                    } else {
+                        col = col.push_maybe(label).push(gap(k));
+                    }
+                } else {
+                    col = col.push(gap(k));
+                }
+                col = col.push(card(content, false, false));
+                k += 1;
+            }
+            if label_before == Some(k) {
+                col = col.push_maybe(divider.take().map(|x| x.1));
+            }
+            col = col.push(gap(k));
+            let ghost: El<'a> = r.ghost.unwrap_or_else(|| Space::new(0, 0).into());
+            let floating = container(card(ghost, true, true)).padding(Padding { top: d.card_top(), ..Padding::ZERO });
+            mouse_area(stack![col, floating]).interaction(iced::mouse::Interaction::Grabbing).on_move(|p| Message::DragAt(p.y)).into()
+        }
+    }
+}
+
+/// What goes in front of each song: its place in the list, its track number (albums), or nothing (search results).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Numbers {
+    Place,
+    TrackNo,
+    Blank,
+}
+
+/// The little marks beside a song: downloaded (a red dot with an arrow) and explicit (E).
+fn song_marks<'a>(app: &App, t: &Track) -> Vec<El<'a>> {
+    let mut v: Vec<El<'a>> = vec![];
+    if app.downloaded.contains(&t.id) {
+        v.push(container(ui::wi("download", 9.0, Color::WHITE)).width(14).height(14).center_x(14).center_y(14).style(|_| container::Style { background: Some(ui::ACCENT().into()), border: iced::border::rounded(7.0), ..Default::default() }).into());
+    }
+    if t.explicit {
+        v.push(explicit_badge());
+    }
+    v
+}
+
+pub fn explicit_badge<'a>() -> El<'a> {
+    container(text("E").size(10).color(ui::FRAME())).padding([0, 4]).style(|_| container::Style { background: Some(ui::TEXT_2().into()), border: iced::border::rounded(3.0), ..Default::default() }).into()
+}
+
+/// A list of songs, like the website's: number (or the playing bars; a play mark under the pointer), cover, title with
+/// "artist · album" under it, then like, add to playlist and ⋯, and the length. Clicking a row plays the list from there.
+pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbers: Numbers, show_album: bool, rows: Rows<'_>) -> El<'a> {
+    let ids: Vec<String> = tracks.iter().map(|t| t.id.clone()).collect();
+    let album_page = numbers == Numbers::TrackNo;
+    let key = list_key(source, numbers as u64 + if matches!(rows, Rows::Playlist { .. }) { 16 } else { 0 });
+    let discs = tracks.iter().map(|t| t.disc.max(1)).max().unwrap_or(1);
+    let current = app.status.track.as_deref();
+    let h = TRACK_ROW_H;
+    // one row's content; `ghost` = the copy that follows the pointer while it's being moved (its buttons are just pictures)
+    let content = |i: usize, t: &'a Track, hovered: bool, ghost: bool| -> El<'a> {
+        let playing = current == Some(t.id.as_str());
+        let album = app.lib.album_of(t);
+        let lead: El<'a> = if hovered {
+            // under the pointer: play (or pause, on the song that's playing)
+            ui::play_pause(playing && app.status.playing, 14.0, ui::TEXT())
+        } else if playing {
+            marks::eq(app.status.playing, 12.0)
+        } else {
+            match numbers {
+                Numbers::Place => ui::dim((i + 1).to_string(), 15).into(),
+                Numbers::TrackNo => ui::dim(if t.no > 0 { t.no.to_string() } else { String::new() }, 15).into(),
+                Numbers::Blank => Space::new(0, 0).into(),
+            }
+        };
+        let title = text(clip(&t.title, 60)).size(15).color(if playing { ui::ACCENT() } else { ui::TEXT() }).wrapping(text::Wrapping::None);
+        let marks = song_marks(app, t);
+        // on an album page a song by the album's own artist shows just its title (with the marks beside it)
+        let own_artist = album_page && album.map(|a| a.artist == t.artist).unwrap_or(false);
+        let words: El<'a> = if own_artist {
+            let mut line = Row::new().spacing(6).align_y(Alignment::Center).push(title);
+            for m in marks {
+                line = line.push(m);
+            }
+            line.into()
+        } else {
+            let mut sub = t.artist.clone();
+            if show_album {
+                if let Some(a) = album {
+                    sub = format!("{sub} · {}", a.title);
+                }
+            }
+            let mut under = Row::new().spacing(4).align_y(Alignment::Center);
+            for m in marks {
+                under = under.push(m);
+            }
+            under = under.push(ui::dim(clip(&sub, 80), 13).wrapping(text::Wrapping::None));
+            column![title, under].spacing(1).into()
+        };
         let liked = app.is_liked(&t.id);
-        let small = |c: char, on: bool, hint: &str, m: Message| -> El<'_> { ui::tip(button(ic(c, 14)).style(ui::icon_btn(on)).padding(7).on_press(m), hint) };
-        // the same three buttons as the website: like, add to a playlist, and the ⋯ menu with everything else
         let in_playlist = match rows {
             Rows::Playlist { id: pl, liked: false } => Some((pl.to_string(), i)),
             _ => None,
         };
         let menu_open = matches!(&app.pop_menu, Some(crate::PopMenu { kind: crate::MenuKind::Track { id, in_playlist: p }, .. }) if *id == t.id && *p == in_playlist);
-        let line = row![
-            container(lead).width(if numbered { 32.0 } else { 48.0 }).center_x(Length::Fixed(if numbered { 32.0 } else { 48.0 })),
-            column![title_line, ui::dim(clip(&sub, 80), 13)].spacing(1).width(Length::Fill),
-            small(if liked { icon::HEART_FILL } else { icon::HEART }, liked, if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }, Message::ToggleLike(t.id.clone())),
-            small(icon::ADD, false, "Add to playlist", Message::AddToPlaylist(vec![t.id.clone()])),
-            small(icon::MORE, menu_open, "More", Message::PopMenuOpen(crate::MenuKind::Track { id: t.id.clone(), in_playlist })),
-            container(ui::dim(format_duration(t.duration), 13)).width(52).align_x(Alignment::End),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center);
-        let click = Message::PlayTracks(ids.clone(), i, source.to_string());
-        match rows {
-            Rows::Playlist { id: pl, .. } => {
-                let list = crate::DragList::Playlist(pl.to_string());
-                col = col.push(drop_target(app, &list, i, draggable_row(app, list.clone(), i, line.into(), click)));
+        // 32 px round buttons, 2 apart: like, add to a playlist, and the ⋯ menu with everything else
+        let small = |name: &'static str, size: f32, on: bool, hint: &'static str, m: Message| -> El<'a> {
+            let face = container(ui::wi_btn(name, size, on)).width(32).height(32).center_x(32).center_y(32);
+            if ghost {
+                container(ui::wi(name, size, if on { ui::ACCENT() } else { ui::TEXT_2() })).width(32).height(32).center_x(32).center_y(32).into()
+            } else {
+                ui::tip(button(face).padding(0).style(ui::icon_btn(on)).on_press(m), hint)
             }
-            Rows::Plain => col = col.push(button(line).width(Length::Fill).padding([6, 12]).style(ui::flat).on_press(click)),
+        };
+        let mut line = Row::new().spacing(12).align_y(Alignment::Center).push(container(lead).width(32).center_x(32));
+        if !album_page {
+            line = line.push(ui::cover_box(album.and_then(|a| app.cover_images.get(&(a.id.clone(), COVER))), album.map(|a| a.title.as_str()).unwrap_or(""), 40.0, 40.0, 4.0));
+        }
+        line.push(container(words).width(Length::Fill).clip(true))
+            .push(
+                row![
+                    small(if liked { "heartFill" } else { "heart" }, 16.0, liked, if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }, Message::ToggleLike(t.id.clone())),
+                    small("plus", 16.0, false, "Add to playlist", Message::AddToPlaylist(vec![t.id.clone()])),
+                    small("more", 18.0, menu_open, "More", Message::PopMenuOpen(crate::MenuKind::Track { id: t.id.clone(), in_playlist })),
+                ]
+                .spacing(2)
+                .align_y(Alignment::Center),
+            )
+            .push(container(ui::dim(format_duration(t.duration), 13)).width(52).align_x(Alignment::End))
+            .into()
+    };
+    let hovered = |i: usize| app.hover_row == Some((key, i));
+    match rows {
+        Rows::Playlist { id: pl, .. } => {
+            let list = crate::DragList::Playlist(pl.to_string());
+            let moving = app.drag.as_ref().filter(|d| d.list == list && d.active).map(|d| d.from);
+            let ghost = moving.and_then(|from| tracks.get(from).map(|t| content(from, t, true, true)));
+            let rows: Vec<(El<'a>, Message)> = tracks.iter().enumerate().map(|(i, t)| (content(i, t, hovered(i) && moving.is_none(), false), Message::PlayTracks(ids.clone(), i, source.to_string()))).collect();
+            drag_list(app, DragRows { list, key, rows, ghost, divider: None, row_h: h, lead: (12.0, 12.0), grab_cursor: true })
+        }
+        Rows::Plain => {
+            let mut col = Column::new();
+            let mut last_disc = 0;
+            for (i, t) in tracks.iter().enumerate() {
+                if album_page && discs > 1 && t.disc.max(1) != last_disc {
+                    last_disc = t.disc.max(1);
+                    col = col.push(
+                        container(row![ui::wi("disc", 16.0, ui::TEXT_2()), text(format!("Disc {last_disc}")).size(13).font(ui::FONT_BOLD).color(ui::TEXT_2())].spacing(8).align_y(Alignment::Center))
+                            .padding(Padding { top: if i == 0 { 0.0 } else { 22.0 }, bottom: 6.0, left: 12.0, right: 0.0 }),
+                    );
+                }
+                let lit = hovered(i);
+                let card = container(content(i, t, lit, false))
+                    .padding([0, 12])
+                    .width(Length::Fill)
+                    .height(h)
+                    .center_y(h)
+                    .style(move |_| container::Style { background: lit.then(|| ui::HOVER().into()), border: iced::border::rounded(8.0), ..Default::default() });
+                col = col.push(
+                    mouse_area(card)
+                        .interaction(iced::mouse::Interaction::Pointer)
+                        .on_press(Message::PlayTracks(ids.clone(), i, source.to_string()))
+                        .on_enter(Message::RowHover(Some((key, i))))
+                        .on_exit(Message::RowLeave(key, i)),
+                );
+            }
+            col.into()
         }
     }
-    col.into()
 }
 
 /// The ⋯ pop-up (a song's or a playlist's), opened where the pointer was, like the website's popover.
 pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
-    let item = |c: char, label: &'static str, msg: Message, danger: bool| -> El<'a> {
-        button(row![ic(c, 15).color(if danger { ui::ACCENT() } else { ui::TEXT_2() }), text(label).size(14).font(ui::FONT_BOLD).color(if danger { ui::ACCENT() } else { ui::TEXT() })].spacing(12).align_y(Alignment::Center))
+    let item = |name: &'static str, label: &'static str, msg: Message, danger: bool| -> El<'a> {
+        button(row![ui::wi(name, 18.0, if danger { ui::ACCENT() } else { ui::TEXT_2() }), text(label).size(14).font(ui::FONT_BOLD).color(if danger { ui::ACCENT() } else { ui::TEXT() })].spacing(12).align_y(Alignment::Center))
             .width(Length::Fill)
             .padding([9, 12])
             .style(ui::flat)
@@ -350,32 +514,41 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
     let mut items: Vec<El<'a>> = vec![];
     match &m.kind {
         crate::MenuKind::Track { id, in_playlist } => {
-            items.push(item(icon::QUEUE, "Play next", Message::PlayNext(id.clone()), false));
-            items.push(item(icon::ADD, "Add to queue", Message::AddToQueue(id.clone()), false));
-            items.push(item(icon::PLAYLIST, "Add to playlist", Message::AddToPlaylist(vec![id.clone()]), false));
+            items.push(item("queue", "Play next", Message::PlayNext(id.clone()), false));
+            items.push(item("plus", "Add to queue", Message::AddToQueue(id.clone()), false));
+            items.push(item("music", "Add to playlist", Message::AddToPlaylist(vec![id.clone()]), false));
             if let Some((pl, index)) = in_playlist {
-                items.push(item(icon::CLOSE, "Remove from this playlist", Message::RemoveFromPlaylist(pl.clone(), *index, id.clone()), false));
+                items.push(item("x", "Remove from this playlist", Message::RemoveFromPlaylist(pl.clone(), *index, id.clone()), false));
             }
+            let got = app.is_saved("track", id);
+            items.push(item(if got { "check" } else { "download" }, if got { "Remove download" } else { "Download" }, Message::ToggleSaved("track".into(), id.clone()), false));
             if let Some(t) = app.lib.track(id) {
-                items.push(item(icon::LIBRARY, "Go to album", Message::Go(Page::Album(t.album_id.clone())), false));
-                items.push(item(icon::PERSON, "Go to artist", Message::Go(Page::Artist(t.artist.clone())), false));
+                items.push(item("disc", "Go to album", Message::Go(Page::Album(t.album_id.clone())), false));
+                items.push(item("book", "Credits", Message::ShowCredits(id.clone()), false));
+                items.push(item("user", "Go to artist", Message::Go(Page::Artist(t.artist.clone())), false));
             }
         }
         crate::MenuKind::Playlist(id) => {
             if let Some(p) = app.playlist(id) {
                 if p.can_manage() {
-                    items.push(item(icon::EDIT, "Edit details", Message::EditPlaylist(p.id.clone()), false));
-                    items.push(item(icon::PICTURE, "Change picture", Message::PickPlaylistPicture(p.id.clone()), false));
+                    items.push(item("settings", "Edit details", Message::EditPlaylist(p.id.clone()), false));
+                    items.push(item("disc", "Change picture", Message::PickPlaylistPicture(p.id.clone()), false));
                     if p.cover > 0 {
-                        items.push(item(icon::CLOSE, "Remove picture", Message::RemovePlaylistPicture(p.id.clone()), false));
+                        items.push(item("x", "Remove picture", Message::RemovePlaylistPicture(p.id.clone()), false));
                     }
                 }
+                if p.can_manage() {
+                    items.push(item("users", if p.is_shared() { "Who can edit" } else { "Make collaborative" }, Message::CollabOpen(p.id.clone()), false));
+                }
                 if !p.tracks.is_empty() {
-                    items.push(item(icon::QUEUE, "Add to queue", Message::QueueMany(p.tracks.clone()), false));
+                    items.push(item("queue", "Add to queue", Message::QueueMany(p.tracks.clone()), false));
+                    if app.can("share") {
+                        items.push(item("send", "Share link…", Message::ShareOpen("playlist".into(), p.name.clone(), p.tracks.clone()), false));
+                    }
                 }
                 if p.can_manage() {
                     items.push(line());
-                    items.push(item(icon::DELETE, "Delete playlist", Message::DeletePlaylist(p.id.clone()), true));
+                    items.push(item("x", "Delete playlist", Message::DeletePlaylist(p.id.clone()), true));
                 }
             }
         }
@@ -502,7 +675,12 @@ fn main_screen(app: &App) -> El<'_> {
         // the Account page keeps its tabs on screen: only the part next to them scrolls
         container(page(app)).padding([8, 28]).width(Length::Fill).height(Length::Fill).into()
     } else {
-        scrollable(container(page(app)).padding([8, 28]).width(Length::Fill)).style(ui::scroller).height(Length::Fill).into()
+        scrollable(container(page(app)).padding([8, 28]).width(Length::Fill))
+            .id(crate::main_scroller())
+            .on_scroll(|v| Message::Scrolled(0, v.absolute_offset().y))
+            .style(ui::scroller)
+            .height(Length::Fill)
+            .into()
     };
     let content = container(column![history_arrows(app), content]).width(Length::Fill).height(Length::Fill).style(ui::panel);
     let mut body = column![];
@@ -599,20 +777,20 @@ fn account_menu(app: &App) -> El<'_> {
     .padding([8, 12])
     .style(ui::flat)
     .on_press(Message::Go(Page::Profile));
-    let item = |c: char, label: &'static str, m: Message| -> El<'static> {
-        button(row![ic(c, 16), text(label).size(14).font(ui::FONT_BOLD)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([9, 12]).style(ui::flat).on_press(m).into()
+    let item = |name: &'static str, label: &'static str, m: Message| -> El<'static> {
+        button(row![ui::wi(name, 18.0, ui::TEXT_2()), text(label).size(14).font(ui::FONT_BOLD)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([9, 10]).style(ui::flat).on_press(m).into()
     };
     let line = || container(Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER().into()), ..Default::default() });
     let may_members = user.admin || user.perms.iter().any(|p| p == "members");
     let mut card = column![head, container(line()).padding([4, 6])].spacing(2);
     if may_members {
-        card = card.push(item(icon::PEOPLE, "Members", Message::Go(Page::Members)));
+        card = card.push(item("family", "Members", Message::Go(Page::Members)));
     }
     card = card
-        .push(item(icon::SETTINGS, "Settings", Message::Go(Page::Settings)))
-        .push(item(icon::HISTORY, "Rewind", Message::Go(Page::Rewind)))
+        .push(item("settings", "Settings", Message::Go(Page::Settings)))
+        .push(item("history", "Rewind", Message::Go(Page::Rewind)))
         .push(container(line()).padding([4, 6]))
-        .push(item(icon::SIGN_OUT, "Sign out", Message::SignOut));
+        .push(item("logout", "Sign out", Message::SignOut));
     // as wide as the button it opens from (the sidebar is 240 wide with 8 of padding each side)
     opaque(container(card).width(224).padding(6).style(ui::dialog)).into()
 }
@@ -790,7 +968,7 @@ fn album_page<'a>(app: &'a App, id: &str) -> El<'a> {
     let extra = vec![download_button(app, "album", id, &ids), round_icon(icon::PLAYLIST, false, "Add to a playlist", Some(Message::AddToPlaylist(ids.clone())))];
     info = info.push(ui::gap(10)).push(header_buttons(Message::PlayAlbum(id.to_string(), 0), Message::ShuffleAlbum(id.to_string()), extra));
     let head = row![cover_of(app, Some(a), 220.0), info].spacing(28).align_y(Alignment::End);
-    let mut c = column![head, track_list(app, &tracks, &a.title, true, false, Rows::Plain)].spacing(28);
+    let mut c = column![head, track_list(app, &tracks, &a.title, Numbers::TrackNo, false, Rows::Plain)].spacing(24);
     let mut foot = vec![];
     if let Some(l) = &a.label {
         foot.push(l.clone());
@@ -831,7 +1009,7 @@ fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
     let mut c = column![head].spacing(28);
     if !p.songs.is_empty() {
         let top: Vec<&Track> = p.songs.iter().take(5).copied().collect();
-        c = c.push(section("Songs", track_list(app, &top, &page_name, false, true, Rows::Plain)));
+        c = c.push(section("Songs", track_list(app, &top, &page_name, Numbers::Place, true, Rows::Plain)));
     }
     if !p.albums.is_empty() {
         c = c.push(section("Albums", album_grid(app, p.albums.clone(), false)));
@@ -894,7 +1072,7 @@ fn search_page(app: &App) -> El<'_> {
         any = true;
         let n = if all { 5 } else { 200 };
         let list: Vec<&Track> = r.songs.iter().take(n).copied().collect();
-        c = c.push(titled("Songs", track_list(app, &list, "Search", false, true, Rows::Plain), (all && r.songs.len() > 5).then_some(SearchType::Songs)));
+        c = c.push(titled("Songs", track_list(app, &list, "Search", Numbers::Blank, true, Rows::Plain), (all && r.songs.len() > 5).then_some(SearchType::Songs)));
     }
     if show(SearchType::Albums) && !r.albums.is_empty() {
         any = true;
@@ -927,64 +1105,146 @@ fn titled<'a>(title: &'static str, body: El<'a>, more: Option<SearchType>) -> El
 
 /* ---------- Now Playing and the player bar ---------- */
 
+/// The website's "nothing here" block: an icon in a grey circle, a heading, a line of text and maybe a button.
+pub fn empty_state<'a>(icon_name: &str, title: &'a str, about: &'a str, action: Option<El<'a>>) -> El<'a> {
+    let mut c = column![
+        container(ui::wi(icon_name, 28.0, ui::TEXT_2())).width(64).height(64).center_x(64).center_y(64).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(32.0), ..Default::default() }),
+        ui::gap(16),
+        text(title).size(18).font(ui::FONT_BOLD),
+        ui::gap(6),
+        text(about).size(15).color(ui::TEXT_2()).align_x(iced::alignment::Horizontal::Center),
+    ]
+    .align_x(Alignment::Center);
+    if let Some(a) = action {
+        c = c.push(ui::gap(18)).push(a);
+    }
+    container(c).width(Length::Fill).center_x(Length::Fill).padding([56, 24]).into()
+}
+
+/// Now Playing, like the website's: the song big on the left (cover, title, artist, "album · year", like and add),
+/// and Up next / Lyrics / Credits on the right.
 fn now_playing(app: &App) -> El<'_> {
     let Some(t) = app.status.track.as_deref().and_then(|id| app.lib.track(id)) else {
-        return column![ui::title("Now playing", 32), ui::dim("Nothing playing. Pick an album or a song to start.", 15)].spacing(12).into();
+        return column![
+            ui::title("Now playing", 32),
+            ui::gap(12),
+            empty_state("music", "Nothing playing", "Pick an album, a playlist or a song to start.", Some(ui::btn("Go home", ui::Btn::Primary).on_press(Message::Go(Page::Home)).into())),
+        ]
+        .into();
     };
     let album = app.lib.album_of(t);
     let liked = app.is_liked(&t.id);
+    let in_one = app.cache.current_in_playlist;
     // the cover shrinks with the window (up to 360 px), so the tabs on the right always fit
     let art = iced::widget::responsive(move |size| cover_of(app, album, size.width.min(360.0)));
+    let mut title = Row::new().spacing(8).align_y(Alignment::Center).push(ui::title(clip(&t.title, 40), 28));
+    if t.explicit {
+        title = title.push(explicit_badge());
+    }
+    let album_line = album.map(|a| match a.year {
+        Some(y) => format!("{} · {y}", a.title),
+        None => a.title.clone(),
+    });
+    let round = |name: &'static str, on: bool, hint: &'static str, m: Message| -> El<'_> {
+        ui::tip(button(container(ui::wi_btn(name, 20.0, on)).width(40).height(40).center_x(40).center_y(40)).padding(0).style(ui::ring_btn(on)).on_press(m), hint)
+    };
     let left = column![
         container(art).width(Length::Fill).height(Length::Shrink).max_height(360),
-        ui::gap(8),
+        ui::gap(20),
+        button(title).padding(0).style(ui::link).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
+        ui::gap(4),
+        button(text(t.artist.as_str()).size(16).color(ui::TEXT_2())).padding(0).style(ui::link).on_press(Message::Go(Page::Artist(t.artist.clone()))),
+        ui::gap(2),
+        button(text(album_line.unwrap_or_default()).size(14).color(ui::TEXT_3())).padding(0).style(ui::link).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
+        ui::gap(14),
         row![
-            column![
-                ui::title(clip(&t.title, 40), 28),
-                button(text(t.artist.as_str()).size(16).color(ui::TEXT_2())).padding(0).style(ui::flat).on_press(Message::Go(Page::Artist(t.artist.clone()))),
-                button(text(album.map(|a| a.title.as_str()).unwrap_or("")).size(14).color(ui::TEXT_3())).padding(0).style(ui::flat).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
-            ]
-            .spacing(4)
-            .width(Length::Fill),
-            ui::tip(button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 20)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())), if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }),
-            ui::tip(button(ic(icon::PLAYLIST, 18)).padding(8).style(ui::icon_btn(false)).on_press(Message::AddToPlaylist(vec![t.id.clone()])), "Add to playlist"),
+            round(if liked { "heartFill" } else { "heart" }, liked, if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }, Message::ToggleLike(t.id.clone())),
+            round(if in_one { "check" } else { "plus" }, in_one, "Add to playlist", Message::AddToPlaylist(vec![t.id.clone()])),
         ]
-        .align_y(Alignment::Start),
+        .spacing(6),
     ]
-    .spacing(6)
     .width(Length::FillPortion(2))
     .max_width(360);
 
     let tab = |label: &'static str, tb: NpTab| button(text(label).size(14).wrapping(text::Wrapping::None)).padding([7, 16]).style(ui::chip(app.np_tab == tb)).on_press(Message::NpTab(tb));
     let tabs = row![tab("Up next", NpTab::Queue), tab("Lyrics", NpTab::Lyrics), tab("Credits", NpTab::Credits)].spacing(8);
     let right: El = match app.np_tab {
-        NpTab::Queue => {
-            let pos = app.queue.position().unwrap_or(0);
-            let mut list = Column::new().spacing(2);
-            list = list.push(ui::dim(if app.queue.source.is_empty() { String::new() } else { format!("Playing from {}", app.queue.source) }, 13));
-            let upcoming = app.queue.upcoming();
-            if upcoming.is_empty() {
-                list = list.push(ui::gap(8)).push(ui::dim("Nothing after this song.", 14));
-            }
-            for (k, id) in upcoming.iter().enumerate().take(100) {
-                let Some(t) = app.lib.track(id) else { continue };
-                let index = pos + 1 + k;
-                let line = row![
-                    cover_of(app, app.lib.album_of(t), 40.0),
-                    column![text(clip(&t.title, 50)).size(14).color(ui::TEXT()), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
-                    ui::tip(button(ic(icon::CLOSE, 11)).style(ui::icon_btn(false)).padding(8).on_press(Message::RemoveFromQueue(index)), "Remove from queue"),
-                    ui::dim(format_duration(t.duration), 12),
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center);
-                list = list.push(drop_target(app, &crate::DragList::Queue, index, draggable_row(app, crate::DragList::Queue, index, line.into(), Message::JumpQueue(index))));
-            }
-            scrollable(list).style(ui::scroller).height(Length::Fill).into()
-        }
+        NpTab::Queue => scrollable(queue_rows(app, t))
+            .id(crate::queue_scroller())
+            .on_scroll(|v| Message::Scrolled(1, v.absolute_offset().y))
+            .style(ui::scroller)
+            .height(Length::Fill)
+            .into(),
         NpTab::Lyrics => pages::lyrics(app, &t.id),
         NpTab::Credits => pages::credits(app, t),
     };
-    row![left, column![tabs, right].spacing(14).width(Length::FillPortion(3)).height(Length::Fill)].spacing(32).into()
+    container(row![left, column![tabs, right].spacing(16).width(Length::FillPortion(3)).height(Length::Fill)].spacing(40)).padding(Padding { top: 8.0, ..Padding::ZERO }).into()
+}
+
+/// The queue, like the website's: the song that's playing, then the ones you queued yourself ("Next in queue"), then
+/// what follows from the album or playlist ("Next from …"). The upcoming rows can be dragged anywhere, or removed.
+fn queue_rows<'a>(app: &'a App, now: &'a Track) -> El<'a> {
+    let key = list_key("queue", 99);
+    let pos = app.queue.position().unwrap_or(0);
+    let label = |s: String| -> El<'a> { container(text(s).size(13).font(ui::FONT_BOLD).color(ui::TEXT_2())).padding(Padding { top: 14.0, bottom: 0.0, left: 12.0, right: 12.0 }).height(LABEL_H).into() };
+    // one row: cover, name over artist, length, and (for upcoming songs, under the pointer) a remove button
+    let content = |t: &'a Track, index: Option<usize>, current: bool, hovered: bool, ghost: bool| -> El<'a> {
+        let mut name = Row::new().spacing(6).align_y(Alignment::Center).push(text(clip(&t.title, 50)).size(14).font(ui::FONT_BOLD).color(if current { ui::ACCENT() } else { ui::TEXT() }).wrapping(text::Wrapping::None));
+        if t.explicit {
+            name = name.push(explicit_badge());
+        }
+        let mut line = row![
+            ui::cover_box(app.lib.album_of(t).and_then(|a| app.cover_images.get(&(a.id.clone(), COVER))), app.lib.album_of(t).map(|a| a.title.as_str()).unwrap_or(""), 40.0, 40.0, 4.0),
+            container(column![name, ui::dim(clip(&t.artist, 50), 12).wrapping(text::Wrapping::None)].spacing(1)).width(Length::Fill).clip(true),
+            ui::dim(format_duration(t.duration), 12),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        if let Some(i) = index {
+            let x = container(ui::wi_btn("x", 15.0, false)).width(28).height(28).center_x(28).center_y(28);
+            line = line.push(if !hovered {
+                El::from(Space::new(28, 28))
+            } else if ghost {
+                x.into()
+            } else {
+                ui::tip(button(x).padding(0).style(ui::icon_btn(false)).on_press(Message::RemoveFromQueue(i)), "Remove from queue")
+            });
+        }
+        line.into()
+    };
+    let mut col = Column::new().push(label("Now playing".into()));
+    // the song that's playing: lights up under the pointer, a click starts it again
+    let lit = app.hover_row == Some((key, usize::MAX));
+    col = col.push(
+        mouse_area(
+            container(content(now, None, true, false, false))
+                .padding([0, 12])
+                .width(Length::Fill)
+                .height(QUEUE_ROW_H)
+                .center_y(QUEUE_ROW_H)
+                .style(move |_| container::Style { background: lit.then(|| ui::HOVER().into()), border: iced::border::rounded(8.0), ..Default::default() }),
+        )
+        .interaction(iced::mouse::Interaction::Pointer)
+        .on_press(Message::JumpQueue(pos))
+        .on_enter(Message::RowHover(Some((key, usize::MAX))))
+        .on_exit(Message::RowLeave(key, usize::MAX)),
+    );
+    let upcoming: Vec<&Track> = app.queue.upcoming().iter().take(300).filter_map(|id| app.lib.track(id)).collect();
+    if upcoming.is_empty() {
+        let none = if app.queue.repeat() == Repeat::All { "Repeat is on: the queue starts over." } else { "Nothing else queued." };
+        return col.push(container(ui::dim(none, 15)).padding([8, 12])).into();
+    }
+    let mine = app.queue.user_queued().min(upcoming.len());
+    let from = if app.queue.source.is_empty() { "Next".to_string() } else { format!("Next from {}", app.queue.source) };
+    // the first part's label sits above the list; the second part's (if there are both) between its rows
+    col = col.push(label(if mine > 0 { "Next in queue".into() } else { from.clone() }));
+    let list = crate::DragList::Queue;
+    let moving = app.drag.as_ref().filter(|d| d.list == list && d.active).map(|d| d.from);
+    let hovered = |k: usize| app.hover_row == Some((key, k)) && moving.is_none();
+    let ghost = moving.and_then(|k| upcoming.get(k).map(|t| content(t, Some(pos + 1 + k), false, true, true)));
+    let rows: Vec<(El<'a>, Message)> = upcoming.iter().enumerate().map(|(k, t)| (content(t, Some(pos + 1 + k), false, hovered(k), false), Message::JumpQueue(pos + 1 + k))).collect();
+    let divider = (mine > 0 && mine < upcoming.len()).then(|| (mine, label(from)));
+    col.push(drag_list(app, DragRows { list, key, rows, ghost, divider, row_h: QUEUE_ROW_H, lead: (4.0, 6.0), grab_cursor: false })).into()
 }
 
 fn player_bar(app: &App) -> El<'_> {

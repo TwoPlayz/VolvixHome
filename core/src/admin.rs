@@ -120,6 +120,12 @@ impl Client {
         Ok(serde_json::from_value(v["shares"].clone()).unwrap_or_default())
     }
 
+    /// Make a link to an album or playlist that anyone with it can play for `days` days (1, 7 or 30).
+    pub fn create_share(&self, kind: &str, name: &str, tracks: &[String], days: u32) -> Result<Share> {
+        let v = json_of(self.request("POST", "/api/shares").send_json(json!({ "kind": kind, "name": name, "tracks": tracks, "days": days }))?)?;
+        serde_json::from_value(v["share"].clone()).map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
     pub fn cancel_share(&self, token: &str) -> Result<()> {
         self.request("DELETE", &format!("/api/shares/{}", enc(token))).call()?;
         Ok(())

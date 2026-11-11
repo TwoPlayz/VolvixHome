@@ -22,6 +22,7 @@ mod pictures;
 mod system;
 mod ui;
 mod views;
+mod webicons;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -117,13 +118,55 @@ pub enum DragList {
     Playlist(String),
 }
 
+/// A row that has been pressed (and, once the pointer has moved a little, picked up) in a list you can reorder.
 #[derive(Debug, Clone)]
 pub struct Drag {
     pub list: DragList,
     pub from: usize,
+    /// where it would land if let go now
     pub over: usize,
-    /// what letting go on the same row means (a click: play it)
+    /// what a plain click on the row does (letting go without having moved)
     pub click: Option<Box<Message>>,
+    /// where the pointer was pressed (window pixels); 5 px from there the row is picked up
+    pub start: (f32, f32),
+    pub active: bool,
+    /// how many rows the list has, how tall each is, and the label between two of them (before which row, how tall)
+    pub count: usize,
+    pub row_h: f32,
+    pub divider: Option<(usize, f32)>,
+    /// the pointer's height within the list, and how far into the row it took hold
+    pub y: f32,
+    pub grab: Option<f32>,
+    /// the room opened before each of the other rows (and after the last), in rows; it eases toward `over`
+    pub gaps: Vec<f32>,
+    pub last_frame: Instant,
+}
+
+impl Drag {
+    /// Where row `i` starts when nothing is being moved.
+    pub fn row_top(&self, i: usize) -> f32 {
+        i as f32 * self.row_h + self.divider.filter(|(at, _)| i >= *at).map(|(_, h)| h).unwrap_or(0.0)
+    }
+
+    /// Where the picked-up card's top is (it stays inside the list).
+    pub fn card_top(&self) -> f32 {
+        (self.y - self.grab.unwrap_or(0.0)).clamp(0.0, self.row_top(self.count.saturating_sub(1)))
+    }
+
+    /// Work out where it would land: after as many rows as have their middle above the card's middle (the website's rule).
+    fn place(&mut self) {
+        let mid = self.card_top() + self.row_h / 2.0;
+        let above = (0..self.count).filter(|j| *j != self.from && self.row_top(*j) + self.row_h / 2.0 < mid).count();
+        self.over = above.min(self.count.saturating_sub(1));
+    }
+}
+
+/// The page's scrolling area and the queue's (a picked-up row near their top or bottom edge scrolls them).
+pub fn main_scroller() -> scrollable::Id {
+    scrollable::Id::new("main")
+}
+pub fn queue_scroller() -> scrollable::Id {
+    scrollable::Id::new("queue")
 }
 
 /// What a pop-up menu (the more button) is for.
@@ -210,6 +253,12 @@ pub enum Dialog {
     Manage { id: String, password: String, error: Option<String>, confirm_remove: bool },
     /// pick the server's music folder
     Folder { browse: Option<volvix_core::admin::Browse>, error: Option<String> },
+    /// a song's credits (from its ⋯ menu)
+    Credits { track: String },
+    /// make a share link for an album or playlist: how long, then the link to copy
+    Share { kind: String, name: String, tracks: Vec<String>, days: u32, link: Option<(String, String)>, error: Option<String>, busy: bool },
+    /// who can edit a collaborative playlist (ticked = can edit, or invited)
+    Collab { id: String, picked: Vec<String> },
 }
 
 /// Playing on a TV or speaker: the app keeps the queue and the clock but stays silent, and tells the TV
@@ -269,15 +318,30 @@ pub enum Message {
     AddToQueue(String),
     Forward,
     /// drag to reorder: picked up a row, moved over another, let go anywhere
-    DragStart(DragList, usize, Option<Box<Message>>),
+    /// a row was pressed: the list, the row, how many rows, the label between rows, the row height, what a click does
+    DragStart(DragList, usize, usize, Option<(usize, f32)>, f32, Option<Box<Message>>),
+    /// the pointer's height within that list
+    DragAt(f32),
+    /// a new frame while a row is picked up (the others ease out of its way; the list scrolls near its edges)
+    DragFrame,
+    /// a scrolling area moved (0 the page, 1 the queue): how far down it is now
+    Scrolled(u8, f32),
     /// the pop-up menu: open for a song or playlist, pick something from it (closes it), close it
     PopMenuOpen(MenuKind),
     PopMenuDo(Box<Message>),
     PopMenuClose,
     /// the row under the pointer (lit up, and shows its grip)
-    RowHover(Option<usize>),
+    RowHover(Option<(u64, usize)>),
     PlayNext(String),
-    RowLeave(usize),
+    /// a song's credits in a window; a share link for an album ("album") or playlist: open, pick days, make it
+    ShowCredits(String),
+    ShareOpen(String, String, Vec<String>),
+    ShareDays(u32),
+    ShareCreate,
+    ShareCreated(Result<volvix_core::admin::Share, Error>),
+    /// who can edit a playlist (your own one becomes collaborative first)
+    CollabOpen(String),
+    RowLeave(u64, usize),
     /// add every song of a playlist to the queue
     QueueMany(Vec<String>),
     /// a playlist's own picture: pick a file, it was saved on the server, remove it; and one arriving from the server
@@ -290,7 +354,6 @@ pub enum Message {
     /// the playlist page's Add songs box
     AddSongQuery(String),
     AddSongTo(String, String),
-    DragOver(usize),
     DragEnd,
     TogglePlay,
     /* the cast button: TVs, speakers and listening parties */
@@ -531,7 +594,10 @@ pub struct App {
     pl_covers: HashMap<(String, u64), image::Handle>,
     pl_cover_pending: HashSet<(String, u64)>,
     pub pop_menu: Option<PopMenu>,
-    pub hover_row: Option<usize>,
+    /// the row under the pointer: which list on the page (see `views::list_key`) and which row
+    pub hover_row: Option<(u64, usize)>,
+    collab_after: bool,
+    scroll_y: [f32; 2],
     pub add_q: String,
     pub cache: Cache,
     start_hidden: bool,
@@ -669,6 +735,8 @@ impl App {
             pl_cover_pending: HashSet::new(),
             pop_menu: None,
             hover_row: None,
+            collab_after: false,
+            scroll_y: [0.0; 2],
             add_q: String::new(),
             cache: Cache::default(),
             start_hidden,
@@ -806,7 +874,7 @@ impl App {
         if self.account_menu && matches!(msg, Message::Go(_) | Message::SignOut) {
             self.account_menu = false; // a choice in the account menu closes it
         }
-        let hot = matches!(msg, Message::Tick | Message::Volume(_) | Message::DragOver(_) | Message::RowHover(_) | Message::CoverLoaded(..) | Message::ImageLoaded(..));
+        let hot = matches!(msg, Message::Tick | Message::Volume(_) | Message::DragAt(_) | Message::DragFrame | Message::Scrolled(..) | Message::RowHover(_) | Message::RowLeave(..) | Message::CoverLoaded(..) | Message::ImageLoaded(..));
         let track_before = self.status.track.clone();
         let t = self.handle(msg);
         if !hot || self.status.track != track_before {
@@ -864,6 +932,7 @@ impl App {
             }
         }
         self.now_playing = false;
+        self.hover_row = None;
         let mut tasks = vec![self.fetch_covers()];
         if let Some(c) = self.client.clone().filter(|_| !self.offline) {
             match page {
@@ -1119,6 +1188,8 @@ impl App {
         for s in &self.saved {
             let ids = match s.kind.as_str() {
                 "album" => self.lib.album_track_ids(&s.id),
+                // one song, downloaded from its ⋯ menu
+                "track" => vec![s.id.clone()],
                 _ => self.playlist(&s.id).map(|p| p.tracks).unwrap_or_default(),
             };
             for id in ids {
@@ -1459,7 +1530,70 @@ impl App {
                 }
                 return self.fetch_covers();
             }
-            Message::DragStart(list, from, click) => self.drag = Some(Drag { list, from, over: from, click }),
+            Message::DragStart(list, from, count, divider, row_h, click) => {
+                let start = POINTER.lock().map(|p| *p).unwrap_or((0.0, 0.0));
+                self.drag = Some(Drag { list, from, over: from, click, start, active: false, count, row_h, divider, y: 0.0, grab: None, gaps: vec![], last_frame: Instant::now() });
+            }
+            Message::DragAt(y) => {
+                if let Some(d) = &mut self.drag {
+                    // how far into the row the pointer took hold (from the first report after the press)
+                    if d.grab.is_none() {
+                        d.grab = Some((y - d.row_top(d.from)).clamp(0.0, d.row_h));
+                    }
+                    d.y = y;
+                    if !d.active {
+                        let p = POINTER.lock().map(|p| *p).unwrap_or(d.start);
+                        if (p.0 - d.start.0).hypot(p.1 - d.start.1) < 5.0 {
+                            return Task::none();
+                        }
+                        // moved far enough: it's picked up, and the room it leaves is where it was
+                        d.active = true;
+                        d.gaps = vec![0.0; d.count.max(1)];
+                        if let Some(g) = d.gaps.get_mut(d.from) {
+                            *g = 1.0;
+                        }
+                        d.last_frame = Instant::now();
+                        self.hover_row = None;
+                    }
+                    d.place();
+                }
+            }
+            Message::DragFrame => {
+                let Some(d) = &mut self.drag else { return Task::none() };
+                if !d.active {
+                    return Task::none();
+                }
+                let dt = d.last_frame.elapsed().as_secs_f32().min(0.1);
+                d.last_frame = Instant::now();
+                // the other rows slide to where they belong (the website takes about 0.16 s)
+                let k = 1.0 - (-dt / 0.05).exp();
+                let over = d.over;
+                for (i, g) in d.gaps.iter_mut().enumerate() {
+                    *g += (if i == over { 1.0 } else { 0.0 } - *g) * k;
+                }
+                // near the top or bottom edge of the list's view: scroll, as the website does (12 px every 30 ms)
+                let (_, py) = POINTER.lock().map(|p| *p).unwrap_or((0.0, 0.0));
+                let (_, wh) = WINDOW_SIZE.lock().map(|w| *w).unwrap_or((1200.0, 800.0));
+                let (top, which) = match d.list {
+                    DragList::Queue => (150.0, queue_scroller()),
+                    DragList::Playlist(_) => (96.0, main_scroller()),
+                };
+                let step = 400.0 * dt;
+                let dy = if py < top + 60.0 {
+                    -step
+                } else if py > wh - 160.0 {
+                    step
+                } else {
+                    0.0
+                };
+                if dy != 0.0 {
+                    return scrollable::scroll_by(which, scrollable::AbsoluteOffset { x: 0.0, y: dy });
+                }
+            }
+            Message::Scrolled(which, y) => {
+                // (the list reports the pointer's new place in it by itself after it scrolls)
+                self.scroll_y[(which as usize).min(1)] = y;
+            }
             Message::PopMenuOpen(kind) => {
                 let at = POINTER.lock().map(|p| *p).unwrap_or((0.0, 0.0));
                 self.pop_menu = Some(PopMenu { kind, at });
@@ -1469,9 +1603,14 @@ impl App {
                 self.pop_menu = None;
                 return self.update(*m);
             }
-            Message::RowHover(h) => self.hover_row = h,
-            Message::RowLeave(i) => {
-                if self.hover_row == Some(i) {
+            Message::RowHover(h) => {
+                // not while a row is being carried around
+                if !self.drag.as_ref().map(|d| d.active).unwrap_or(false) {
+                    self.hover_row = h;
+                }
+            }
+            Message::RowLeave(list, i) => {
+                if self.hover_row == Some((list, i)) {
                     self.hover_row = None;
                 }
             }
@@ -1530,28 +1669,84 @@ impl App {
                     self.pl_covers.insert((id, v), image::Handle::from_bytes(b));
                 }
             }
+            Message::ShowCredits(id) => {
+                self.dialog = Some(Dialog::Credits { track: id.clone() });
+                if !self.credits.contains_key(&id) {
+                    if let Some(c) = self.client.clone().filter(|_| !self.offline) {
+                        let tid = id.clone();
+                        return Task::perform(blocking(move || c.credits(&tid)), move |r| Message::CreditsLoaded(id.clone(), r));
+                    }
+                }
+            }
+            Message::ShareOpen(kind, name, tracks) => {
+                if !self.can("share") {
+                    self.say("You don't have permission to make share links. Ask an admin.");
+                } else if tracks.is_empty() {
+                    self.say("There's nothing in it to share yet");
+                } else {
+                    self.dialog = Some(Dialog::Share { kind, name, tracks, days: 7, link: None, error: None, busy: false });
+                }
+            }
+            Message::ShareDays(d) => {
+                if let Some(Dialog::Share { days, .. }) = &mut self.dialog {
+                    *days = d;
+                }
+            }
+            Message::ShareCreate => {
+                let (Some(c), Some(Dialog::Share { kind, name, tracks, days, busy, .. })) = (self.client.clone(), &mut self.dialog) else { return Task::none() };
+                *busy = true;
+                let (kind, name, tracks, days) = (kind.clone(), name.clone(), tracks.clone(), *days);
+                return Task::perform(blocking(move || c.create_share(&kind, &name, &tracks, days)), Message::ShareCreated);
+            }
+            Message::ShareCreated(r) => {
+                let base = self.client.as_ref().map(|c| c.base().to_string()).unwrap_or_default();
+                if let Some(Dialog::Share { link, error, busy, .. }) = &mut self.dialog {
+                    *busy = false;
+                    match r {
+                        Ok(s) => *link = Some((format!("{base}{}", s.path), s.time_left(userdata::now()))),
+                        Err(e) => *error = Some(e.to_string()),
+                    }
+                }
+            }
+            Message::CollabOpen(id) => {
+                let Some(p) = self.playlist(&id) else { return Task::none() };
+                if p.is_shared() {
+                    let mut picked = p.collaborators.clone();
+                    picked.extend(p.invited.iter().cloned());
+                    self.dialog = Some(Dialog::Collab { id, picked });
+                    if let Some(c) = self.client.clone() {
+                        return Task::perform(blocking(move || c.household()), Message::HouseholdLoaded);
+                    }
+                } else {
+                    // it only becomes shared (and moves to the server) once you choose who can edit it
+                    let (Some(c), Some(pl)) = (self.client.clone(), self.data.playlists.iter().find(|x| x.id == id).cloned()) else { return Task::none() };
+                    let ids = pl.track_ids();
+                    self.collab_after = true;
+                    return Task::perform(blocking(move || c.create_shared(&pl.name, &pl.description, pl.public, &ids)), move |r| Message::SharedCreated(r, id.clone()));
+                }
+            }
             Message::PlayNext(id) => {
                 self.queue.play_next(&id);
                 self.say("Playing next");
             }
             Message::AddSongQuery(s) => self.add_q = s,
             Message::AddSongTo(pl, id) => return self.add_to_playlist(&pl, vec![id]),
-            Message::DragOver(i) => {
-                if let Some(d) = &mut self.drag {
-                    d.over = i;
-                }
-            }
             Message::DragEnd => {
                 if let Some(d) = self.drag.take() {
-                    if d.over == d.from {
-                        // let go on the row it was picked up on: that was a click
+                    let p = POINTER.lock().map(|p| *p).unwrap_or(d.start);
+                    let moved = (p.0 - d.start.0).hypot(p.1 - d.start.1) >= 5.0;
+                    if !d.active && !moved {
+                        // let go where it was pressed: a click
                         if let Some(m) = d.click {
                             return self.update(*m);
                         }
-                    } else {
+                    } else if d.active && d.over != d.from {
+                        // dropped somewhere else: it moves there (and nothing starts playing)
                         return match d.list {
                             DragList::Queue => {
-                                self.queue.move_item(d.from, d.over);
+                                // the queue's rows are counted from the song after the current one
+                                let base = self.queue.position().map(|p| p + 1).unwrap_or(0);
+                                self.queue.move_item(base + d.from, base + d.over);
                                 Task::none()
                             }
                             DragList::Playlist(pl) => self.update(Message::MoveInPlaylist(pl, d.from, d.over)),
@@ -1727,7 +1922,7 @@ impl App {
             }
             Message::PartyInviteOpen => self.dialog = Some(Dialog::PartyInvite { invite: vec![] }),
             Message::PartyPick(id, on) => {
-                if let Some(Dialog::PartyStart { invite } | Dialog::PartyInvite { invite }) = &mut self.dialog {
+                if let Some(Dialog::PartyStart { invite } | Dialog::PartyInvite { invite } | Dialog::Collab { picked: invite, .. }) = &mut self.dialog {
                     invite.retain(|i| *i != id);
                     if on {
                         invite.push(id);
@@ -1932,9 +2127,11 @@ impl App {
                 Ok(res) => {
                     let id = res.playlist.id.clone();
                     self.shared.push(res.playlist);
-                    self.say("It's collaborative now. Invite people from the website's playlist page.");
                     let t = self.edit(vec![Edit::DeletePlaylist(old_id)]);
-                    return Task::batch([t, self.go(Page::Playlist(id))]);
+                    let page = self.go(Page::Playlist(id.clone()));
+                    // then choose who can edit it
+                    self.collab_after = false;
+                    return Task::batch([t, page, self.update(Message::CollabOpen(id))]);
                 }
                 Err(e) => self.say(e.to_string()),
             },
@@ -2629,7 +2826,25 @@ impl App {
                 }
                 self.edit(vec![Edit::DeletePlaylist(id)])
             }
-            Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } | Dialog::Folder { .. } => Task::none(),
+            Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } | Dialog::Folder { .. } | Dialog::Credits { .. } | Dialog::Share { .. } => Task::none(),
+            Dialog::Collab { id, picked } => {
+                self.dialog = None;
+                let Some(p) = self.playlist(&id) else { return Task::none() };
+                let current: Vec<String> = p.collaborators.iter().chain(p.invited.iter()).cloned().collect();
+                let add: Vec<String> = picked.iter().filter(|x| !current.contains(x)).cloned().collect();
+                let drop: Vec<String> = current.iter().filter(|x| !picked.contains(x)).cloned().collect();
+                let mut tasks = vec![];
+                if !add.is_empty() {
+                    self.say("Invites sent");
+                    tasks.push(self.update(Message::SharedOp(id.clone(), json!({ "op": "invite", "userIds": add }))));
+                } else if !drop.is_empty() {
+                    self.say("Updated who can edit");
+                }
+                for u in drop {
+                    tasks.push(self.update(Message::SharedOp(id.clone(), json!({ "op": "uninvite", "userId": u }))));
+                }
+                Task::batch(tasks)
+            }
             Dialog::AddCast { host, busy, .. } => {
                 let Some(c) = self.client.clone() else { return Task::none() };
                 if busy || host.trim().is_empty() {
@@ -3024,6 +3239,10 @@ impl App {
             }
             None
         }));
+        // a row is picked up: the others ease out of its way, frame by frame
+        if self.drag.as_ref().map(|d| d.active).unwrap_or(false) {
+            subs.push(window::frames().map(|_| Message::DragFrame));
+        }
         // dragging a row: letting go anywhere drops it
         if self.drag.is_some() {
             subs.push(iced::event::listen_with(|e, _, _| match e {
