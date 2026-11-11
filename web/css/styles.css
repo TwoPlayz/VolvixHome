@@ -3163,3 +3163,22 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 .ctrl-play { display: grid; place-items: center; padding: 0; }
 .ctrl-play .icon { display: block; margin: 0; fill: currentColor; stroke: none; }
 .ctrl-play .icon * { fill: currentColor; stroke: none; }
+/* ---- round 5: player and sidebar match the app ---- */
+/* the player's text can't be selected (it's a button-like card) */
+.player, .player * { user-select: none; -webkit-user-select: none; }
+/* spacing: bars, card and buttons sit 4px apart, like the app; the bars keep their room even when hidden */
+.player-track { gap: 4px; }
+.eq-player { display: inline-flex; visibility: hidden; width: 12px; margin-right: 0; }
+.eq-player.on { visibility: visible; }
+.eq-player i { width: 3px; }
+/* long names are cut off at the edge of the card (the app clips them, no dots) */
+.player-title, .player-sub { text-overflow: clip; }
+/* the Liked Songs picture: the heart sits exactly in the middle, at any size */
+.cover.cover--liked { container-type: inline-size; display: grid; place-items: center; }
+.cover.cover--liked .icon { width: 40cqw; height: 40cqw; margin: 0; display: grid; place-items: center; }
+.cover.cover--liked .icon.glyph { font-size: 36cqw; }
+.cover.cover--liked .icon svg { display: block; width: 100%; height: 100%; }
+/* sidebar playlists show their picture, not an icon */
+.pl-mark { width: 32px; height: 32px; border-radius: 4px; overflow: hidden; flex: none; }
+.pl-mark .cover, .pl-mark .mosaic { width: 100%; height: 100%; border-radius: 4px; }
+.playlist-link { padding: 4px 10px; }

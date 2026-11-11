@@ -1,7 +1,7 @@
 //! Updates from GitHub releases (TwoPlayz/VolvixHome). The release has `volvix-home.exe` and, next to it,
 //! `volvix-home.exe.sha256`. The new exe is downloaded to the app's own folder, checked against that hash, and
 //! swapped in (Windows lets a running exe be renamed, not overwritten): the old one becomes `volvix-home.old`
-//! until the next start. Nothing restarts by itself: the tray offers "Restart to finish the update".
+//! until the next start. The app then restarts itself into the new copy (the caller does that on `Ready`).
 
 use std::io::Read;
 use std::path::PathBuf;

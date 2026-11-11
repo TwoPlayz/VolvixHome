@@ -118,8 +118,8 @@ window.Spin.views = window.Spin.views || {};
     host.innerHTML = list.map(function (pl) {
       const n = pl.tracks.length + (pl.tracks.length === 1 ? ' song' : ' songs');
       const sub = pl.owner !== 'u_me' ? 'By ' + S.esc(S.data.person(pl.owner).name.split(' ')[0]) + ' · ' + n : (pl.collaborative ? 'Collaborative · ' : 'Playlist · ') + n;
-      // like the Windows app: a red heart for Liked Songs, people for shared playlists, a list for the rest
-      const mark = pl.liked ? S.icon('heartFill', 16) : (pl.collaborative || pl.owner !== 'u_me') ? S.icon('users', 16) : S.icon('list', 16);
+      // the playlist's own picture (Liked Songs gets its heart)
+      const mark = S.playlistCover(pl, 'pl-cover');
       return '<a class="playlist-link" href="#/playlist/' + pl.id + '" data-route="/playlist/' + pl.id + '">' +
         '<span class="pl-mark' + (pl.liked ? ' pl-liked' : '') + '">' + mark + '</span>' +
         '<span class="pl-text"><span class="pl-name">' + S.esc(pl.name) + '</span><span class="pl-sub">' + sub + '</span></span></a>';

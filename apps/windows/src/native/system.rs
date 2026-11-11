@@ -200,8 +200,36 @@ pub struct Tray {
     quit: MenuItem,
 }
 
+/// Let Windows draw this program's pop-up menus (the tray menu) in the system's light or dark theme.
+/// (uxtheme has no public call for it: ordinal 135 is SetPreferredAppMode, 136 flushes the menu theme cache.)
+fn follow_system_menu_theme() {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LoadLibraryW(name: *const u16) -> isize;
+        fn GetProcAddress(module: isize, name: usize) -> usize;
+    }
+    let name: Vec<u16> = "uxtheme.dll\0".encode_utf16().collect();
+    unsafe {
+        let lib = LoadLibraryW(name.as_ptr());
+        if lib == 0 {
+            return;
+        }
+        let set = GetProcAddress(lib, 135);
+        if set != 0 {
+            let set: extern "system" fn(i32) -> i32 = std::mem::transmute(set);
+            set(1); // AllowDark: follows the system setting
+        }
+        let flush = GetProcAddress(lib, 136);
+        if flush != 0 {
+            let flush: extern "system" fn() = std::mem::transmute(flush);
+            flush();
+        }
+    }
+}
+
 impl Tray {
     pub fn new(start_with_windows: bool, close_to_tray: bool, auto_update: bool) -> Option<Tray> {
+        follow_system_menu_theme();
         let open = MenuItem::new("Open Volvix Home", true, None);
         let play = MenuItem::new("Play / pause", true, None);
         let next = MenuItem::new("Next song", true, None);

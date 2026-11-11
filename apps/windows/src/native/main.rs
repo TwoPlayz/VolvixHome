@@ -2039,6 +2039,12 @@ impl App {
             self.check_update();
         }
         while let Ok(s) = self.update_rx.try_recv() {
+            // an installed update starts by itself: the new copy opens and this one exits
+            if let update::State::Ready(_) = &s {
+                if update::restart() {
+                    return iced::exit();
+                }
+            }
             if let (update::State::Ready(v), Some(t)) = (&s, &self.tray) {
                 t.restart.set_enabled(true);
                 t.set_tooltip(&format!("Volvix Home: version {v} is ready (restart to finish)"));

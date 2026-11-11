@@ -57,6 +57,8 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
     if let Some(t) = app.status.track.as_deref().and_then(|id| lib.track(id)) {
         ids.push(t.album_id.clone());
     }
+    // the sidebar always shows your playlists' pictures
+    ids.extend(app.playlists().iter().filter_map(|p| first_album(&p.tracks)));
     if app.now_playing {
         ids.extend(app.queue.upcoming().iter().take(30).filter_map(|id| lib.track(id)).map(|t| t.album_id.clone()));
     } else {
@@ -457,12 +459,9 @@ fn sidebar(app: &App) -> El<'_> {
     let mut list = Column::new().spacing(0);
     for p in app.playlists().into_iter().filter(|p| !matches!(p.kind, Kind::Household { .. })) {
         let active = is(&Page::Playlist(p.id.clone()));
-        let mark: El = match p.kind {
-            Kind::Liked => ic(icon::HEART_FILL, 12).color(ui::ACCENT).into(),
-            Kind::Shared { .. } => ic(icon::PEOPLE, 12).into(),
-            _ => ic(icon::PLAYLIST, 12).into(),
-        };
-        list = list.push(button(row![mark, text(clip(&p.name, 24)).size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([6, 14]).style(ui::nav(active)).on_press(Message::Go(Page::Playlist(p.id.clone()))));
+        // the playlist's picture (its first album; a heart for Liked Songs), like the website
+        let mark = playlist_cover(app, &p.tracks, p.kind == Kind::Liked, &p.name, 32.0);
+        list = list.push(button(row![mark, text(clip(&p.name, 22)).size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([4, 10]).style(ui::nav(active)).on_press(Message::Go(Page::Playlist(p.id.clone()))));
     }
     let playlists = column![container(head).padding(Padding { top: 0.0, bottom: 0.0, left: 14.0, right: 4.0 }), scrollable(list).style(ui::scroller).height(Length::Fill)].spacing(2);
 
@@ -893,8 +892,7 @@ fn player_row(app: &App, width: f32) -> El<'_> {
 
     let has = track.is_some() || !app.queue.is_empty();
     let small = |c: char, on: bool, hint: &str, m: Message| -> El<'_> { ui::tip(button(ic(c, 16)).padding(8).style(ui::icon_btn(on)).on_press_maybe(has.then_some(m)), hint) };
-    let play_icon = if st.playing { icon::PAUSE } else { icon::PLAY };
-    let play = ui::tip(button(container(ic(play_icon, 14).color(ui::FRAME)).center_x(16).center_y(16)).width(36).height(36).padding(10).style(ui::round_play).on_press_maybe(has.then_some(Message::TogglePlay)), if st.playing { "Pause" } else { "Play" });
+    let play =ui::tip(button(container(ui::play_pause(st.playing, 18.0, ui::FRAME)).center_x(18).center_y(18)).width(36).height(36).padding(9).style(ui::round_play).on_press_maybe(has.then_some(Message::TogglePlay)), if st.playing { "Pause" } else { "Play" });
     let repeat_icon = if app.queue.repeat() == Repeat::One { icon::REPEAT_ONE } else { icon::REPEAT_ALL };
     let controls = row![
         small(icon::SHUFFLE, app.queue.shuffle(), "Shuffle", Message::ToggleShuffle),

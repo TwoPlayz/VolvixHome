@@ -30,7 +30,6 @@ pub const ICONS: Font = Font::with_name("Segoe Fluent Icons");
 
 pub mod icon {
     pub const PLAY: char = '\u{E768}';
-    pub const PAUSE: char = '\u{E769}';
     pub const PREVIOUS: char = '\u{E892}';
     pub const NEXT: char = '\u{E893}';
     pub const SHUFFLE: char = '\u{E8B1}';
@@ -144,6 +143,15 @@ pub fn cast_icon<'a, M: 'a>(size: f32, color: Color) -> Element<'a, M> {
     iced::widget::svg(iced::widget::svg::Handle::from_memory(SVG.as_bytes())).width(size).height(size).style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(color) }).into()
 }
 
+/// The play / pause mark of the big round button: a solid triangle or two solid bars (drawn, not a font glyph,
+/// so it is exactly the website's shape and sits in the middle).
+pub fn play_pause<'a, M: 'a>(playing: bool, size: f32, color: Color) -> Element<'a, M> {
+    const PLAY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="white" transform="translate(-1.6 0)" d="M7 4.6v14.8a1 1 0 0 0 1.5.86l12.3-7.4a1 1 0 0 0 0-1.72L8.5 3.74A1 1 0 0 0 7 4.6z"/></svg>"#;
+    const PAUSE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect fill="white" x="6" y="4" width="4" height="16" rx="1"/><rect fill="white" x="14" y="4" width="4" height="16" rx="1"/></svg>"#;
+    let src = if playing { PAUSE } else { PLAY };
+    iced::widget::svg(iced::widget::svg::Handle::from_memory(src.as_bytes())).width(size).height(size).style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(color) }).into()
+}
+
 /// A small hint that appears over a button after a moment (what the website shows as a title).
 /// It appears only once the pointer has rested on the button for a moment (iced shows tooltips at once, so the
 /// app tracks the pointer itself: `hint_on` / `hint_off` are called from the hover messages).
@@ -151,10 +159,12 @@ pub fn tip<'a>(content: impl Into<Element<'a, crate::Message>>, label: impl ToSt
     let label = label.to_string();
     let ready = HINT.lock().map(|h| h.as_ref().map(|(l, at)| *l == label && at.elapsed() >= HINT_DELAY).unwrap_or(false)).unwrap_or(false);
     let shown: Element<'a, crate::Message> = if ready {
-        container(text(label.clone()).size(12)).padding([4, 8]).style(|_: &Theme| container::Style {
+        // no outline: a soft shadow lifts it off the page instead
+        container(text(label.clone()).size(12)).padding([5, 10]).style(|_: &Theme| container::Style {
             background: Some(SURFACE_3.into()),
-            border: Border { radius: 6.0.into(), width: 1.0, color: BORDER },
+            border: Border { radius: 6.0.into(), width: 0.0, color: Color::TRANSPARENT },
             text_color: Some(TEXT),
+            shadow: iced::Shadow { color: Color { a: 0.45, ..Color::BLACK }, offset: iced::Vector::new(0.0, 3.0), blur_radius: 10.0 },
             ..Default::default()
         })
         .into()

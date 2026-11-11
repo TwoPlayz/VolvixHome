@@ -541,6 +541,12 @@ Spin.views = Spin.views || {};
       group('Downloads',
         row('Only play downloads', 'Use only the songs saved on this device. Everything else is greyed out and skipped. This also happens by itself when you lose your connection.',
           toggle('offlineOnly', !!st.settings.offlineOnly), { icon: 'wifiOff' }) +
+        row('Download on mobile data', 'Off: downloads wait for Wi-Fi, so a big album can\'t use up your data plan. Only phones that tell the browser they\'re on mobile data (Android Chrome) are held back; elsewhere it can\'t tell.',
+          toggle('downloadMobile', !!st.settings.downloadMobile), { icon: 'phone' }) +
+        (window.VH && window.VH.transcoding
+          ? row('Download quality', 'Smaller downloads use less storage and data. "Same as streaming" follows the streaming quality above. Songs already downloaded stay as they are.',
+              seg('downloadq', st.settings.downloadQuality || 'stream', [['stream', 'Same as streaming'], ['original', 'Original'], ['high', 'High'], ['normal', 'Normal'], ['low', 'Data saver']]), { icon: 'download' })
+          : '') +
         row('On this device', S.dl.supported ? S.dl.count() + ' song' + (S.dl.count() === 1 ? '' : 's') + ' · ' + (S.dl.bytes() / 1048576).toFixed(0) + ' MB. Download from an album, a playlist or a song\'s ⋯ menu.' : 'This browser can\'t keep downloads.',
           S.dl.count() ? '<button class="btn btn-secondary btn-sm" data-act="dl-clear">Remove all</button>' : '', { icon: 'download' }),
         { id: 'downloads' }) +
@@ -615,6 +621,7 @@ Spin.views = Spin.views || {};
         S.store.update(function (s) { s.settings[key] = e.target.checked; });
         if (S.household) S.household.syncPresence();
         if (key === 'offlineOnly') { S.dl.refreshOffline(); S.toast(e.target.checked ? 'Only downloaded songs play' : 'All songs play again', 'download'); return; }
+        if (key === 'downloadMobile') { S.toast(e.target.checked ? 'Downloads may use mobile data' : 'Downloads wait for Wi-Fi', 'download'); return; }
         if (key === 'crossfadeAlbums') { S.toast(e.target.checked ? 'Crossfading within albums too' : 'Albums play straight through', 'check'); return; }
         if (key === 'resumeLast') { S.toast(e.target.checked ? 'Will resume where you left off' : 'Will start fresh each time'); return; }
         S.toast(key === 'privateSession' ? (e.target.checked ? 'Private session on' : 'Private session off') : (e.target.checked ? 'Sharing what you play' : 'Not sharing what you play'));
@@ -626,6 +633,10 @@ Spin.views = Spin.views || {};
         if (segBtn && segBtn.dataset.seg === 'streamq') {
           try { localStorage.setItem('vh_streamq', segBtn.dataset.value); } catch (x) { /* ignore */ }
           S.toast(segBtn.dataset.value === 'original' ? 'Streaming in original quality' : 'Streaming smaller files from the next song', 'wifi'); S.app.refresh(); return;
+        }
+        if (segBtn && segBtn.dataset.seg === 'downloadq') {
+          S.store.update(function (s) { s.settings.downloadQuality = segBtn.dataset.value; });
+          S.toast('New downloads: ' + segBtn.textContent.trim().toLowerCase(), 'download'); S.app.refresh(); return;
         }
         if (segBtn && (segBtn.dataset.seg === 'crossfade' || segBtn.dataset.seg === 'leveling')) {
           const k = segBtn.dataset.seg, v = k === 'crossfade' ? Number(segBtn.dataset.value) : segBtn.dataset.value;

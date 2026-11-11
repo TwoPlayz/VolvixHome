@@ -31,6 +31,14 @@ window.Spin = window.Spin || {};
     supported: supported,
     trackSet: function () { return manifest; },
     has: function (id) { return !!manifest[id]; },
+    /** The browser says this is a mobile connection (Android Chrome; Safari doesn't tell, so it counts as Wi-Fi). */
+    onMobileData: function () { const c = navigator.connection; return !!(c && (c.type === 'cellular' || c.saveData)); },
+    /** Where to fetch a song to keep: the quality chosen for downloads ('stream' = the same as streaming). Needs ffmpeg on the server. */
+    downloadUrl: function (id) {
+      const q = settings().downloadQuality || 'stream';
+      if (q === 'stream' || !(window.VH && window.VH.transcoding)) return S.server.streamUrl(id);
+      return '/api/stream/' + encodeURIComponent(id) + (q !== 'original' ? '?q=' + q : '');
+    },
     isOffline: function () { return !!settings().offlineOnly || navigator.onLine === false; },
     count: function () { return Object.keys(manifest).length; },
     bytes: function () { return Object.keys(manifest).reduce(function (s, id) { return s + (manifest[id] || 0); }, 0); },
@@ -43,6 +51,8 @@ window.Spin = window.Spin || {};
       const todo = ids.filter(function (id) { return !manifest[id] && S.data.track(id); });
       if (!todo.length) { S.toast('Already on this device', 'check'); return Promise.resolve(); }
       if (navigator.onLine === false) { S.toast('Connect to download', 'wifiOff'); return Promise.resolve(); }
+      // on mobile data, downloads wait unless the person allowed them (Settings → Downloads)
+      if (D.onMobileData() && !settings().downloadMobile) { S.toast('On mobile data: connect to Wi-Fi, or allow downloads on mobile data in Settings', 'wifiOff'); return Promise.resolve(); }
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
       progress.done = 0; progress.total += todo.length; busy++;
       S.toast('Downloading ' + todo.length + ' song' + (todo.length === 1 ? '' : 's') + '…', 'download');
@@ -50,7 +60,7 @@ window.Spin = window.Spin || {};
         let failed = 0;
         return todo.reduce(function (p, id) {
           return p.then(function () {
-            return fetch(S.server.streamUrl(id), { credentials: 'same-origin' }).then(function (r) {
+            return fetch(D.downloadUrl(id), { credentials: 'same-origin' }).then(function (r) {
               if (!r.ok) throw new Error('bad');
               const len = Number(r.headers.get('content-length')) || 0;
               return c.put(urlFor(id), r).then(function () { manifest[id] = len || 1; saveManifest(); });
