@@ -120,16 +120,44 @@ pub fn nav(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
 }
 /// Icon buttons in the player; `on` = shuffle/repeat switched on (red).
 pub fn icon_btn(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    // the whole round area lights up on hover (not just the icon), like the website
     move |_, s| button::Style {
-        background: None,
+        background: match s {
+            button::Status::Hovered => Some(HOVER.into()),
+            button::Status::Pressed => Some(ACTIVE.into()),
+            _ => None,
+        },
+        border: border::rounded(100.0),
         text_color: match (on, s) {
             (true, _) => ACCENT,
-            (false, button::Status::Hovered) => TEXT,
+            (false, button::Status::Hovered | button::Status::Pressed) => TEXT,
             (false, button::Status::Disabled) => TEXT_3,
             _ => TEXT_2,
         },
         ..Default::default()
     }
+}
+
+/// The website's cast icon (a screen and a speaker), drawn the same way.
+pub fn cast_icon<'a, M: 'a>(size: f32, color: Color) -> Element<'a, M> {
+    const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6"/><rect x="18" y="8" width="4" height="12" rx="1"/></svg>"#;
+    iced::widget::svg(iced::widget::svg::Handle::from_memory(SVG.as_bytes())).width(size).height(size).style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(color) }).into()
+}
+
+/// A small hint that appears over a button after a moment (what the website shows as a title).
+pub fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, label: impl ToString) -> Element<'a, M> {
+    iced::widget::tooltip(
+        content,
+        container(text(label.to_string()).size(12)).padding([4, 8]).style(|_: &Theme| container::Style {
+            background: Some(SURFACE_3.into()),
+            border: Border { radius: 6.0.into(), width: 1.0, color: BORDER },
+            text_color: Some(TEXT),
+            ..Default::default()
+        }),
+        iced::widget::tooltip::Position::Top,
+    )
+    .gap(6)
+    .into()
 }
 /// The big round play button.
 pub fn round_play(_: &Theme, s: button::Status) -> button::Style {

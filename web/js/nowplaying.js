@@ -171,6 +171,10 @@ window.Spin = window.Spin || {};
     if (S.player.current()) { e.preventDefault(); location.hash = '#/now'; }
   });
 
+  document.addEventListener('keydown', function (e) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.player-now')) { e.preventDefault(); e.target.click(); }
+  });
+
   document.addEventListener('click', function (e) {
     if (!el || !open || !el.contains(e.target)) return;
     if (e.target.closest('[data-np-close]')) { close(); return; }

@@ -73,9 +73,12 @@ window.Spin.views = window.Spin.views || {};
     return '<footer class="player" aria-label="Player">' +
       '<div class="player-track">' +
         '<span class="eq eq-player" data-p="eq" aria-hidden="true"><i></i><i></i><i></i></span>' +
-        '<button class="player-art" data-p="art" data-np-open aria-label="Open Now Playing">' + S.icon('music', 22) + '</button>' +
-        '<div class="player-meta"><div class="player-title" data-p="title">Nothing playing</div>' +
-        '<div class="player-sub" data-p="sub"></div></div>' +
+        // the cover and the names are one card (hover lights it up), like in the Windows app
+        '<div class="player-now" data-np-open role="button" tabindex="0" aria-label="Open Now Playing">' +
+          '<span class="player-art" data-p="art">' + S.icon('music', 22) + '</span>' +
+          '<div class="player-meta"><div class="player-title" data-p="title">Nothing playing</div>' +
+          '<div class="player-sub" data-p="sub"></div></div>' +
+        '</div>' +
         '<button class="ctrl like-btn player-like" data-p="like" data-like="" data-size="18" aria-label="Add to Liked Songs" title="Add to Liked Songs" hidden>' + S.icon('heart', 18) + '</button>' +
         '<button class="ctrl player-add" data-p="add" data-add-current aria-label="Add to playlist" title="Add to playlist" hidden>' + S.icon('plus', 18) + '</button>' +
         '<button class="ctrl player-more" data-p="more" data-player="info" aria-label="More" title="More" hidden>' + S.icon('more', 18) + '</button>' +

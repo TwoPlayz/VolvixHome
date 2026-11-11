@@ -258,18 +258,18 @@ pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbered
             }
         }
         let liked = app.is_liked(&t.id);
-        let small = |c: char, on: bool, m: Message| button(ic(c, 14)).style(ui::icon_btn(on)).padding(7).on_press(m);
+        let small = |c: char, on: bool, hint: &str, m: Message| -> El<'_> { ui::tip(button(ic(c, 14)).style(ui::icon_btn(on)).padding(7).on_press(m), hint) };
         let mut line = row![
             container(lead).width(if numbered { 32.0 } else { 48.0 }).center_x(Length::Fixed(if numbered { 32.0 } else { 48.0 })),
             column![title_line, ui::dim(clip(&sub, 80), 13)].spacing(1).width(Length::Fill),
-            small(if liked { icon::HEART_FILL } else { icon::HEART }, liked, Message::ToggleLike(t.id.clone())),
-            small(icon::ADD, false, Message::AddToQueue(t.id.clone())),
-            small(icon::PLAYLIST, false, Message::AddToPlaylist(vec![t.id.clone()])),
+            small(if liked { icon::HEART_FILL } else { icon::HEART }, liked, if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }, Message::ToggleLike(t.id.clone())),
+            small(icon::ADD, false, "Add to queue", Message::AddToQueue(t.id.clone())),
+            small(icon::PLAYLIST, false, "Add to playlist", Message::AddToPlaylist(vec![t.id.clone()])),
         ]
         .spacing(4)
         .align_y(Alignment::Center);
         if let Rows::Playlist { id: pl, liked: false } = rows {
-            line = line.push(small(icon::DELETE, false, Message::RemoveFromPlaylist(pl.to_string(), i, t.id.clone())));
+            line = line.push(small(icon::DELETE, false, "Remove from this playlist", Message::RemoveFromPlaylist(pl.to_string(), i, t.id.clone())));
         }
         line = line.push(container(ui::dim(format_duration(t.duration), 13)).width(52).align_x(Alignment::End));
         let song: El = button(line).width(Length::Fill).padding([6, 12]).style(ui::flat).on_press(Message::PlayTracks(ids.clone(), i, source.to_string())).into();
@@ -453,7 +453,7 @@ fn sidebar(app: &App) -> El<'_> {
     nav = nav.push(item(icon::PEOPLE, "Household", Page::Household));
 
     // your playlists
-    let head = row![ui::dim("Playlists", 13), horizontal_space(), button(ic(icon::ADD, 13)).padding(6).style(ui::icon_btn(false)).on_press(Message::NewPlaylist(vec![]))].align_y(Alignment::Center);
+    let head = row![ui::dim("Playlists", 13), horizontal_space(), ui::tip(button(ic(icon::ADD, 13)).padding(6).style(ui::icon_btn(false)).on_press(Message::NewPlaylist(vec![])), "New playlist")].align_y(Alignment::Center);
     let mut list = Column::new().spacing(0);
     for p in app.playlists().into_iter().filter(|p| !matches!(p.kind, Kind::Household { .. })) {
         let active = is(&Page::Playlist(p.id.clone()));
@@ -481,7 +481,7 @@ fn bell(app: &App) -> El<'_> {
     if n > 0 {
         r = r.push(container(text(if n > 99 { "99+".to_string() } else { n.to_string() }).size(11)).padding([1, 6]).style(ui::badge));
     }
-    button(r).padding(8).style(ui::icon_btn(app.page == Page::Notifications && !app.now_playing)).on_press(Message::Go(Page::Notifications)).into()
+    ui::tip(button(r).padding(8).style(ui::icon_btn(app.page == Page::Notifications && !app.now_playing)).on_press(Message::Go(Page::Notifications)), "Notifications")
 }
 
 fn page(app: &App) -> El<'_> {
@@ -803,8 +803,8 @@ fn now_playing(app: &App) -> El<'_> {
             ]
             .spacing(4)
             .width(Length::Fill),
-            button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 20)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())),
-            button(ic(icon::PLAYLIST, 18)).padding(8).style(ui::icon_btn(false)).on_press(Message::AddToPlaylist(vec![t.id.clone()])),
+            ui::tip(button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 20)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())), if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }),
+            ui::tip(button(ic(icon::PLAYLIST, 18)).padding(8).style(ui::icon_btn(false)).on_press(Message::AddToPlaylist(vec![t.id.clone()])), "Add to playlist"),
         ]
         .align_y(Alignment::Start),
     ]
@@ -829,7 +829,7 @@ fn now_playing(app: &App) -> El<'_> {
                 let line = row![
                     cover_of(app, app.lib.album_of(t), 40.0),
                     column![text(clip(&t.title, 50)).size(14).color(ui::TEXT), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
-                    button(ic(icon::CLOSE, 11)).style(ui::icon_btn(false)).padding(8).on_press(Message::RemoveFromQueue(index)),
+                    ui::tip(button(ic(icon::CLOSE, 11)).style(ui::icon_btn(false)).padding(8).on_press(Message::RemoveFromQueue(index)), "Remove from queue"),
                     ui::dim(format_duration(t.duration), 12),
                 ]
                 .spacing(12)
@@ -880,9 +880,9 @@ fn player_row(app: &App, width: f32) -> El<'_> {
                 .padding(4)
                 .style(ui::flat)
                 .on_press(Message::ToggleNowPlaying),
-                button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 15)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())),
+                ui::tip(button(ic(if liked { icon::HEART_FILL } else { icon::HEART }, 15)).padding(8).style(ui::icon_btn(liked)).on_press(Message::ToggleLike(t.id.clone())), if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }),
                 // add to a playlist (a tick once it's in one of yours)
-                button(ic(if in_one { icon::DOWNLOADED } else { icon::ADD }, 15)).padding(8).style(ui::icon_btn(in_one)).on_press(Message::AddToPlaylist(vec![t.id.clone()])),
+                ui::tip(button(ic(if in_one { icon::DOWNLOADED } else { icon::ADD }, 15)).padding(8).style(ui::icon_btn(in_one)).on_press(Message::AddToPlaylist(vec![t.id.clone()])), "Add to playlist"),
             ]
             .spacing(4)
             .align_y(Alignment::Center)
@@ -892,16 +892,16 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     };
 
     let has = track.is_some() || !app.queue.is_empty();
-    let small = |c: char, on: bool, m: Message| button(ic(c, 16)).padding(8).style(ui::icon_btn(on)).on_press_maybe(has.then_some(m));
+    let small = |c: char, on: bool, hint: &str, m: Message| -> El<'_> { ui::tip(button(ic(c, 16)).padding(8).style(ui::icon_btn(on)).on_press_maybe(has.then_some(m)), hint) };
     let play_icon = if st.playing { icon::PAUSE } else { icon::PLAY };
-    let play = button(container(ic(play_icon, 14).color(ui::FRAME)).center_x(16).center_y(16)).width(36).height(36).padding(10).style(ui::round_play).on_press_maybe(has.then_some(Message::TogglePlay));
+    let play = ui::tip(button(container(ic(play_icon, 14).color(ui::FRAME)).center_x(16).center_y(16)).width(36).height(36).padding(10).style(ui::round_play).on_press_maybe(has.then_some(Message::TogglePlay)), if st.playing { "Pause" } else { "Play" });
     let repeat_icon = if app.queue.repeat() == Repeat::One { icon::REPEAT_ONE } else { icon::REPEAT_ALL };
     let controls = row![
-        small(icon::SHUFFLE, app.queue.shuffle(), Message::ToggleShuffle),
-        small(icon::PREVIOUS, false, Message::Previous),
+        small(icon::SHUFFLE, app.queue.shuffle(), "Shuffle", Message::ToggleShuffle),
+        small(icon::PREVIOUS, false, "Previous", Message::Previous),
         play,
-        small(icon::NEXT, false, Message::Next),
-        small(repeat_icon, app.queue.repeat() != Repeat::Off, Message::CycleRepeat),
+        small(icon::NEXT, false, "Next", Message::Next),
+        small(repeat_icon, app.queue.repeat() != Repeat::Off, "Repeat", Message::CycleRepeat),
     ]
     .spacing(10)
     .align_y(Alignment::Center);
@@ -926,9 +926,9 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     let playing_elsewhere = app.cast.is_some() || app.party.is_some();
     let right = row![
         horizontal_space(),
-        button(ic(icon::DEVICES, 16)).padding(8).style(ui::icon_btn(playing_elsewhere)).on_press(Message::PlayOn),
-        button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }),
-        button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute),
+        ui::tip(button(container(ui::cast_icon(17.0, if playing_elsewhere { ui::ACCENT } else { ui::TEXT_2 })).center_x(16).center_y(16)).padding(8).style(ui::icon_btn(playing_elsewhere)).on_press(Message::PlayOn), "Play on"),
+        ui::tip(button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }), "Queue"),
+        ui::tip(button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute), if app.volume <= 0.001 { "Unmute" } else { "Mute" }),
         container(El::from(marks::scrub(app.volume, 1.0, Message::Volume).on_change(Message::Volume))).width(if narrow { 64 } else { 110 }),
     ]
     .spacing(2)

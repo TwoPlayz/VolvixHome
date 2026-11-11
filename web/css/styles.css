@@ -3133,3 +3133,26 @@ a.gm-link:hover .t-name { text-decoration: underline; }
 
   .btn { font-weight: 400; }
 }
+
+/* ---------- matching the Windows app (round 3) ---------- */
+/* Segoe Fluent Icons glyphs (Windows only; see S.icon) */
+.icon.glyph { display: inline-grid; place-items: center; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets"; font-style: normal; font-weight: 400; line-height: 1; flex: none; text-align: center; }
+/* the play / pause glyph is cut out of the white button: filled, in the frame colour */
+.ctrl-play .icon [fill] { fill: currentColor; stroke: none; }
+.ctrl-play { color: var(--frame); }
+/* a cover without art: the letter sits in the exact middle */
+.cover--tile { justify-content: center; align-items: center; padding: 0; }
+.cover--tile .cover-letter { display: block; line-height: 1; transform: translateY(-.02em); }
+/* the playing song in the player bar is one card: cover and names light up together */
+.player-now { display: flex; align-items: center; gap: 12px; flex: 1 1 0; min-width: 0; padding: 4px; border-radius: 6px; cursor: pointer; }
+.player-now:hover { background: var(--hover); }
+.player-now:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.player-now .player-meta { flex: 1 1 auto; }
+.player-art { cursor: inherit; }
+/* like / add sit at the right end of the left block, as in the app */
+.player-track { justify-content: flex-start; }
+/* playing bars drop to the bottom when paused */
+.eq.paused i, .track.paused .eq i { animation: none !important; height: 25%; transition: height .35s ease-out; }
+/* every round button lights up its whole area on hover */
+.ctrl:not(.ctrl-play), .icon-btn, .row-more, .row-add, .row-like, .np-more, .np-add { transition: background .12s, color .12s; }
+.ctrl:not(.ctrl-play):hover, .icon-btn:hover, .row-more:hover, .row-add:hover, .row-like:hover, .np-more:hover, .np-add:hover { background: var(--hover); color: var(--text); }

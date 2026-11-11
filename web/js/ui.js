@@ -160,8 +160,28 @@ window.Spin = window.Spin || {};
     family: '<circle cx="7" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><circle cx="12" cy="14" r="2.5"/><path d="M2 20a5 5 0 0 1 8.5-3.6M21.9 20a5 5 0 0 0-8.4-3.6M8.5 21a3.5 3.5 0 0 1 7 0"/>'
   };
 
+  /* On Windows the buttons use the same icon font as the Windows app (Segoe Fluent Icons), so both look alike.
+   * Elsewhere (Mac, phones, Linux) the drawn icons above are used. The cast icon ('devices') stays drawn. */
+  const GLYPHS = {
+    play: 'E768', pause: 'E769', prev: 'E892', next: 'E893', shuffle: 'E8B1', repeat: 'E8EE', volume: 'E767',
+    home: 'E80F', search: 'E721', library: 'E8F1', queue: 'E90B', plus: 'E710', heart: 'EB51', heartFill: 'EB52',
+    download: 'E896', check: 'E73E', bell: 'EA8F', users: 'E716', party: 'E716', partyFill: 'E716', family: 'E716',
+    gear: 'E713', list: 'E8FD', x: 'E711', more: 'E712'
+  };
+  const hasGlyphs = (function () {
+    try {
+      const c = document.createElement('canvas').getContext('2d');
+      const w = function (f) { c.font = '32px ' + f; return c.measureText('').width; };
+      const base = w('monospace');
+      return ['"Segoe Fluent Icons"', '"Segoe MDL2 Assets"'].some(function (f) { return Math.abs(w(f + ', monospace') - base) > 1; });
+    } catch (e) { return false; }
+  })();
+
   S.icon = function (name, size) {
     size = size || 20;
+    if (hasGlyphs && GLYPHS[name]) {
+      return '<span class="icon glyph" style="width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.9) + 'px" aria-hidden="true">&#x' + GLYPHS[name] + ';</span>';
+    }
     return '<svg class="icon" width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
   };
 

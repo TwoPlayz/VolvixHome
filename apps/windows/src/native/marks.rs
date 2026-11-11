@@ -1,11 +1,12 @@
 //! Small drawn things: the playing bars (as on the website's `.eq`) and the Volvix logo.
 //! They draw themselves, so the bars animate without rebuilding the screen.
+use std::cell::Cell;
 use std::sync::OnceLock;
 use std::time::Instant;
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer::{self, Quad};
-use iced::advanced::widget::{tree::Tree, Widget};
+use iced::advanced::widget::{tree::{self, Tree}, Widget};
 use iced::advanced::{mouse, Clipboard, Shell};
 use iced::event::{Event, Status};
 use iced::window::{self, RedrawRequest};
@@ -18,7 +19,13 @@ fn start() -> Instant {
     *T.get_or_init(Instant::now)
 }
 
-/// Three bars bouncing while a song plays; still (at different heights) while paused.
+/// What the bars remember between frames: where they were, and when they were paused.
+struct Settle {
+    last: Cell<[f32; 3]>,
+    paused_at: Cell<Option<f32>>,
+}
+
+/// Three bars bouncing while a song plays; they sink to the bottom when it's paused.
 pub struct EqBars {
     playing: bool,
     w: f32,
@@ -43,16 +50,41 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for EqBars {
         Size::new(Length::Fixed(self.w), Length::Fixed(self.h))
     }
 
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Settle>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Settle { last: Cell::new([0.25; 3]), paused_at: Cell::new(Some(-10.0)) })
+    }
+
     fn layout(&self, _tree: &mut Tree, _r: &R, _limits: &layout::Limits) -> layout::Node {
         layout::Node::new(Size::new(self.w, self.h))
     }
 
-    fn draw(&self, _tree: &Tree, renderer: &mut R, _theme: &Th, _style: &renderer::Style, layout: Layout<'_>, _cursor: mouse::Cursor, _viewport: &Rectangle) {
+    fn draw(&self, tree: &Tree, renderer: &mut R, _theme: &Th, _style: &renderer::Style, layout: Layout<'_>, _cursor: mouse::Cursor, _viewport: &Rectangle) {
         let b = layout.bounds();
         let t = start().elapsed().as_secs_f32();
         let bar = (self.w - 4.0) / 3.0;
+        let st = tree.state.downcast_ref::<Settle>();
+        if self.playing {
+            st.paused_at.set(None);
+        } else if st.paused_at.get().is_none() {
+            st.paused_at.set(Some(t)); // just paused: the bars sink from where they were
+        }
         for (i, delay) in [0.0f32, 0.3, 0.55].iter().enumerate() {
-            let f = if self.playing { bar_height(t, -delay) } else { [0.45, 0.85, 0.6][i] };
+            let f = if self.playing {
+                let f = bar_height(t, -delay);
+                let mut l = st.last.get();
+                l[i] = f;
+                st.last.set(l);
+                f
+            } else {
+                // paused: ease down to the lowest level, like the bars dropping when the music stops
+                let k = ((t - st.paused_at.get().unwrap_or(t)) / 0.35).clamp(0.0, 1.0);
+                let from = st.last.get()[i];
+                from + (0.25 - from) * (1.0 - (1.0 - k) * (1.0 - k))
+            };
             let h = (b.height * f).max(1.0);
             renderer.fill_quad(
                 Quad {
@@ -65,8 +97,10 @@ impl<M, Th, R: renderer::Renderer> Widget<M, Th, R> for EqBars {
         }
     }
 
-    fn on_event(&mut self, _tree: &mut Tree, event: Event, _layout: Layout<'_>, _cursor: mouse::Cursor, _r: &R, _c: &mut dyn Clipboard, shell: &mut Shell<'_, M>, _viewport: &Rectangle) -> Status {
-        if self.playing {
+    fn on_event(&mut self, tree: &mut Tree, event: Event, _layout: Layout<'_>, _cursor: mouse::Cursor, _r: &R, _c: &mut dyn Clipboard, shell: &mut Shell<'_, M>, _viewport: &Rectangle) -> Status {
+        // keep drawing while playing, and for the moment the bars take to sink after a pause
+        let settling = tree.state.downcast_ref::<Settle>().paused_at.get().map(|p| start().elapsed().as_secs_f32() - p < 0.4).unwrap_or(false);
+        if self.playing || settling {
             if let Event::Window(window::Event::RedrawRequested(_)) = event {
                 shell.request_redraw(RedrawRequest::NextFrame);
             }
