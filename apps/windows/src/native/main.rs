@@ -453,6 +453,7 @@ pub enum Message {
     RequestsLoaded(Result<Vec<Request>, Error>),
     QueueLoaded(Result<serde_json::Value, Error>),
     ArtistInfoLoaded(String, Option<String>, Option<Vec<u8>>),
+    DescEdit(iced::widget::text_editor::Action),
     CancelRequest(String),
 
     /* downloads */
@@ -690,6 +691,8 @@ pub struct App {
     avatars: HashMap<(String, u64), image::Handle>,
     /// artist name -> (bio, round photo) as the server knows them
     pub artist_infos: HashMap<String, (Option<String>, Option<image::Handle>)>,
+    /// the multi-line description box of the New / Edit playlist dialogs
+    pub desc_editor: iced::widget::text_editor::Content,
     avatar_pending: HashSet<(String, u64)>,
     /// Settings → Lidarr: what the server says, and what is being typed / picked
     pub lidarr: Option<serde_json::Value>,
@@ -823,6 +826,7 @@ impl App {
             rewind_year: None,
             avatars: HashMap::new(),
             artist_infos: HashMap::new(),
+            desc_editor: iced::widget::text_editor::Content::new(),
             avatar_pending: HashSet::new(),
             lidarr: None,
             lidarr_url: None,
@@ -2148,9 +2152,10 @@ impl App {
                 self.say(if on { "Added to Liked Songs" } else { "Removed from Liked Songs" });
                 return self.edit(vec![Edit::Like { track, on, at: userdata::now() }]);
             }
-            Message::NewPlaylist(add) => self.dialog = Some(Dialog::NewPlaylist { name: String::new(), description: String::new(), add, collaborative: false, public: false }),
+            Message::NewPlaylist(add) => {self.desc_editor = iced::widget::text_editor::Content::new(); self.dialog = Some(Dialog::NewPlaylist { name: String::new(), description: String::new(), add, collaborative: false, public: false }); }
             Message::EditPlaylist(id) => {
                 if let Some(p) = self.playlist(&id) {
+                    self.desc_editor = iced::widget::text_editor::Content::with_text(&p.description);
                     self.dialog = Some(Dialog::EditPlaylist { id, name: p.name, description: p.description, public: p.public });
                 }
             }
@@ -2404,6 +2409,14 @@ impl App {
                         }
                     }
                     Err(e) => self.say(e.to_string()),
+                }
+            }
+            Message::DescEdit(a) => {
+                self.desc_editor.perform(a);
+                let t = self.desc_editor.text().trim_end_matches('\n').to_string();
+                match &mut self.dialog {
+                    Some(Dialog::NewPlaylist { description, .. }) | Some(Dialog::EditPlaylist { description, .. }) => *description = t,
+                    _ => {}
                 }
             }
             Message::ArtistInfoLoaded(name, bio, img) => {
@@ -3207,6 +3220,14 @@ impl App {
         // pick up what was changed elsewhere (the website, another computer): playlists, likes, recently played, settings
         if Instant::now() >= self.next_pull && self.screen == Screen::Main && !self.offline && self.pending.is_empty() && self.in_flight.is_empty() {
             self.next_pull = Instant::now() + Duration::from_secs(6);
+            if self.page == Page::GetMusic && std::env::var("VH_DEMO").as_deref() != Ok("requests") {
+                // the Requests page keeps itself up to date while it is open
+                if let Some(c) = self.client.clone() {
+                    let c2 = c.clone();
+                    tasks.push(Task::perform(blocking(move || c2.lidarr_queue()), Message::QueueLoaded));
+                    tasks.push(Task::perform(blocking(move || c.requests()), Message::RequestsLoaded));
+                }
+            }
             if let Some(c) = self.client.clone() {
                 tasks.push(Task::perform(blocking(move || c.user_data()), Message::DataPulled));
             }

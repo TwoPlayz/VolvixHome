@@ -723,6 +723,28 @@ fn setting_row<'a>(title: impl text::IntoFragment<'a>, sub: impl text::IntoFragm
     container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).width(Length::Fill), control].spacing(16).align_y(Alignment::Center)).padding([10, 4]).into()
 }
 
+/// The website's description box: a few lines tall.
+fn desc_box<'a>(app: &'a App) -> El<'a> {
+    iced::widget::text_editor(&app.desc_editor)
+        .placeholder("Add an optional description")
+        .on_action(Message::DescEdit)
+        .height(84)
+        .padding(10)
+        .size(15)
+        .style(|_: &iced::Theme, s| {
+            use iced::widget::text_editor::{Status, Style};
+            Style {
+                background: ui::INPUT_BG().into(),
+                border: iced::Border { radius: 8.0.into(), width: 1.0, color: if matches!(s, Status::Focused) { ui::TEXT_2() } else { ui::BORDER() } },
+                icon: ui::TEXT_2(),
+                placeholder: ui::TEXT_3(),
+                value: ui::TEXT(),
+                selection: Color { a: 0.35, ..ui::ACCENT() },
+            }
+        })
+        .into()
+}
+
 /// A small label above a form field, like the website's.
 fn labelled<'a>(label: &'a str, field: El<'a>) -> El<'a> {
     column![text(label).size(13).font(ui::FONT_BOLD), field].spacing(6).into()
@@ -1366,7 +1388,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             column![
                 ui::title(title, 22),
                 labelled("Name", field("My playlist", name, 0).into()),
-                labelled("Description", field("Add an optional description", description, 1).into()),
+                labelled("Description", desc_box(app)),
                 switch_card("Collaborative", "People you invite can add, remove and reorder songs.", *collaborative, |v| Message::DialogFlag(0, v)),
                 switch_card("Visible to the household", "Everyone here can see it on the Household page.", *public, |v| Message::DialogFlag(1, v)),
                 buttons("Create", true),
@@ -1377,7 +1399,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
         Dialog::EditPlaylist { name, description, public, .. } => column![
             ui::title("Edit details", 22),
             labelled("Name", field("", name, 0).into()),
-            labelled("Description", field("Add an optional description", description, 1).into()),
+            labelled("Description", desc_box(app)),
             switch_card("Visible to the household", "Everyone here can see it on the Household page.", *public, |v| Message::DialogFlag(0, v)),
             buttons("Save", true),
         ]

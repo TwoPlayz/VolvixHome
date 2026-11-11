@@ -592,6 +592,57 @@ pub fn look_font(name: &str) -> (Font, bool) {
     }
 }
 
+/// The website's patterned backgrounds, drawn as a picture (stripes, rings, grid, sunburst, checker).
+fn look_svg(name: &str) -> Option<String> {
+    let body = match name {
+        "stripes" => {
+            let mut s = String::from("<rect width='100' height='100' fill='#e5484d'/><g transform='rotate(45 50 50)'>");
+            for i in -10..20 {
+                if i % 2 != 0 {
+                    s += &format!("<rect x='-50' y='{}' width='200' height='7' fill='#c23a3f'/>", i * 7);
+                }
+            }
+            s + "</g>"
+        }
+        "rings" => {
+            let mut s = String::from("<rect width='100' height='100' fill='#1d3557'/>");
+            for i in (0..16).rev() {
+                s += &format!("<circle cx='70' cy='30' r='{}' fill='{}'/>", (i + 1) * 6, if i % 2 == 0 { "#274b7a" } else { "#1d3557" });
+            }
+            s
+        }
+        "grid" => {
+            let mut s = String::from("<rect width='100' height='100' fill='#101820'/>");
+            for i in 0..10 {
+                let p = i as f32 * 11.0;
+                s += &format!("<path d='M{p} 0V100M0 {p}H100' stroke='white' stroke-opacity='0.12' stroke-width='0.5'/>");
+            }
+            s
+        }
+        "sunburst" => {
+            let mut s = String::from("<rect width='100' height='100' fill='#ffd23f'/>");
+            for i in 0..18 {
+                let (a0, a1) = (((i * 20 + 10) as f32).to_radians(), ((i * 20 + 20) as f32).to_radians());
+                s += &format!("<path d='M50 38L{:.1} {:.1}L{:.1} {:.1}Z' fill='#ff9f1c'/>", 50.0 + 200.0 * a0.sin(), 38.0 - 200.0 * a0.cos(), 50.0 + 200.0 * a1.sin(), 38.0 - 200.0 * a1.cos());
+            }
+            s
+        }
+        "checker" => {
+            let mut s = String::from("<rect width='100' height='100' fill='#eee'/>");
+            for y in 0..10 {
+                for x in 0..10 {
+                    if (x + y) % 2 == 0 {
+                        s += &format!("<rect x='{}' y='{}' width='10' height='10' fill='#222'/>", x * 10, y * 10);
+                    }
+                }
+            }
+            s
+        }
+        _ => return None,
+    };
+    Some(format!("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'>{body}</svg>"))
+}
+
 /// A drawn cover in the look someone chose (background + font) for an album without art.
 pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, bg: &str, font: &str) -> Element<'a, M> {
     let (stops, angle, ink) = look_bg(bg);
@@ -605,6 +656,10 @@ pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, bg: &str, font
         let pct = if n <= 10 { 0.17 } else if n <= 22 { 0.13 } else if n <= 40 { 0.105 } else { 0.085 };
         text(shown).font(font).size(size * pct).color(ink).align_x(iced::alignment::Horizontal::Center).width(Length::Fixed(size * 0.82)).wrapping(text::Wrapping::WordOrGlyph).into()
     };
+    if let Some(doc) = look_svg(bg) {
+        let art = iced::widget::svg(iced::widget::svg::Handle::from_memory(doc.into_bytes())).width(size).height(size).content_fit(iced::ContentFit::Cover);
+        return iced::widget::stack![art, container(body).width(size).height(size).center_x(size).center_y(size)].width(size).height(size).into();
+    }
     let mut g = iced::gradient::Linear::new(angle.to_radians());
     for (o, c) in stops {
         g = g.add_stop(o, c);
