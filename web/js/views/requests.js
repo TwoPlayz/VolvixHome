@@ -35,7 +35,8 @@ Spin.views = Spin.views || {};
   }
   /** Where clicking a result goes: your own page if it's already here, otherwise a page about it with everything it holds. */
   const albumHref = function (a) { return a.onServer ? '#/album/' + a.onServer : '#/get/album/' + a.foreignId; };
-  const artistHref = function (a) { return a.onServer ? S.artistUrl(a.onServer) : '#/get/artist/' + a.foreignId; };
+  // always the MusicBrainz page (it has "Open in your library" when you have them), so you can get more of an artist you already have
+  const artistHref = function (a) { return a.foreignId ? '#/get/artist/' + a.foreignId : S.artistUrl(a.onServer); };
   const artistOfAlbumHref = function (a) { return a.artistId ? '#/get/artist/' + a.artistId : ''; };
 
   function albumCard(a) {

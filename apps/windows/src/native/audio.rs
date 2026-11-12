@@ -169,6 +169,9 @@ struct Handoff {
     leave: Arc<AtomicBool>,
     leave_total: usize,
     leave_left: Option<usize>,
+    /// samples taken from the shared sound a block at a time
+    block: Vec<f32>,
+    at: usize,
 }
 
 impl Handoff {
@@ -179,7 +182,27 @@ impl Handoff {
         };
         let ramp_total = (rate as usize * channels as usize * ramp_ms as usize) / 1000;
         let leave_total = (rate as usize * channels as usize * 25) / 1000;
-        Handoff { src, channels, rate, ramp_total, ramp_left: ramp_total, leave: Arc::new(AtomicBool::new(false)), leave_total, leave_left: None }
+        Handoff { src, channels, rate, ramp_total, ramp_left: ramp_total, leave: Arc::new(AtomicBool::new(false)), leave_total, leave_left: None, block: Vec::new(), at: 0 }
+    }
+}
+
+impl Handoff {
+    /// The next sample of the shared sound (taken 512 at a time, so the lock is rarely touched).
+    fn pull(&mut self) -> Option<f32> {
+        if self.at >= self.block.len() {
+            self.block.clear();
+            self.at = 0;
+            let mut src = self.src.lock().unwrap();
+            for _ in 0..512 {
+                match src.next() {
+                    Some(v) => self.block.push(v),
+                    None => break,
+                }
+            }
+        }
+        let v = self.block.get(self.at).copied();
+        self.at += 1;
+        v
     }
 }
 
@@ -192,10 +215,10 @@ impl Iterator for Handoff {
                 return None; // faded out: the rest of the song plays on the new output
             }
             self.leave_left = Some(left - 1);
-            let v = self.src.lock().unwrap().next()?;
+            let v = self.pull()?;
             return Some(v * left as f32 / self.leave_total.max(1) as f32);
         }
-        let v = self.src.lock().unwrap().next()?;
+        let v = self.pull()?;
         if self.ramp_left > 0 {
             let k = 1.0 - self.ramp_left as f32 / self.ramp_total.max(1) as f32;
             self.ramp_left -= 1;
@@ -263,6 +286,11 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
     // when it moved (a new sink counts from zero)
     let mut cur_src: Option<Arc<Mutex<Inner>>> = None;
     let mut cur_leave: Option<Arc<AtomicBool>> = None;
+    // watchdog: the output can stop taking sound without any error (a device glitch); if the position stops moving
+    // while playing, open the output again
+    let mut seen_pos = Duration::ZERO;
+    let mut moved_at = Instant::now();
+    let mut forced_at = Instant::now() - Duration::from_secs(60);
     let mut pos_base = Duration::ZERO;
     // the Windows default output device: when it changes (headphones, a speaker, another DAC) the sound follows it
     let mut last_device = default_device_name();
@@ -405,7 +433,25 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
         if device_check.elapsed() >= Duration::from_secs(1) {
             device_check = Instant::now();
             let now = default_device_name();
-            if now.is_some() && now != last_device {
+            let stuck = match &sink {
+                Some(s) => {
+                    let p = pos_base + s.get_pos();
+                    let playing = status.lock().unwrap().playing && !s.empty();
+                    if p != seen_pos || !playing {
+                        seen_pos = p;
+                        moved_at = Instant::now();
+                        false
+                    } else if moved_at.elapsed() > Duration::from_secs(4) && forced_at.elapsed() > Duration::from_secs(12) {
+                        forced_at = Instant::now();
+                        moved_at = Instant::now();
+                        true
+                    } else {
+                        false
+                    }
+                }
+                None => false,
+            };
+            if stuck || (now.is_some() && now != last_device) {
                 last_device = now;
                 match OutputStream::try_default() {
                     Ok((stream2, handle2)) => {

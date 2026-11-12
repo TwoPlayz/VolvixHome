@@ -96,6 +96,17 @@ pub enum Page {
     Rewind,
     /// the albums of one genre, decade or label (from Library → Browse): the kind, then the value
     Browse(String, String),
+    /// an artist from MusicBrainz (by id): their releases, with a way to get what is missing
+    Discover(String),
+}
+
+/// An artist looked up on MusicBrainz, and what they have released.
+#[derive(Debug, Clone, Default)]
+pub struct Discovered {
+    pub name: String,
+    pub albums: Vec<FoundItem>,
+    /// the same artist in your library, when you have them
+    pub on_server: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -453,6 +464,8 @@ pub enum Message {
     RequestsLoaded(Result<Vec<Request>, Error>),
     QueueLoaded(Result<serde_json::Value, Error>),
     ArtistInfoLoaded(String, Option<String>, Option<Vec<u8>>),
+    ArtistMbid(String, Option<String>),
+    DiscoverLoaded(String, Result<serde_json::Value, Error>),
     DescEdit(iced::widget::text_editor::Action),
     CancelRequest(String),
 
@@ -502,6 +515,10 @@ pub enum Message {
     SetStreamQuality(String),
     SetDownloadQuality(String),
     SetOfflineOnly(bool),
+    SetCacheSongs(bool),
+    SetCacheLimit(String),
+    ClearCache,
+    CacheFetched(String, Result<(), Error>),
     SetDataSaver(bool),
     /// a text box on the Profile or Members tab: 0 your name, 1 current password, 2 new password, 3 member name, 4 member password
     ProfileField(u8, String),
@@ -603,6 +620,12 @@ pub struct App {
     pub find: FindState,
 
     pub downloads: Downloads,
+    /// songs kept as they are queued, and which are being fetched now
+    pub song_cache: volvix_core::cache::SongCache,
+    caching: HashSet<String>,
+    next_cache_at: Instant,
+    /// (songs, bytes) in the cache, for Settings
+    pub cache_stats: (usize, u64),
     pub downloaded: HashSet<String>,
     pub saved: Vec<Saved>,
     dl_queue: VecDeque<String>,
@@ -691,6 +714,9 @@ pub struct App {
     avatars: HashMap<(String, u64), image::Handle>,
     /// artist name -> (bio, round photo) as the server knows them
     pub artist_infos: HashMap<String, (Option<String>, Option<image::Handle>)>,
+    /// MusicBrainz artists looked up (by id), and which id belongs to each library artist (lower-case name)
+    pub discovered: HashMap<String, Discovered>,
+    pub artist_mbids: HashMap<String, Option<String>>,
     /// the multi-line description box of the New / Edit playlist dialogs
     pub desc_editor: iced::widget::text_editor::Content,
     avatar_pending: HashSet<(String, u64)>,
@@ -720,7 +746,12 @@ impl App {
         let player = audio::Player::start();
         let tray = system::Tray::new(autostart_registered(), settings.close_to_tray, settings.auto_update);
         let downloads = Downloads::new(dir.join("offline"));
+        let song_cache = volvix_core::cache::SongCache::new(dir.join("cache"));
         let mut app = App {
+            cache_stats: song_cache.stats(),
+            song_cache,
+            caching: HashSet::new(),
+            next_cache_at: Instant::now() + Duration::from_secs(2),
             covers: CoverCache::new(dir.join("covers")),
             downloaded: downloads.list().into_iter().collect(),
             saved: downloads.saved(),
@@ -826,6 +857,8 @@ impl App {
             rewind_year: None,
             avatars: HashMap::new(),
             artist_infos: HashMap::new(),
+            discovered: HashMap::new(),
+            artist_mbids: HashMap::new(),
             desc_editor: iced::widget::text_editor::Content::new(),
             avatar_pending: HashSet::new(),
             lidarr: None,
@@ -982,7 +1015,22 @@ impl App {
                     tasks.push(Task::perform(blocking(move || c2.household()), Message::HouseholdLoaded));
                     tasks.push(Task::perform(blocking(move || c.shared()), Message::SharedLoaded));
                 }
-                Page::Artist(name) if self.me.as_ref().map(|m| m.artist_info).unwrap_or(false) && !self.artist_infos.contains_key(&name) => {
+                Page::Artist(name) => {
+                    // the MusicBrainz side: which artist this is, so "Get more" can list what is missing
+                    if self.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false) && !self.artist_mbids.contains_key(&name.to_lowercase()) {
+                        let (c2, n2) = (c.clone(), name.clone());
+                        tasks.push(Task::perform(
+                            blocking(move || {
+                                let (list, _, _) = c2.find_part(&n2, "artists")?;
+                                Ok::<_, Error>(list.into_iter().find(|x| x.label().eq_ignore_ascii_case(&n2) && x.foreign_id.is_some()).and_then(|x| x.foreign_id))
+                            }),
+                            {
+                                let n3 = name.clone();
+                                move |r| Message::ArtistMbid(n3.clone(), r.ok().flatten())
+                            },
+                        ));
+                    }
+                    if self.me.as_ref().map(|m| m.artist_info).unwrap_or(false) && !self.artist_infos.contains_key(&name) {
                     let n = name.clone();
                     tasks.push(Task::perform(
                         blocking(move || {
@@ -999,6 +1047,11 @@ impl App {
                             Err(_) => Message::ArtistInfoLoaded(name.clone(), None, None),
                         },
                     ));
+                    }
+                }
+                Page::Discover(id) if !self.discovered.contains_key(&id) => {
+                    let i = id.clone();
+                    tasks.push(Task::perform(blocking(move || c.discover_artist(&i)), move |r| Message::DiscoverLoaded(id.clone(), r)));
                 }
                 Page::Notifications => tasks.push(Task::perform(blocking(move || c.notifications()), Message::NotesLoaded)),
                 Page::GetMusic => {
@@ -1077,8 +1130,9 @@ impl App {
             tasks.push(Task::perform(blocking(move || cache.get(&c, &fetch_id, size, version).ok()), move |b| Message::CoverLoaded(id.clone(), size, b)));
         }
         // pictures of music found through Lidarr
-        if self.page == Page::Search {
-            let paths: Vec<String> = self.find.parts.values().filter_map(|r| r.as_ref().ok()).flatten().filter_map(|x| x.image.clone()).collect();
+        if self.page == Page::Search || matches!(self.page, Page::Artist(_) | Page::Discover(_)) {
+            let mut paths: Vec<String> = self.find.parts.values().filter_map(|r| r.as_ref().ok()).flatten().filter_map(|x| x.image.clone()).collect();
+            paths.extend(self.discovered.values().flat_map(|d| d.albums.iter()).filter_map(|x| x.image.clone()));
             for p in paths {
                 if self.images.contains_key(&p) || !self.image_pending.insert(p.clone()) {
                     continue;
@@ -1189,7 +1243,7 @@ impl App {
                 return Task::none();
             }
         }
-        let local = self.downloads.path(&id).filter(|p| p.exists());
+        let local = self.local_for(&id);
         if self.offline && local.is_none() {
             self.say("That song isn't downloaded, and the server can't be reached.");
             return Task::none();
@@ -1362,6 +1416,48 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// A copy of the song on this computer: a download, or one cached as it was queued.
+    fn local_for(&self, id: &str) -> Option<PathBuf> {
+        if let Some(p) = self.downloads.path(id).filter(|p| p.exists()) {
+            return Some(p);
+        }
+        let p = self.song_cache.path(id).filter(|p| p.exists())?;
+        self.song_cache.touch(id);
+        Some(p)
+    }
+
+    /// What is playing and what plays soon (kept in the cache, and fetched into it).
+    fn cache_keep(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.queue.current().map(String::from).into_iter().collect();
+        v.extend(self.queue.upcoming().iter().take(4).cloned());
+        v
+    }
+
+    /// Fetch the song playing and the next few into the cache, a couple at a time, in the background.
+    fn prefetch(&mut self) -> Task<Message> {
+        if !self.settings.cache_songs || self.offline || self.cast.is_some() || self.party.is_some() || self.screen != Screen::Main {
+            return Task::none();
+        }
+        if !self.settings.download_metered && system::on_metered_connection() {
+            return Task::none();
+        }
+        let Some(c) = self.client.clone() else { return Task::none() };
+        let sc = self.stream_client(&c);
+        let mut tasks = vec![];
+        for id in self.cache_keep().into_iter().take(4) {
+            if self.caching.len() >= 2 {
+                break;
+            }
+            if self.caching.contains(&id) || self.local_for(&id).is_some() {
+                continue;
+            }
+            self.caching.insert(id.clone());
+            let (cache, client, tid) = (self.song_cache.clone(), sc.clone(), id.clone());
+            tasks.push(Task::perform(blocking(move || cache.fetch(&client, &tid)), move |r| Message::CacheFetched(id.clone(), r)));
+        }
+        Task::batch(tasks)
+    }
+
     /// Crossfade: a few seconds before the end, open the next song so it can fade in.
     fn crossfade_prepare(&mut self) {
         let fade = self.crossfade_secs();
@@ -1384,7 +1480,7 @@ impl App {
             return; // albums flow straight through unless asked
         }
         let Some(c) = self.client.clone() else { return };
-        let local = self.downloads.path(&next).filter(|p| p.exists());
+        let local = self.local_for(&next);
         let gain = self.gain_for(&next);
         self.player.preload(&self.stream_client(&c), &next, local, gain);
     }
@@ -2419,6 +2515,30 @@ impl App {
                     _ => {}
                 }
             }
+            Message::ArtistMbid(name, id) => {
+                if std::env::var("VH_DEMO").as_deref() == Ok("discover") {
+                    return Task::none(); // the demo has made-up results
+                }
+                self.artist_mbids.insert(name.to_lowercase(), id.clone());
+                if let (Some(id), Some(c)) = (id, self.client.clone()) {
+                    if !self.discovered.contains_key(&id) {
+                        let i = id.clone();
+                        return Task::perform(blocking(move || c.discover_artist(&i)), move |r| Message::DiscoverLoaded(id.clone(), r));
+                    }
+                }
+            }
+            Message::DiscoverLoaded(id, r) => {
+                if let Ok(v) = r {
+                    let d = Discovered {
+                        name: v["name"].as_str().unwrap_or("").to_string(),
+                        albums: serde_json::from_value(v["albums"].clone()).unwrap_or_default(),
+                        on_server: v["onServer"].as_str().map(String::from),
+                    };
+                    self.find.can_get = v["canRequest"].as_bool().unwrap_or(false);
+                    self.discovered.insert(id, d);
+                    return self.fetch_covers();
+                }
+            }
             Message::ArtistInfoLoaded(name, bio, img) => {
                 let handle = img.and_then(|b| pictures::round_handle(&b));
                 self.artist_infos.insert(name, (bio, handle));
@@ -2840,6 +2960,32 @@ impl App {
                 self.settings.set_text("downloadQuality", &q);
                 self.say("New downloads use this quality");
             }
+            Message::SetCacheSongs(v) => {
+                self.settings.set("cacheSongs", v);
+                if v {
+                    return self.prefetch();
+                }
+            }
+            Message::SetCacheLimit(v) => {
+                self.settings.set_text("cacheLimitMb", &v);
+                let keep = self.cache_keep();
+                self.song_cache.trim(self.settings.cache_limit_mb * 1024 * 1024, &keep);
+                self.cache_stats = self.song_cache.stats();
+            }
+            Message::ClearCache => {
+                let freed = self.song_cache.clear();
+                self.cache_stats = self.song_cache.stats();
+                self.say(format!("Cleared {}", crate::pages::human_size(freed)));
+            }
+            Message::CacheFetched(id, r) => {
+                self.caching.remove(&id);
+                if r.is_ok() {
+                    let keep = self.cache_keep();
+                    self.song_cache.trim(self.settings.cache_limit_mb * 1024 * 1024, &keep);
+                    self.cache_stats = self.song_cache.stats();
+                }
+                return self.prefetch();
+            }
             Message::SetOfflineOnly(v) => return self.edit(vec![Edit::Setting("offlineOnly".into(), json!(v))]),
             Message::SetDataSaver(v) => self.settings.set("dataSaver", v),
             Message::SetResume(v) => return self.edit(vec![Edit::Setting("resumeLast".into(), json!(v))]),
@@ -3114,7 +3260,24 @@ impl App {
                 tasks.push(self.go(Page::Playlist(id)));
             }
             "home" => tasks.push(self.go(Page::Home)),
-            "requests" => {
+            "discover" => {
+                // pretend Lidarr is connected, and MusicBrainz knows a few more releases by an artist in the library
+                let artist = self.lib.artists().first().cloned().unwrap_or_default();
+                if let Some(m) = &mut self.me {
+                    m.lidarr.configured = true;
+                }
+                let albums: Vec<FoundItem> = serde_json::from_value(json!([
+                    { "foreignId": "a1", "title": "Harbor Songs", "year": "2022", "type": "Album" },
+                    { "foreignId": "a2", "title": "Low Tide EP", "year": "2020", "type": "EP" },
+                    { "foreignId": "a3", "title": "Night Ferry", "year": "2019", "type": "Single", "requested": true },
+                    { "foreignId": "a4", "title": "Already Here", "year": "2018", "type": "Album", "onServer": "x" }
+                ]))
+                .unwrap_or_default();
+                self.discovered.insert("mb1".into(), Discovered { name: artist.clone(), albums, on_server: Some(artist.clone()) });
+                self.artist_mbids.insert(artist.to_lowercase(), Some("mb1".into()));
+                self.find.can_get = true;
+                tasks.push(self.go(Page::Artist(artist)));
+            }            "requests" => {
                 // pretend Lidarr is connected and downloading, to look at the Requests page
                 self.find.configured = true;
                 self.find.queue = Some(json!({ "items": [
@@ -3215,6 +3378,14 @@ impl App {
                     let y = (i as f32 * LYRIC_LINE - 160.0).max(0.0);
                     tasks.push(scrollable::scroll_to(lyrics_scroller(), scrollable::AbsoluteOffset { x: 0.0, y }));
                 }
+            }
+        }
+        // keep the song cache topped up with what plays soon
+        if Instant::now() >= self.next_cache_at {
+            self.next_cache_at = Instant::now() + Duration::from_secs(3);
+            tasks.push(self.prefetch());
+            if self.page == Page::Settings {
+                self.cache_stats = self.song_cache.stats();
             }
         }
         // pick up what was changed elsewhere (the website, another computer): playlists, likes, recently played, settings

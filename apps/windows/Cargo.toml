@@ -45,9 +45,17 @@ image = { version = "0.24", optional = true, default-features = false, features 
 [build-dependencies]
 winres = "0.1"
 
+# Sound is decoded and equalised live inside the audio callback, so the code has to be fast: optimise for speed, not size.
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Test builds (cargo run) stay quick enough that the sound does not stutter.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

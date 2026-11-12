@@ -119,7 +119,7 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                 }
             }
             Page::Notifications | Page::Profile | Page::Members | Page::Settings => {}
-            Page::GetMusic => {}
+            Page::GetMusic | Page::Discover(_) => {}
             Page::Browse(..) => ids.extend(lib.albums().iter().map(|a| a.id.clone())),
             Page::Rewind => {
                 // the top songs' covers
@@ -844,6 +844,7 @@ fn page(app: &App) -> El<'_> {
         Page::Playlist(id) => pages::playlist_page(app, id),
         Page::Mix(id) => pages::mix_page(app, id),
         Page::GetMusic => pages::requests(app),
+        Page::Discover(id) => pages::discover_page(app, id),
         Page::Household => pages::household(app),
         Page::Notifications => pages::notifications(app),
         Page::Profile | Page::Members | Page::Settings => pages::account(app),
@@ -1244,6 +1245,9 @@ fn artist_page<'a>(app: &'a App, name: &str) -> El<'a> {
     if !p.appears_on.is_empty() {
         c = c.push(section("Appears on", album_grid(app, p.appears_on.clone(), true)));
     }
+    if let Some(more) = pages::artist_get_more(app, &page_name) {
+        c = c.push(more);
+    }
     c.into()
 }
 
@@ -1365,7 +1369,7 @@ fn now_playing(app: &App) -> El<'_> {
     let in_one = app.cache.current_in_playlist;
     // the cover shrinks with the window (up to 360 px), so the tabs on the right always fit
     let art = iced::widget::responsive(move |size| cover_of(app, album, size.width.min(360.0)));
-    let mut title = Row::new().spacing(8).align_y(Alignment::Center).push(ui::title(clip(&t.title, 40), 28));
+    let mut title = Row::new().spacing(8).align_y(Alignment::Center).push(text(clip(&t.title, 40)).font(ui::FONT_BOLD).size(28.0));
     if t.explicit {
         title = title.push(explicit_badge());
     }
@@ -1379,11 +1383,11 @@ fn now_playing(app: &App) -> El<'_> {
     let left = column![
         container(art).width(Length::Fill).height(Length::Shrink).max_height(360),
         ui::gap(20),
-        button(title).padding(0).style(ui::link).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
+        button(title).padding(0).style(ui::link_hover(ui::TEXT(), ui::ACCENT())).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
         ui::gap(4),
-        button(text(t.artist.as_str()).size(16).color(ui::TEXT_2())).padding(0).style(ui::link).on_press(Message::Go(Page::Artist(t.artist.clone()))),
+        button(text(t.artist.as_str()).size(16)).padding(0).style(ui::link_hover(ui::TEXT_2(), ui::TEXT())).on_press(Message::Go(Page::Artist(t.artist.clone()))),
         ui::gap(2),
-        button(text(album_line.unwrap_or_default()).size(14).color(ui::TEXT_3())).padding(0).style(ui::link).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
+        button(text(album_line.unwrap_or_default()).size(14)).padding(0).style(ui::link_hover(ui::TEXT_3(), ui::TEXT())).on_press_maybe(album.map(|a| Message::Go(Page::Album(a.id.clone())))),
         ui::gap(14),
         row![
             round(if liked { "heartFill" } else { "heart" }, liked, if liked { "Remove from Liked Songs" } else { "Add to Liked Songs" }, Message::ToggleLike(t.id.clone())),

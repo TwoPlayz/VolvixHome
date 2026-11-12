@@ -308,6 +308,11 @@ pub fn link(_: &Theme, _: button::Status) -> button::Style {
     button::Style { background: None, text_color: TEXT(), ..Default::default() }
 }
 
+/// A text link: `base` colour, and it lights up (and the pointer becomes a hand) when hovered, like the website's links.
+pub fn link_hover(base: Color, lit: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, s| button::Style { background: None, text_color: if matches!(s, button::Status::Hovered | button::Status::Pressed) { lit } else { base }, ..Default::default() }
+}
+
 /// A round outlined button (the website's 40–42 px ones on album, playlist and Now Playing pages); red when `on`.
 pub fn ring_btn(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, s| button::Style {

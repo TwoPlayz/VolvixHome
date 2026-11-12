@@ -314,6 +314,12 @@ impl Client {
         self.get_json(&format!("/api/artist/info?name={}", enc(name)))
     }
 
+    /// An artist from MusicBrainz and their releases, each marked: already here, or already asked for.
+    pub fn discover_artist(&self, mbid: &str) -> Result<serde_json::Value> {
+        let res = self.request("GET", &format!("/api/discover/artist/{}", enc(mbid))).timeout(Duration::from_secs(45)).call()?;
+        res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
     /// A server-relative picture (e.g. a found album's "/api/discover/image/…").
     pub fn image_bytes(&self, path: &str) -> Result<Vec<u8>> {
         let res = self.request("GET", path).call()?;

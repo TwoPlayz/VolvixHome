@@ -4,6 +4,31 @@ Spin.views = Spin.views || {};
 (function (S) {
   'use strict';
 
+  /** Under the albums: what this artist has released that isn't on the server yet, with a Get button. */
+  function getMore(root, name) {
+    const L = window.VH && window.VH.lidarr;
+    if (!L || !L.configured || !S.getMusic || !S.getMusic.helpers) return;
+    S.server.json('GET', '/api/lidarr/search?kind=artists&term=' + encodeURIComponent(name)).then(function (r) {
+      const hit = (r.artists || []).find(function (x) { return String(x.name || '').toLowerCase() === name.toLowerCase() && x.foreignId; });
+      if (!hit) return null;
+      return S.server.json('GET', '/api/discover/artist/' + encodeURIComponent(hit.foreignId)).then(function (a) { return { a: a, id: hit.foreignId }; });
+    }).then(function (res) {
+      const host = S.$('[data-getmore]', root);
+      if (!res || !host || !document.body.contains(root)) return;
+      const H = S.getMusic.helpers;
+      H.setCan(res.a.canRequest, res.a.configured);
+      const missing = (res.a.albums || []).filter(function (x) { return !x.onServer; });
+      if (!missing.length) return;
+      host.innerHTML = '<section class="section"><div class="section-title"><div><h2>Get more</h2></div>' +
+        '<a class="btn btn-secondary btn-sm" href="#/get/artist/' + S.esc(res.id) + '">See all releases</a></div>' +
+        '<div class="gm-grid">' + missing.slice(0, 8).map(function (a) {
+          return '<div class="gm-card"><a class="gm-link" href="' + H.albumHref(a) + '">' + H.art(a.image, false, a.title) +
+            '<span class="gm-text"><span class="t-name">' + S.esc(a.title) + '</span><span class="t-sub">' + S.esc([a.year, a.type && a.type !== 'Album' ? a.type : ''].filter(Boolean).join(' · ')) + '</span></span></a>' +
+            H.stateButton(a, 'album') + '</div>';
+        }).join('') + '</div></section>';
+    }).catch(function () { /* MusicBrainz is slow or off: the page is fine without it */ });
+  }
+
   S.views.artist = {
     render: function (root, params) {
       const name = S.data.artists.find(function (n) { return S.artistSlug(n) === params.slug; });
@@ -43,7 +68,10 @@ Spin.views = Spin.views || {};
         (albums.length ? S.shelf('Albums', albums.map(function (a) {
           return S.albumCard(a, { meta: '<span>' + (a.year || '') + '</span>' });
         }).join('')) : '') +
-        (appears.length ? S.shelf('Appears on', appears.map(function (a) { return S.albumCard(a); }).join('')) : '');
+        (appears.length ? S.shelf('Appears on', appears.map(function (a) { return S.albumCard(a); }).join('')) : '') +
+        '<div data-getmore></div>';
+
+      getMore(root, name);
 
       if (S.markPlaying) S.markPlaying();
       // a photo and a short bio (kept on the server; asked for once a month)

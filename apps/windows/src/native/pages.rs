@@ -156,8 +156,10 @@ pub fn human_size(b: u64) -> String {
     let mb = b as f64 / 1_048_576.0;
     if mb >= 1024.0 {
         format!("{:.1} GB", mb / 1024.0)
-    } else {
+    } else if mb >= 1.0 {
         format!("{mb:.0} MB")
+    } else {
+        format!("{:.0} KB", b as f64 / 1024.0)
     }
 }
 
@@ -280,6 +282,53 @@ pub fn get_more(app: &App) -> Option<El<'_>> {
         c = c.push(ui::dim("Results from MusicBrainz.", 12));
     }
     Some(c.into())
+}
+
+/// An artist from MusicBrainz: everything they have released, each with its state (in your library, asked for, or a
+/// Get button). Reached from a found artist, or from "See all releases" on a library artist's page.
+pub fn discover_page<'a>(app: &'a App, id: &str) -> El<'a> {
+    let Some(d) = app.discovered.get(id) else {
+        return column![ui::title("Artist", 32), ui::dim("Looking it up on MusicBrainz…", 15)].spacing(10).into();
+    };
+    let left = d.albums.iter().filter(|a| !a.is_on_server() && !a.requested && !app.find.asked.contains(a.foreign_id.as_deref().unwrap_or(""))).count();
+    let mut actions = row![].spacing(10).align_y(Alignment::Center);
+    if let Some(n) = &d.on_server {
+        actions = actions.push(ui::btn_icon("check", "Open in your library", ui::Btn::Secondary, false).on_press(Message::Go(Page::Artist(n.clone()))));
+    }
+    if left > 0 && app.find.can_get {
+        actions = actions.push(ui::btn_icon("download", format!("Get everything ({left})"), ui::Btn::Primary, false).on_press(Message::RequestMusic("artist".into(), id.to_string())));
+    }
+    let mut c = column![ui::dim(if d.on_server.is_some() { "Artist" } else { "Not in your library yet" }, 13), ui::title(d.name.clone(), 40), ui::dim(format!("{} releases", d.albums.len()), 15), actions].spacing(8);
+    for (title, single) in [("Albums & EPs", false), ("Singles", true)] {
+        let rows: Vec<El> = d.albums.iter().filter(|a| (a.kind.as_deref() == Some("Single")) == single).map(|a| found_row(app, a, "albums")).collect();
+        if !rows.is_empty() {
+            c = c.push(ui::gap(12)).push(ui::title(title, 22)).push(Column::with_children(rows).spacing(2));
+        }
+    }
+    if d.albums.is_empty() {
+        c = c.push(ui::dim("MusicBrainz doesn't list any albums for this artist yet.", 14));
+    }
+    c.push(ui::dim("Lidarr gets whole releases, so a song comes with its album or single.", 12)).into()
+}
+
+/// Under a library artist's albums: what they have released that you don't have yet, with a way to get it.
+pub fn artist_get_more<'a>(app: &'a App, name: &str) -> Option<El<'a>> {
+    if !app.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false) || app.offline {
+        return None;
+    }
+    let id = app.artist_mbids.get(&name.to_lowercase())?.as_ref()?;
+    let d = app.discovered.get(id)?;
+    let missing: Vec<&FoundItem> = d.albums.iter().filter(|a| !a.is_on_server()).collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let rows: Vec<El> = missing.iter().take(6).map(|a| found_row(app, a, "albums")).collect();
+    let head = row![
+        column![ui::title("Get more", 22), ui::dim(format!("More by {name} that isn't in your library yet."), 13)].spacing(4).width(Length::Fill),
+        button(text("See all releases").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))),
+    ]
+    .align_y(Alignment::Center);
+    Some(column![head, Column::with_children(rows).spacing(2)].spacing(10).into())
 }
 
 /// Requests: what people asked Lidarr for, and where it is.
@@ -411,7 +460,12 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str) -> El<'a> {
             (serde_json::Value::String(v), true) => Some(Message::Go(Page::Artist(v.clone()))),
             _ => None,
         };
-        button(row![ic(icon::DOWNLOADED, 12), text("In your library").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press_maybe(go).into()
+        let mut r = row![button(row![ic(icon::DOWNLOADED, 12), text("In your library").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press_maybe(go)].spacing(6);
+        if let (true, Some(id)) = (is_artist, &s.foreign_id) {
+            // you have some of their music: this is how to find and get the rest
+            r = r.push(button(text("More from them").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))));
+        }
+        r.into()
     } else if s.requested || asked(&s.foreign_id) || asked(&s.album_id) || asked(&s.single_id) {
         row![ic(icon::DOWNLOAD, 12), ui::dim("Requested", 13)].spacing(6).align_y(Alignment::Center).into()
     } else if !can {
@@ -1167,6 +1221,23 @@ fn settings(app: &App) -> El<'_> {
         btn("Remove all", (!app.saved.is_empty() || !app.downloaded.is_empty()).then_some(Message::RemoveAllDownloads)),
     ));
 
+    let cache = Column::new()
+        .push(setting_row(
+            "Cache songs as they're queued",
+            "Keeps the song playing and the next few on this computer, so they play steadily and replaying them uses no data.",
+            switch(app.settings.cache_songs, Message::SetCacheSongs),
+        ))
+        .push(setting_row(
+            "Cache limit",
+            "The songs you played longest ago are removed first when the cache is over this.",
+            ui::seg(&[("1024", "1 GB"), ("2048", "2 GB"), ("5120", "5 GB"), ("10240", "10 GB")], &app.settings.cache_limit_mb.to_string(), Message::SetCacheLimit),
+        ))
+        .push(action_row(
+            format!("{} song{} cached", app.cache_stats.0, if app.cache_stats.0 == 1 { "" } else { "s" }),
+            format!("{} used. Clearing it never removes your downloads.", human_size(app.cache_stats.1)),
+            btn("Clear cache", (app.cache_stats.1 > 0).then_some(Message::ClearCache)),
+        ));
+
     let mut library = Column::new();
     if app.can("settings") {
         let line = match &app.folder {
@@ -1218,7 +1289,7 @@ fn settings(app: &App) -> El<'_> {
         }
         page = page.push(column![ui::title("Share links", 22), ui::dim("Open links, newest first. Cancelling one stops it working straight away.", 13), container(shares).padding([6, 0])].spacing(6));
     }
-    page = page.push(section("Downloads", downloads.into())).push(section("Library", library.into()));
+    page = page.push(section("Downloads", downloads.into())).push(section("Cache", cache.into())).push(section("Library", library.into()));
     if app.can("settings") {
         page = page.push(lidarr_section(app));
     }

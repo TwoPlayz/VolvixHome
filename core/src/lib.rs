@@ -12,6 +12,7 @@
 //! which keeps it simple to call from Swift later (UniFFI).
 
 pub mod admin;
+pub mod cache;
 pub mod cast;
 pub mod client;
 pub mod covers;
