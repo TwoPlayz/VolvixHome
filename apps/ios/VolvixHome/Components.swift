@@ -255,26 +255,20 @@ struct TrackRow: View {
                 Text(track.artist).font(.system(size: 13)).foregroundColor(Theme.text2).lineLimit(1)
             }
             Spacer(minLength: 8)
-            if app.isLiked(track.id) {
-                Image(systemName: "heart.fill").font(.system(size: 13)).foregroundColor(Theme.accent)
+            Button { app.toggleLike(track.id) } label: {
+                Image(systemName: app.isLiked(track.id) ? "heart.fill" : "heart")
+                    .font(.system(size: 16)).foregroundColor(app.isLiked(track.id) ? Theme.accent : Theme.text2)
+                    .frame(width: 32, height: 34)
             }
+            .buttonStyle(.plain)
+            AddToPlaylistButton(ids: [track.id], compact: true)
             Menu {
                 Button { player.playNext(track.id) } label: { Label("Play next", systemImage: "text.insert") }
                 Button { player.addToQueue(track.id) } label: { Label("Add to queue", systemImage: "text.append") }
-                Button { app.toggleLike(track.id) } label: {
-                    Label(app.isLiked(track.id) ? "Remove from Liked Songs" : "Add to Liked Songs", systemImage: app.isLiked(track.id) ? "heart.slash" : "heart")
-                }
                 Button {
                     if downloads.has(track.id) { downloads.remove([track.id]) } else { downloads.add([track.id]) }
                 } label: {
                     Label(downloads.has(track.id) ? "Remove download" : "Download", systemImage: downloads.has(track.id) ? "trash" : "arrow.down.circle")
-                }
-                if !app.yourPlaylists.isEmpty {
-                    Menu {
-                        ForEach(app.yourPlaylists) { p in
-                            Button(p.name) { app.addTracks([track.id], to: p.id) }
-                        }
-                    } label: { Label("Add to playlist", systemImage: "plus.square.on.square") }
                 }
                 Button { showCredits = true } label: { Label("Credits", systemImage: "book") }
                 if let remove = onRemove {

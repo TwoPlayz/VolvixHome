@@ -356,7 +356,7 @@ struct PlaylistView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(p.trackIDs.enumerated()), id: \.offset) { i, tid in
                             if let t = app.track(tid) {
-                                let rm: (() -> Void)? = p.editable ? { remove(p, at: i, track: t) } : nil
+                                let rm: (() -> Void)? = (p.editable && !p.liked) ? { remove(p, at: i, track: t) } : nil
                                 TrackRow(track: t, showCover: true, onRemove: rm) { player.play(ids, startAt: ids.firstIndex(of: tid) ?? 0, from: p.name) }
                             }
                         }

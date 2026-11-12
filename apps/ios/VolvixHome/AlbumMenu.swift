@@ -7,6 +7,8 @@ struct AddToPlaylistButton: View {
     let ids: [String]
     var label = "plus"
     var plain = false
+    /// a small + for a song's row
+    var compact = false
     @State private var naming = false
     @State private var name = ""
 
@@ -22,7 +24,9 @@ struct AddToPlaylistButton: View {
             }
             Button { naming = true } label: { Label("New playlist…", systemImage: "plus") }
         } label: {
-            if plain {
+            if compact {
+                Image(systemName: "plus").font(.system(size: 16)).foregroundColor(Theme.text2).frame(width: 32, height: 34)
+            } else if plain {
                 Image(systemName: inAny ? "checkmark" : label).font(.system(size: 20)).foregroundColor(inAny ? Theme.accent : Theme.text).frame(width: 40, height: 44)
             } else {
                 Image(systemName: label).font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)

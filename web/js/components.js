@@ -442,8 +442,8 @@ window.Spin = window.Spin || {};
       items.push({ label: 'Play next', icon: 'queue', onClick: function () { S.player.addNext([trackId]); } });
       items.push({ label: 'Add to queue', icon: 'plus', onClick: function () { S.player.addToQueue([trackId]); } });
     }
-    items.push({ label: 'Add to playlist', icon: 'music', onClick: function () { S.pl.addToDialog([trackId]); } });
-    if (plId) {
+    // the heart and + buttons on the row do "Add to playlist" and, in Liked Songs, "Remove"
+    if (plId && plId !== 'pl_liked') {
       const index = parseInt(row.dataset.plIndex, 10);
       items.push({ label: 'Remove from this playlist', icon: 'x', onClick: function () {
         const entry = S.pl.removeAt(plId, index);

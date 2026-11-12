@@ -544,8 +544,8 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
         crate::MenuKind::Track { id, in_playlist } => {
             items.push(item("queue", "Play next", Message::PlayNext(id.clone()), false));
             items.push(item("plus", "Add to queue", Message::AddToQueue(id.clone()), false));
-            items.push(item("music", "Add to playlist", Message::AddToPlaylist(vec![id.clone()]), false));
-            if let Some((pl, index)) = in_playlist {
+            // the heart and + buttons on the row do "Add to playlist" and, in Liked Songs, "Remove"
+            if let Some((pl, index)) = in_playlist.as_ref().filter(|(pl, _)| pl.as_str() != "pl_liked") {
                 items.push(item("x", "Remove from this playlist", Message::RemoveFromPlaylist(pl.clone(), *index, id.clone()), false));
             }
             let got = app.is_saved("track", id);
