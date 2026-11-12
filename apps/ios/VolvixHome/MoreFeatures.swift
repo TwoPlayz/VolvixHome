@@ -160,38 +160,6 @@ struct SearchView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    VStack(spacing: 0) {
-            Text("Search").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundColor(Theme.text2)
-                TextField("Artists, albums, songs, playlists", text: $query)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .focused($focused)
-                    .foregroundColor(Theme.text)
-                if !query.isEmpty {
-                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundColor(Theme.text3) }
-                }
-            }
-            .padding(12)
-            .background(Theme.surface3)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .padding(.horizontal, 16).padding(.top, 10)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(types, id: \.0) { t in
-                        Button { type = t.0 } label: {
-                            Text(t.1).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 16).padding(.vertical, 8)
-                                .foregroundColor(type == t.0 ? Theme.surface : Theme.text).glass(Capsule(), tint: type == t.0 ? Theme.text : nil)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .padding(.vertical, 10)
-
-                    }
 
                     if !typed {
                         if app.albums.isEmpty {
@@ -290,7 +258,39 @@ struct SearchView: View {
                 .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    TopBar()
+            Text("Search").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundColor(Theme.text2)
+                TextField("Artists, albums, songs, playlists", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($focused)
+                    .foregroundColor(Theme.text)
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundColor(Theme.text3) }
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .glass(Capsule())
+            .padding(.horizontal, 16).padding(.top, 6)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(types, id: \.0) { t in
+                        Button { type = t.0 } label: {
+                            Text(t.1).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 16).padding(.vertical, 8)
+                                .foregroundColor(type == t.0 ? Theme.surface : Theme.text).glass(Capsule(), tint: type == t.0 ? Theme.text : nil)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.vertical, 10)
+                }
+            }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
