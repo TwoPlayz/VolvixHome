@@ -21,6 +21,8 @@ final class AppModel: ObservableObject {
     @Published var playlists: [PlaylistInfo] = []
     @Published var follows: Set<String> = []
     @Published var busy = false
+    /// the server can't be reached: the app runs from its saved copy, and only downloaded songs play
+    @Published var offline = false
     @Published var notes: [NoteItem] = []
     @Published var unread = 0
     @Published var members: [Member] = []
@@ -76,6 +78,7 @@ final class AppModel: ObservableObject {
         user = nil
         me = nil
         clearLibrary()
+        forgetSavedCopy()
         phase = .connect
     }
 
@@ -103,8 +106,16 @@ final class AppModel: ObservableObject {
         user = nil
         me = nil
         clearLibrary()
+        forgetSavedCopy()
         message = nil
         phase = .signIn
+    }
+
+    private func forgetSavedCopy() {
+        Persist.remove("library.json")
+        Persist.remove("me.json")
+        Persist.remove("userdata.json")
+        offline = false
     }
 
     func setQuality(_ q: String) {
@@ -118,14 +129,23 @@ final class AppModel: ObservableObject {
     func load() async {
         guard let api = api else { return }
         do {
-            let info = try await api.meInfo()
-            let catalog = try await api.library()
+            let meRaw = try await api.meData()
+            let libRaw = try await api.libraryData()
+            guard let info = try? JSONDecoder().decode(MeInfo.self, from: meRaw),
+                  let catalog = try? JSONDecoder().decode(Catalog.self, from: libRaw) else {
+                throw ServerError(message: "The server's answer wasn't what the app expected.")
+            }
             let data = (try? await api.userData()) ?? [:]
             me = info
             user = info.user
             index(catalog)
             userData = data
             readUserData()
+            // keep a copy, so the app opens without the server too
+            Persist.write(meRaw, "me.json")
+            Persist.write(libRaw, "library.json")
+            if let d = try? JSONSerialization.data(withJSONObject: data) { Persist.write(d, "userdata.json") }
+            offline = false
             message = nil
             phase = .ready
             await pollOnce()
@@ -135,6 +155,8 @@ final class AppModel: ObservableObject {
                 api.token = nil
                 message = "Your sign-in ran out. Sign in again."
                 phase = .signIn
+            } else if e.status == 0 && loadOffline() {
+                return
             } else {
                 message = e.message
                 phase = .loading
@@ -143,6 +165,24 @@ final class AppModel: ObservableObject {
             message = error.localizedDescription
             phase = .loading
         }
+    }
+
+    /// No server: open from the copy kept last time. False when there isn't one.
+    private func loadOffline() -> Bool {
+        guard let libRaw = Persist.read("library.json"), let meRaw = Persist.read("me.json"),
+              let catalog = try? JSONDecoder().decode(Catalog.self, from: libRaw),
+              let info = try? JSONDecoder().decode(MeInfo.self, from: meRaw) else { return false }
+        me = info
+        user = info.user
+        index(catalog)
+        if let d = Persist.read("userdata.json"), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] {
+            userData = o
+            readUserData()
+        }
+        offline = true
+        message = nil
+        phase = .ready
+        return true
     }
 
     /// Pull down to refresh: the library and your data again.
@@ -170,6 +210,11 @@ final class AppModel: ObservableObject {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 12_000_000_000)
             if phase != .ready { continue }
+            if offline {
+                // look for the server again; when it answers, load everything fresh
+                if (try? await api?.meInfo()) != nil { await load() }
+                continue
+            }
             await pollOnce()
         }
     }

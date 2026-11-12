@@ -1,6 +1,9 @@
 import Foundation
 
 extension API {
+    func meData() async throws -> Data { try await send(try request("/api/me")) }
+    func libraryData() async throws -> Data { try await send(try request("/api/library")) }
+
     func meInfo() async throws -> MeInfo {
         try await decode(MeInfo.self, "/api/me")
     }

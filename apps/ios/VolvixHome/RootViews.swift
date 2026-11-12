@@ -119,6 +119,7 @@ struct SignInView: View {
 struct MainTabs: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
+    @EnvironmentObject var downloads: DownloadStore
     @State private var showFull = false
 
     var body: some View {
@@ -131,9 +132,19 @@ struct MainTabs: View {
         }
         .tint(Theme.accent)
         .fullScreenCover(isPresented: $showFull) {
-            NowPlayingView().environmentObject(app).environmentObject(player)
+            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads)
         }
-        .onAppear { player.attach(app) }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if app.offline {
+                Text("Offline: the server can't be reached. Downloaded music still plays.")
+                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 5).background(Theme.accent)
+            }
+        }
+        .onAppear {
+            downloads.attach(app)
+            player.attach(app, downloads: downloads)
+        }
         .task { await app.pollLoop() }
     }
 

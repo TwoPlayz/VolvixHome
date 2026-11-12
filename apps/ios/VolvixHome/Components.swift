@@ -223,6 +223,7 @@ struct Shelf<Content: View>: View {
 struct TrackRow: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
+    @EnvironmentObject var downloads: DownloadStore
     let track: Track
     var number: Int? = nil
     var showCover = false
@@ -253,6 +254,11 @@ struct TrackRow: View {
                 Button { app.toggleLike(track.id) } label: {
                     Label(app.isLiked(track.id) ? "Remove from Liked Songs" : "Add to Liked Songs", systemImage: app.isLiked(track.id) ? "heart.slash" : "heart")
                 }
+                Button {
+                    if downloads.has(track.id) { downloads.remove([track.id]) } else { downloads.add([track.id]) }
+                } label: {
+                    Label(downloads.has(track.id) ? "Remove download" : "Download", systemImage: downloads.has(track.id) ? "trash" : "arrow.down.circle")
+                }
                 if !app.yourPlaylists.isEmpty {
                     Menu {
                         ForEach(app.yourPlaylists) { p in
@@ -269,6 +275,7 @@ struct TrackRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
+        .opacity(app.offline && !downloads.has(track.id) ? 0.4 : 1)
         .contentShape(Rectangle())
         .onTapGesture { onPlay() }
     }

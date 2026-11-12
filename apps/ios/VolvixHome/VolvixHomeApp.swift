@@ -7,6 +7,7 @@ import AVFoundation
 struct VolvixHomeApp: App {
     @StateObject private var app = AppModel()
     @StateObject private var player = PlayerModel()
+    @StateObject private var downloads = DownloadStore()
 
     init() {
         // sound keeps playing when the app is in the background or the screen locks
@@ -19,6 +20,7 @@ struct VolvixHomeApp: App {
             RootView()
                 .environmentObject(app)
                 .environmentObject(player)
+                .environmentObject(downloads)
                 .background(Color(UIColor.volvixSurface).ignoresSafeArea())
                 .preferredColorScheme(.dark)
         }

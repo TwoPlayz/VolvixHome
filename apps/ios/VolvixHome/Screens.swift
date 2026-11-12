@@ -146,8 +146,9 @@ struct PlaylistArt: View {
 // MARK: - Library
 
 struct LibraryView: View {
-    enum Tab: String, CaseIterable { case albums = "Albums", artists = "Artists", songs = "Songs", playlists = "Playlists" }
+    enum Tab: String, CaseIterable { case albums = "Albums", artists = "Artists", songs = "Songs", playlists = "Playlists", downloaded = "Saved" }
     @EnvironmentObject var app: AppModel
+    @EnvironmentObject var downloads: DownloadStore
     @EnvironmentObject var player: PlayerModel
     @State private var tab: Tab = .albums
     @State private var allArtists = false
@@ -171,6 +172,7 @@ struct LibraryView: View {
                 case .artists: artists
                 case .songs: songs
                 case .playlists: playlists
+                case .downloaded: saved
                 }
             }
             .refreshable { await app.refresh() }
@@ -257,6 +259,39 @@ struct LibraryView: View {
         }
     }
 
+    /// What is kept on this phone.
+    private var saved: some View {
+        let tracks = app.allTracks.filter { downloads.has($0.id) }.sorted { a, b in
+            if a.albumId != b.albumId { return a.albumId < b.albumId }
+            if a.disc != b.disc { return a.disc < b.disc }
+            return a.no < b.no
+        }
+        let ids = tracks.map { $0.id }
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("\(tracks.count) song\(tracks.count == 1 ? "" : "s") · \(formatBytes(downloads.bytes))")
+                .font(.system(size: 14)).foregroundColor(Theme.text2).padding(.horizontal, 16)
+            if !downloads.pending.isEmpty {
+                Text("Downloading \(downloads.pending.count) more…").font(.system(size: 13)).foregroundColor(Theme.text2).padding(.horizontal, 16)
+            }
+            if let p = downloads.problem { ProblemBox(text: p).padding(.horizontal, 16) }
+            if tracks.isEmpty {
+                Text("Nothing saved yet. Open an album or playlist and tap the download button to keep it here for listening without a connection.")
+                    .font(.system(size: 15)).foregroundColor(Theme.text2).padding(.horizontal, 16).padding(.top, 6)
+            } else {
+                HStack(spacing: 12) {
+                    PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
+                    PillButton(title: "Remove all", icon: "trash", primary: false) { downloads.removeAll() }
+                }
+                .padding(.horizontal, 16)
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { i, t in
+                        TrackRow(track: t, showCover: true) { player.play(ids, startAt: i) }
+                    }
+                }
+            }
+        }
+    }
+
     private var playlists: some View {
         VStack(alignment: .leading, spacing: 8) {
             PillButton(title: "New playlist", icon: "plus", primary: false) { creating = true }
@@ -308,6 +343,7 @@ struct AlbumView: View {
                     HStack(spacing: 12) {
                         PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
                         PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
+                        DownloadButton(ids: ids)
                     }
                     LazyVStack(spacing: 0) {
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { i, t in
@@ -416,6 +452,7 @@ struct PlaylistView: View {
                         HStack(spacing: 12) {
                             PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
                             PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
+                            DownloadButton(ids: ids)
                         }
                     }
                     LazyVStack(spacing: 0) {

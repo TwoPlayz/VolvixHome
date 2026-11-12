@@ -24,6 +24,7 @@ final class PlayerModel: ObservableObject {
     private var endObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
     private weak var app: AppModel?
+    private weak var downloads: DownloadStore?
     private var lastReported: String?
     private var artworkFor: String?
     private var artwork: MPMediaItemArtwork?
@@ -32,9 +33,10 @@ final class PlayerModel: ObservableObject {
     var upcoming: [String] { index + 1 < queue.count ? Array(queue[(index + 1)...]) : [] }
     var hasCurrent: Bool { currentID != nil }
 
-    func attach(_ app: AppModel) {
+    func attach(_ app: AppModel, downloads: DownloadStore) {
         if self.app === app { return }
         self.app = app
+        self.downloads = downloads
         setUpAudioSession()
         setUpRemoteCommands()
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
@@ -55,6 +57,16 @@ final class PlayerModel: ObservableObject {
         guard !ids.isEmpty else { return }
         var list = ids
         var start = max(0, min(startAt, ids.count - 1))
+        // with no server, only what is downloaded can play
+        if app?.offline == true, let d = downloads {
+            let wanted = ids[start]
+            list = ids.filter { d.has($0) }
+            if list.isEmpty {
+                problem = "None of these songs are downloaded, and the server can't be reached."
+                return
+            }
+            start = list.firstIndex(of: wanted) ?? 0
+        }
         if shuffled {
             let first = list[start]
             list.remove(at: start)
@@ -65,6 +77,7 @@ final class PlayerModel: ObservableObject {
         }
         queue = list
         index = start
+        problem = nil
         load(autoplay: true)
         if let id = currentID, let t = app?.track(id) { app?.playedAlbum(t.albumId) }
     }
@@ -171,7 +184,17 @@ final class PlayerModel: ObservableObject {
         duration = Double(t?.duration ?? 0)
         var options: [String: Any] = [:]
         if let h = api.authHeader { options["AVURLAssetHTTPHeaderFieldsKey"] = ["Authorization": h] }
-        let asset = AVURLAsset(url: url, options: options)
+        let asset: AVURLAsset
+        if let local = downloads?.localURL(id) {
+            asset = AVURLAsset(url: local)
+        } else if app.offline {
+            loading = false
+            isPlaying = false
+            problem = "This song isn't downloaded, and the server can't be reached."
+            return
+        } else {
+            asset = AVURLAsset(url: url, options: options)
+        }
         let item = AVPlayerItem(asset: asset)
         if let old = endObserver { NotificationCenter.default.removeObserver(old) }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
