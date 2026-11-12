@@ -169,24 +169,30 @@ enum MixEngine {
     }
 }
 
-/// A card for a mix: a collage of the albums its songs come from, with its name printed on it.
+/// A card for a mix, as on the website's phone view: a collage of the albums its songs come from, a dark fade along the
+/// bottom, and the mix's name (with its icon) printed on it in heavy white type.
 struct MixCard: View {
     @EnvironmentObject var app: AppModel
     let mix: Mix
     var width: CGFloat = 150
 
     var body: some View {
+        let size = max(13, min(22, width * 0.11))
         NavigationLink(value: Route.mix(mix.id)) {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack(alignment: .bottomLeading) {
                     Collage(ids: mix.ids)
-                    LinearGradient(colors: [.clear, Color.black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
-                    HStack(spacing: 5) {
-                        Image(systemName: mix.icon).font(.system(size: 12, weight: .bold))
-                        Text(mix.title).font(.system(size: 13, weight: .bold)).lineLimit(2)
+                    LinearGradient(stops: [.init(color: Color.black.opacity(0.78), location: 0), .init(color: Color.black.opacity(0.35), location: 0.55), .init(color: .clear, location: 1)],
+                                   startPoint: .bottom, endPoint: .top)
+                        .frame(height: width * 0.62)
+                    HStack(alignment: .bottom, spacing: 5) {
+                        Image(systemName: mix.icon).font(.system(size: size * 0.9, weight: .bold)).opacity(0.9)
+                        Text(mix.title).font(.system(size: size, weight: .heavy)).tracking(-0.02 * size).lineLimit(2).multilineTextAlignment(.leading)
+                            .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
                     }
                     .foregroundColor(.white)
-                    .padding(9)
+                    .padding(.horizontal, width * 0.09)
+                    .padding(.bottom, width * 0.08)
                 }
                 .frame(width: width, height: width)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -199,7 +205,7 @@ struct MixCard: View {
     }
 }
 
-/// Up to four covers in a square.
+/// Up to four covers in a square: 4 = a 2x2 grid, 3 = one big and two small, 2 = side by side, 1 = just that cover.
 struct Collage: View {
     @EnvironmentObject var app: AppModel
     let ids: [String]
@@ -213,18 +219,38 @@ struct Collage: View {
         return out
     }
 
+    private func tile(_ id: String, _ w: CGFloat, _ h: CGFloat) -> some View {
+        CoverView(albumID: id, corner: 0).frame(width: max(w, h), height: max(w, h)).frame(width: w, height: h).clipped()
+    }
+
     var body: some View {
         let a = albums
-        if a.count >= 4 {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) { CoverView(albumID: a[0], corner: 0); CoverView(albumID: a[1], corner: 0) }
-                HStack(spacing: 0) { CoverView(albumID: a[2], corner: 0); CoverView(albumID: a[3], corner: 0) }
+        GeometryReader { geo in
+            let s = min(geo.size.width, geo.size.height)
+            let half = s / 2
+            Group {
+                switch a.count {
+                case 0:
+                    ZStack { Theme.tint("mix"); Image(systemName: "music.note").font(.system(size: s * 0.3)).foregroundColor(.white.opacity(0.7)) }
+                case 1:
+                    tile(a[0], s, s)
+                case 2:
+                    HStack(spacing: 0) { tile(a[0], half, s); tile(a[1], half, s) }
+                case 3:
+                    HStack(spacing: 0) {
+                        tile(a[0], half, s)
+                        VStack(spacing: 0) { tile(a[1], half, half); tile(a[2], half, half) }
+                    }
+                default:
+                    VStack(spacing: 0) {
+                        HStack(spacing: 0) { tile(a[0], half, half); tile(a[1], half, half) }
+                        HStack(spacing: 0) { tile(a[2], half, half); tile(a[3], half, half) }
+                    }
+                }
             }
-        } else if let first = a.first {
-            CoverView(albumID: first, corner: 0)
-        } else {
-            Theme.tint("mix")
+            .frame(width: s, height: s)
         }
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 
@@ -244,8 +270,10 @@ struct MixView: View {
                 let tracks = m.ids.compactMap { app.track($0) }
                 VStack(spacing: 14) {
                     ZStack {
-                        Collage(ids: m.ids).frame(width: 220, height: 220)
+                        LinearGradient(colors: [Color(hex: 0x5E548E), Color(hex: 0xE5484D)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        Image(systemName: m.icon).font(.system(size: 64, weight: .semibold)).foregroundColor(.white)
                     }
+                    .frame(width: 220, height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .padding(.top, 8)
                     VStack(spacing: 4) {
