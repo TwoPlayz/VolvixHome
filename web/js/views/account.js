@@ -386,7 +386,12 @@ Spin.views = Spin.views || {};
 
   /* ---------- equalizer ---------- */
   // The equalizer is a graph: drag a dot up or down to boost or cut that part of the sound (32 Hz bass on the left, 16 kHz treble on the right).
-  const G = { w: 640, h: 260, x0: 46, x1: 628, top: 16, bot: 230 };
+  const G = { w: 640, h: 260, x0: 46, x1: 628, top: 16, bot: 230, r: 9 };
+  /** On a phone the graph is drawn taller and narrower (about 1:1 with the screen) so the dots stay big enough to grab. */
+  function eqLayout() {
+    const phone = !!(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
+    Object.assign(G, phone ? { w: 360, h: 340, x0: 36, x1: 352, top: 22, bot: 290, r: 11 } : { w: 640, h: 260, x0: 46, x1: 628, top: 16, bot: 230, r: 9 });
+  }
   const gx = function (i) { return G.x0 + (G.x1 - G.x0) * (i + 0.5) / 10; };
   const gy = function (db) { return (G.top + G.bot) / 2 - db * ((G.bot - G.top) / 2 / 12); };
   function curve(gains) {
@@ -405,6 +410,7 @@ Spin.views = Spin.views || {};
 
   /** The whole equalizer: switch, presets, the graph, preamp. It lives inside Playback with crossfade and leveling. */
   function eqPanel(st) {
+    eqLayout();
     const eq = st.settings.eq || { on: false, preset: 'flat', pre: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     const P = S.fx.PRESETS, B = S.fx.BANDS;
     const grid = [-12, -6, 0, 6, 12].map(function (d) {
@@ -414,23 +420,16 @@ Spin.views = Spin.views || {};
       return '<line class="eq-grid v" x1="' + gx(i) + '" x2="' + gx(i) + '" y1="' + G.top + '" y2="' + G.bot + '"/><text class="eq-axis" x="' + gx(i) + '" y="' + (G.bot + 22) + '" text-anchor="middle">' + hz(f) + '</text>';
     }).join('');
     const pts = eq.gains.map(function (g, i) {
-      return '<circle class="eq-pt" data-pt="' + i + '" cx="' + gx(i) + '" cy="' + gy(g).toFixed(1) + '" r="9" tabindex="' + (eq.on ? 0 : -1) + '" role="slider" aria-label="' + hz(B[i]) + ' Hz" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="' + g + '" aria-valuetext="' + sgn(g) + ' dB"/>';
+      return '<circle class="eq-pt" data-pt="' + i + '" cx="' + gx(i) + '" cy="' + gy(g).toFixed(1) + '" r="' + G.r + '" tabindex="' + (eq.on ? 0 : -1) + '" role="slider" aria-label="' + hz(B[i]) + ' Hz" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="' + g + '" aria-valuetext="' + sgn(g) + ' dB"/>';
     }).join('');
-    // on a phone the graph's dots are too small to grab: ten tall sliders instead, one per band
-    const phone = !!(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
-    const sliders = '<div class="eq-bands eq-bands-phone">' + B.map(function (f, i) {
-      return '<div class="eq-band"><span class="eq-db" data-eq-db="' + i + '">' + sgn(eq.gains[i]) + '</span>' +
-        '<input class="eq-slider" type="range" min="-12" max="12" step="1" value="' + eq.gains[i] + '" data-eq-band="' + i + '" aria-label="' + hz(f) + ' Hz"' + (eq.on ? '' : ' disabled') + '>' +
-        '<span class="eq-hz">' + hz(f) + '</span></div>';
-    }).join('') + '</div>';
-    return row('Equalizer', S.fx.available() ? (phone ? 'Shape the sound: slide a band up to boost and down to cut.' : 'Shape the sound: drag the dots up to boost and down to cut.') + ` It works on this device while it plays (not when casting to a TV).` : 'This browser can\'t process sound.', toggle('eqOn', !!eq.on), { icon: 'settings' }) +
+    return row('Equalizer', S.fx.available() ? 'Shape the sound: drag the dots up to boost and down to cut.' + ` It works on this device while it plays (not when casting to a TV).` : 'This browser can\'t process sound.', toggle('eqOn', !!eq.on), { icon: 'settings' }) +
       '<div class="eq-panel"' + (eq.on ? '' : ' data-off') + '>' +
         '<div class="eq-top"><label class="eq-pick"><span>Preset</span><select class="input" data-eq-preset' + (eq.on ? '' : ' disabled') + '>' +
           Object.keys(P).map(function (k) { return '<option value="' + k + '"' + (eq.preset === k ? ' selected' : '') + '>' + S.esc(P[k].label) + '</option>'; }).join('') +
           '<option value="custom"' + (eq.preset === 'custom' ? ' selected' : '') + '>Custom</option></select></label>' +
           '<label class="eq-pick"><span>Preamp <b data-eq-prev>' + sgn(eq.pre) + ' dB</b></span><input type="range" min="-12" max="6" step="1" value="' + eq.pre + '" data-eq-pre' + (eq.on ? '' : ' disabled') + '></label>' +
           '<button class="btn btn-ghost btn-sm" data-act="eq-reset"' + (eq.on ? '' : ' disabled') + '>Reset</button></div>' +
-        (phone ? sliders : '<div class="eq-graph"><svg viewBox="0 0 ' + G.w + ' ' + G.h + '" role="group" aria-label="Equalizer graph" data-eq-svg>' + grid + cols +
+        ('<div class="eq-graph"><svg viewBox="0 0 ' + G.w + ' ' + G.h + '" role="group" aria-label="Equalizer graph" data-eq-svg>' + grid + cols +
           '<path class="eq-fill" d="' + fillOf(eq.gains) + '"/><path class="eq-line" d="' + curve(eq.gains) + '"/>' + pts +
           '<g class="eq-tip" data-eq-tip hidden><rect rx="6" width="92" height="24" x="-46" y="-40"/><text text-anchor="middle" y="-24"></text></g></svg></div>') +
       '</div>';
@@ -451,6 +450,7 @@ Spin.views = Spin.views || {};
   }
   /** Dragging and keys on the graph. Safe to call after every render. */
   function bindEq(root) {
+    eqLayout();
     const svg = root.querySelector('[data-eq-svg]');
     if (!svg) return;
     const on = function () { return !!(S.store.state.settings.eq && S.store.state.settings.eq.on); };

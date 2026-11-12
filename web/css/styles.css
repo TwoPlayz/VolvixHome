@@ -87,6 +87,8 @@ a { color: inherit; text-decoration: none; }
 /* in the Volvix apps: scroll, but no pinch or double-tap zoom, no grey tap flash, no long-press link previews */
 html[data-native], html[data-platform="ios"] { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 html[data-native] a, html[data-native] button { -webkit-touch-callout: none; }
+/* inside the iPhone app there is no Tab key: no focus outlines. (Browsers, even a narrow desktop window, keep theirs.) */
+html[data-native="ios"] :focus, html[data-native="ios"] :focus-visible { outline: none; }
 /* in the apps the page itself never scrolls (only the content inside it does), and never sideways */
 html[data-native], html[data-native] body { overflow: hidden; overscroll-behavior: none; }
 html[data-native] body { position: fixed; inset: 0; width: 100%; }
@@ -1607,10 +1609,8 @@ select.input {
   .view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .proof, .social-side, .acct-nav { position: static; }
   /* the bottom tabs: no browser tap flash, a quick dim while pressed instead */
-  .tabbar .tab { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; outline: none; transition: opacity .1s; }
+  .tabbar .tab { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: opacity .1s; }
   .tabbar .tab:active { opacity: .55; }
-  /* with a keyboard (Tab key) the bottom tab is marked by a soft background, not the red outline */
-  .tabbar .tab:focus-visible { outline: none; background: var(--hover); border-radius: 10px; }
   .nav-arrow { display: none; }
   .mobile-brand { display: block; }
   .view { padding: 4px 16px 32px; }
@@ -2807,11 +2807,8 @@ body.reordering { cursor: grabbing; user-select: none; }
 .eq-db { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .eq-hz { font-size: 11px; color: var(--text-3); }
 .eq-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 130px; accent-color: var(--accent); }
-/* phone: ten tall sliders you can reach with a thumb */
-.eq-bands-phone { gap: 2px; }
-.eq-bands-phone .eq-slider { height: 190px; width: 30px; touch-action: none; }
-.eq-bands-phone .eq-db { min-width: 24px; text-align: center; }
-.eq-panel[data-off] .eq-bands-phone { pointer-events: none; }
+/* phone: the same graph, drawn taller with bigger dots */
+@media (max-width: 760px) { .eq-pt { r: 11; } .eq-pt:hover, .eq-pt:focus-visible { r: 13; } .eq-line { stroke-width: 3.5; } .eq-axis { font-size: 12px; } }
 
 /* browse */
 .browse-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
