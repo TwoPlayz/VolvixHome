@@ -18,7 +18,7 @@ struct VolvixHomeApp: App {
             Group {
                 if let server = state.server {
                     ServerView(server: server, onDisconnect: state.clear)
-                        .ignoresSafeArea(.container, edges: .bottom)
+                        .ignoresSafeArea(.container, edges: .all) // the page fills the whole screen; its CSS keeps clear of the notch and the home bar itself
                 } else {
                     ConnectView { state.connect($0) }
                 }

@@ -87,6 +87,10 @@ a { color: inherit; text-decoration: none; }
 /* in the Volvix apps: scroll, but no pinch or double-tap zoom, no grey tap flash, no long-press link previews */
 html[data-native], html[data-platform="ios"] { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 html[data-native] a, html[data-native] button { -webkit-touch-callout: none; }
+/* in the apps the page itself never scrolls (only the content inside it does), and never sideways */
+html[data-native], html[data-native] body { overflow: hidden; overscroll-behavior: none; }
+html[data-native] body { position: fixed; inset: 0; width: 100%; }
+html[data-native] .main { overflow-x: hidden; overscroll-behavior: contain; }
 html[data-platform="ios"] a, html[data-platform="ios"] button { -webkit-touch-callout: none; }
 input, select, textarea { font: inherit; color: inherit; }
 h1, h2, h3 { font-family: var(--font-display); }
@@ -1216,7 +1220,8 @@ select.input {
 .set-foot { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border); }
 .set-hint { color: var(--text-3); font-size: 12px; }
 
-.seg-ctl { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-3); }
+.seg-ctl { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-3); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.seg-ctl::-webkit-scrollbar { display: none; }
 .seg-ctl button { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); }
 .seg-ctl button:hover { color: var(--text); }
 .seg-ctl button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .18); }
