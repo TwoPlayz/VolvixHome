@@ -37,7 +37,8 @@ window.Spin = window.Spin || {};
     items.push({ label: (here ? here.name : 'This device') + ' (this device)', icon: playingHere ? 'check' : 'devices', onClick: function () {
       // bring it back here
       const o = D.list.find(function (d) { return d.id === D.active; });
-      if (!playingHere && o) S.toast('Press play here to move it back', 'devices');
+      if (D.remote) D.takeOver();
+      else if (!playingHere && o) S.toast('Press play here to move it back', 'devices');
     } });
     D.list.filter(function (d) { return d.id !== D.me; }).forEach(function (d) {
       items.push({ label: d.name + (d.active ? ' · playing' : ''), icon: d.active ? 'check' : 'devices', onClick: function () {

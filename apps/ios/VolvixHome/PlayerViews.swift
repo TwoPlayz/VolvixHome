@@ -13,7 +13,7 @@ struct MiniPlayer: View {
                     CoverView(albumID: t.albumId, corner: 6).frame(width: 42, height: 42)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(t.title).font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
-                        Text(t.artist).font(.system(size: 12)).foregroundColor(Theme.text2).lineLimit(1)
+                        Text(player.remoteName.map { "Playing on " + $0 } ?? t.artist).font(.system(size: 12)).foregroundColor(player.remoteName == nil ? Theme.text2 : Theme.accent).lineLimit(1)
                     }
                     Spacer(minLength: 8)
                     Button { app.toggleLike(t.id) } label: {
@@ -119,8 +119,8 @@ struct NowPlayingView: View {
                         }
                         Spacer()
                         VStack(spacing: 1) {
-                            Text(player.partyOn ? "Listening party" : "Playing from").font(.system(size: 11)).foregroundColor(Theme.text2)
-                            Text(player.partyOn ? "Everyone hears the same queue" : (player.contextName ?? album?.title ?? "")).font(.system(size: 14, weight: .bold)).foregroundColor(Theme.text).lineLimit(1)
+                            Text(player.partyOn ? "Listening party" : (player.remoteName != nil ? "Controlling" : "Playing from")).font(.system(size: 11)).foregroundColor(Theme.text2)
+                            Text(player.partyOn ? "Everyone hears the same queue" : (player.remoteName ?? player.contextName ?? album?.title ?? "")).font(.system(size: 14, weight: .bold)).foregroundColor(Theme.text).lineLimit(1)
                         }
                         Spacer()
                         Color.clear.frame(width: 44, height: 44)
@@ -209,7 +209,7 @@ struct NowPlayingView: View {
                         Button { showLyrics.toggle() } label: { tool(showLyrics ? "quote.bubble.fill" : "quote.bubble", on: showLyrics) }.frame(maxWidth: .infinity)
                         Menu {
                             Section("Play on") {
-                                Button { } label: { Label(devices.deviceName + " (this device)", systemImage: devices.playingHere ? "checkmark" : "iphone") }
+                                Button { devices.takeOver() } label: { Label(devices.deviceName + " (this device)", systemImage: devices.playingHere ? "checkmark" : "iphone") }
                                 ForEach(devices.others) { d in
                                     Button { devices.transfer(to: d.id) } label: {
                                         Label(d.name + (d.active ? " · playing" : ""), systemImage: d.active ? "checkmark" : "laptopcomputer.and.iphone")

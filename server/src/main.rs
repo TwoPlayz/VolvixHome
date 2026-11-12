@@ -2114,6 +2114,23 @@ struct DeviceBody {
     to: String,
     #[serde(default)]
     state: Value,
+    #[serde(default)]
+    cmd: Value,
+}
+
+/// The playing device says what it is playing, so your other devices can show it and control it.
+async fn device_report(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<DeviceBody>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    if st.devices.report(&user.id, &b.device, b.state) { StatusCode::NO_CONTENT.into_response() } else { error(StatusCode::CONFLICT, "This device isn't the one playing.") }
+}
+
+/// Control another of your devices: play, pause, next, previous, seek, or jump to a song in its queue.
+async fn device_command(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<DeviceBody>) -> Response {
+    let (_, user) = match signed_in(&st, &headers) { Ok(u) => u, Err(r) => return r };
+    match st.devices.command(&user.id, &b.to, b.cmd) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => error(StatusCode::NOT_FOUND, &e),
+    }
 }
 
 async fn device_active(State(st): State<Shared>, headers: HeaderMap, Json(b): Json<DeviceBody>) -> Response {
@@ -2436,6 +2453,8 @@ async fn main() {
         .route("/api/devices/events", get(device_events))
         .route("/api/devices/active", post(device_active))
         .route("/api/devices/transfer", post(device_transfer))
+        .route("/api/devices/state", post(device_report))
+        .route("/api/devices/command", post(device_command))
         .route("/", get(index_page))
         .route("/index.html", get(index_page))
         .route("/api/people", get(people))

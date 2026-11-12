@@ -47,6 +47,13 @@ final class PlayerModel: ObservableObject {
     /// what the music is playing from (an album, a playlist…), for the full player
     @Published private(set) var contextName: String?
     private var applyingParty = false
+    /// songs fetched by the app itself when the player couldn't open the stream (song id -> file)
+    private var fetched: [String: URL] = [:]
+    private var retriedFor: String?
+    /// another device is playing: this phone mirrors it (silently) and sends it what you tap
+    @Published private(set) var remoteName: String?
+    private var remoteState: RemoteNow?
+    private var remoteTimer: Timer?
     private var silent = false
     private var xfading = false
     private var fadingOut: AVPlayer?
@@ -97,6 +104,7 @@ final class PlayerModel: ObservableObject {
     func play(_ ids: [String], startAt: Int = 0, shuffled: Bool = false, from: String? = nil) {
         guard !ids.isEmpty else { return }
         if inParty { partyPlay(ids, startAt, shuffled); return }
+        if inRemote { hub?.leaveRemote() }
         contextName = from
         var list = ids
         var start = max(0, min(startAt, ids.count - 1))
@@ -127,24 +135,28 @@ final class PlayerModel: ObservableObject {
     }
 
     func playNext(_ id: String) {
+        if inRemote { hub?.notice = "Not available while you control another device"; return }
         if inParty { party?.fire("addNext", ["ids": [id]]); party?.notice = "Playing next in the party"; return }
         if queue.isEmpty { play([id]); return }
         queue.insert(id, at: min(index + 1, queue.count))
     }
 
     func playNext(ids: [String]) {
+        if inRemote { hub?.notice = "Not available while you control another device"; return }
         if inParty { party?.fire("addNext", ["ids": ids]); party?.notice = "Playing next in the party"; return }
         if queue.isEmpty { play(ids); return }
         queue.insert(contentsOf: ids, at: min(index + 1, queue.count))
     }
 
     func addToQueue(ids: [String]) {
+        if inRemote { hub?.notice = "Not available while you control another device"; return }
         if inParty { party?.fire("add", ["ids": ids]); party?.notice = "Added to the party queue"; return }
         if queue.isEmpty { play(ids); return }
         queue.append(contentsOf: ids)
     }
 
     func addToQueue(_ id: String) {
+        if inRemote { hub?.notice = "Not available while you control another device"; return }
         if inParty { party?.fire("add", ["ids": [id]]); party?.notice = "Added to the party queue"; return }
         if queue.isEmpty { play([id]); return }
         queue.append(id)
@@ -153,6 +165,7 @@ final class PlayerModel: ObservableObject {
     func jump(to i: Int) {
         guard i >= 0, i < queue.count else { return }
         if inParty && !applyingParty { party?.fire("playAt", ["index": i]); return }
+        if inRemote { hub?.command("playAt", ["index": i]); return }
         index = i
         load(autoplay: true)
     }
@@ -160,6 +173,7 @@ final class PlayerModel: ObservableObject {
     func removeFromQueue(at i: Int) {
         guard i > index, i < queue.count else { return }
         if inParty { party?.fire("remove", ["index": i]); return }
+        if inRemote { hub?.notice = "Not available while you control another device"; return }
         queue.remove(at: i)
     }
 
@@ -201,6 +215,13 @@ final class PlayerModel: ObservableObject {
     func resume() {
         guard hasCurrent else { return }
         if inParty && !applyingParty { party?.fire("play"); return }
+        if inRemote { hub?.command("play"); return }
+        // after another device stopped playing nothing is loaded here yet: load the song and carry on from the spot
+        if player.currentItem == nil {
+            pendingSeek = position > 1 ? position : nil
+            load(autoplay: true)
+            return
+        }
         if cast?.isCasting != true { hub?.announce() }
         if cast?.isCasting == true && !suppressCast { cast?.control("play") }
         player.play()
@@ -211,6 +232,7 @@ final class PlayerModel: ObservableObject {
 
     func pause() {
         if inParty && !applyingParty { party?.fire("pause"); return }
+        if inRemote { hub?.command("pause"); return }
         fadingOut?.pause()
         if cast?.isCasting == true && !suppressCast { cast?.control("pause") }
         player.pause()
@@ -222,6 +244,7 @@ final class PlayerModel: ObservableObject {
     func next() {
         if queue.isEmpty { return }
         if inParty && !applyingParty { party?.fire("next"); return }
+        if inRemote { hub?.command("next"); return }
         if index + 1 < queue.count {
             index += 1
             load(autoplay: true)
@@ -236,6 +259,7 @@ final class PlayerModel: ObservableObject {
 
     func previous() {
         if inParty && !applyingParty { party?.fire("prev"); return }
+        if inRemote { hub?.command("prev"); return }
         // a few seconds in: back to the start of the song; at the start: the one before
         if position > 3 || index <= 0 {
             seek(to: 0)
@@ -263,11 +287,13 @@ final class PlayerModel: ObservableObject {
 
     func seek(to seconds: Double) {
         if inParty && !applyingParty { party?.fire("seek", ["posMs": Int(max(0, seconds) * 1000)]); return }
+        if inRemote { hub?.command("seek", ["pos": max(0, seconds)]); return }
         if cast?.isCasting == true && !suppressCast { cast?.control("seek", value: max(0, seconds)) }
         seekLocal(seconds)
     }
 
     private func seekLocal(_ seconds: Double) {
+        defer { hub?.report(force: true) }
         let t = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
         player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
         position = max(0, seconds)
@@ -313,7 +339,7 @@ final class PlayerModel: ObservableObject {
         var options: [String: Any] = [:]
         if let h = api.authHeader { options["AVURLAssetHTTPHeaderFieldsKey"] = ["Authorization": h] }
         let asset: AVURLAsset
-        if let local = downloads?.localURL(id) {
+        if let local = downloads?.localURL(id) ?? fetched[id] {
             asset = AVURLAsset(url: local)
         } else if app.localOnly {
             loading = false
@@ -332,7 +358,11 @@ final class PlayerModel: ObservableObject {
             let failed = item.status == .failed
             let ready = item.status == .readyToPlay
             let secs = item.duration.seconds
-            let text = item.error?.localizedDescription
+            var text = item.error?.localizedDescription
+            if let e = item.error as NSError? {
+                text = (text ?? "This song couldn't be played.") + " (\(e.domain) \(e.code))"
+                if let log = item.errorLog()?.events.last, log.errorStatusCode != 0 { text = (text ?? "") + " The server answered \(log.errorStatusCode)." }
+            }
             Task { @MainActor in self?.itemStatus(failed: failed, ready: ready, duration: secs, error: text) }
         }
         player.replaceCurrentItem(with: item)
@@ -354,6 +384,11 @@ final class PlayerModel: ObservableObject {
 
     private func itemStatus(failed: Bool, ready: Bool, duration secs: Double, error: String?) {
         if failed {
+            // the player couldn't open the stream: fetch the song ourselves (the same request, with redirects kept) and play the file
+            if let id = currentID, retriedFor != id, fetched[id] == nil, downloads?.localURL(id) == nil {
+                recover(id, wasPlaying: isPlaying, original: error)
+                return
+            }
             loading = false
             problem = error ?? "This song couldn't be played."
             isPlaying = false
@@ -369,6 +404,46 @@ final class PlayerModel: ObservableObject {
         }
     }
 
+    private func recover(_ id: String, wasPlaying: Bool, original: String?) {
+        retriedFor = id
+        guard let api = app?.api, let url = api.streamURL(id) else { return }
+        loading = true
+        Task {
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 120
+            if let h = api.authHeader { req.setValue(h, forHTTPHeaderField: "Authorization") }
+            do {
+                let (tmp, resp) = try await URLSession.shared.download(for: req)
+                guard let http = resp as? HTTPURLResponse else { throw ServerError(message: "The server didn't answer.") }
+                if http.statusCode == 401 {
+                    loading = false; isPlaying = false
+                    problem = "Your sign-in ran out. Sign out in Account and sign in again."
+                    return
+                }
+                guard (200..<300).contains(http.statusCode) else {
+                    loading = false; isPlaying = false
+                    problem = "The server answered \(http.statusCode) for this song."
+                    return
+                }
+                let t = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+                let ext = t.contains("flac") ? "flac" : (t.contains("mpeg") || t.contains("mp3")) ? "mp3" : (t.contains("mp4") || t.contains("m4a") || t.contains("aac")) ? "m4a" : t.contains("wav") ? "wav" : t.contains("ogg") ? "ogg" : "audio"
+                let dest = FileManager.default.temporaryDirectory.appendingPathComponent("stream-" + id + "." + ext)
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                // keep only the latest few so the phone's storage isn't filled
+                if fetched.count >= 3, let old = fetched.keys.first(where: { $0 != id }) {
+                    if let u = fetched[old] { try? FileManager.default.removeItem(at: u) }
+                    fetched[old] = nil
+                }
+                fetched[id] = dest
+                if currentID == id { load(autoplay: wasPlaying) }
+            } catch {
+                loading = false; isPlaying = false
+                problem = (original ?? "This song couldn't be played.") + " " + error.localizedDescription
+            }
+        }
+    }
+
     /// 0 = off, minutes, or -1 = when this song ends.
     func setSleep(minutes: Int) {
         sleepAt = nil
@@ -379,6 +454,7 @@ final class PlayerModel: ObservableObject {
 
     /// Move songs in the part of the queue that is still to come.
     func moveUpcoming(from offsets: IndexSet, to destination: Int) {
+        if inRemote { hub?.notice = "Not available while you control another device"; return }
         if inParty {
             if let rel = offsets.first {
                 let to = destination > rel ? destination - 1 : destination
@@ -428,6 +504,7 @@ final class PlayerModel: ObservableObject {
         maybeCrossfade()
         keepInStep()
         if isPlaying && Date().timeIntervalSince(lastSaved) > 5 { saveLast() }
+        hub?.report()
         let playing = player.timeControlStatus == .playing
         if playing != isPlaying && player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
             isPlaying = playing
@@ -536,6 +613,72 @@ final class PlayerModel: ObservableObject {
         index = at
         pendingSeek = pos > 2 ? pos : nil
         load(autoplay: false)
+    }
+
+    // MARK: controlling another device
+
+    private var inRemote: Bool { remoteState != nil }
+
+    /// Mirror the device that is playing: its queue, song and spot. No sound is made here.
+    func applyRemote(_ r: RemoteNow) {
+        let first = remoteState == nil
+        if first {
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            if let o = endObserver { NotificationCenter.default.removeObserver(o); endObserver = nil }
+        }
+        remoteState = r
+        remoteName = r.name
+        queue = r.queue
+        index = r.index
+        isPlaying = r.playing
+        contextName = nil
+        duration = Double(currentID.flatMap { app?.track($0)?.duration } ?? 0)
+        updateRemotePosition()
+        if remoteTimer == nil {
+            remoteTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.updateRemotePosition() }
+            }
+        }
+        artworkFor = nil
+        publishNowPlaying()
+        loadArtwork()
+    }
+
+    private func updateRemotePosition() {
+        guard let r = remoteState else { return }
+        let serverNow = Date().timeIntervalSince1970 * 1000 + r.offsetMs
+        var p = (r.playing ? r.posMs + (serverNow - r.updatedAt) : r.posMs) / 1000
+        if duration > 0 { p = min(p, duration) }
+        position = max(0, p)
+    }
+
+    /// The other device stopped (or this one took over): back to being a player of its own.
+    func clearRemote() {
+        remoteTimer?.invalidate()
+        remoteTimer = nil
+        remoteState = nil
+        remoteName = nil
+        isPlaying = false
+        publishNowPlaying()
+    }
+
+    /// Another phone, the website or the Windows app asked this device (the one playing) to do something.
+    func handleCommand(_ c: [String: Any]) {
+        guard !inRemote, !inParty else { return }
+        switch c["op"] as? String {
+        case "play": if !isPlaying { resume() }
+        case "pause": if isPlaying { pause() }
+        case "next": next()
+        case "prev": previous()
+        case "seek": seek(to: decimal(c["pos"]))
+        case "playAt": jump(to: wholeNumber(c["index"]))
+        default: break
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            hub?.report(force: true)
+        }
     }
 
     // MARK: listening party
