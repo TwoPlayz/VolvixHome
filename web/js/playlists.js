@@ -391,7 +391,7 @@ window.Spin = window.Spin || {};
               '<span class="t-sub">' + (st === 'collab' ? 'Can edit' : st === 'invited' ? 'Invited, waiting to accept' : 'Not invited') + '</span></span>' +
               '<input type="checkbox" value="' + p.id + '"' + (st !== 'none' ? ' checked' : '') + '></label>';
           }).join('') + '</div>'
-        : '<p class="modal-text">No one else is in your household yet. An admin can add people under Account → People.</p>',
+        : '<p class="modal-text">No one else is in your household yet. An admin can add people under Account → Members.</p>',
       actions: [
         pl.shared && (collab.length || invited.length) ? { label: 'Stop sharing', kind: 'danger danger-left', onClick: function (close) { close(); S.pl.toggleCollaborative(id); } } : null,
         { label: 'Cancel', kind: 'secondary' },

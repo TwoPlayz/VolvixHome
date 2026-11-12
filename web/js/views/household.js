@@ -42,7 +42,7 @@ Spin.views = Spin.views || {};
         const members = S.household.members();
         if (!members.length) {
           host.innerHTML = S.emptyState('family', 'Just you so far', S.data.can('members')
-            ? 'Add the people you share this server with under Account → People, and they show up here.'
+            ? 'Add the people you share this server with under Account → Members, and they show up here.'
             : 'When more people join this server, you\'ll see what they\'re listening to here.',
             S.data.can('members') ? '<a class="btn btn-secondary" href="#/account/members">Add members</a>' : '');
           return;

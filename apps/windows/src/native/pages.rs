@@ -731,7 +731,7 @@ pub fn household(app: &App) -> El<'_> {
         c = c.push(section("Invites", Column::with_children(rows).spacing(4).into()));
     }
     if app.household.members.is_empty() {
-        return c.push(ui::dim("No one else is in your household yet. An admin can add people on the website (Account → People).", 15)).into();
+        return c.push(ui::dim("No one else is in your household yet. An admin can add people on the website (Account → Members).", 15)).into();
     }
     // listening now first, then the most recently active (like the website)
     let mut members: Vec<&_> = app.household.members.iter().collect();
