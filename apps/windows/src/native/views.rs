@@ -154,9 +154,9 @@ pub fn clip(s: &str, max: usize) -> String {
 pub fn cover_of<'a>(app: &'a App, album: Option<&Album>, size: f32) -> El<'a> {
     let handle = album.and_then(|a| app.cover_images.get(&(a.id.clone(), COVER)));
     if handle.is_none() {
-        if let Some((a, (bg, font))) = album.and_then(|a| app.lib.look(&a.id).map(|l| (a, l))) {
+        if let Some((a, look)) = album.and_then(|a| app.lib.look(&a.id).map(|l| (a, l))) {
             if !a.cover {
-                return ui::cover_look(&a.title, size, 6.0, bg, font);
+                return ui::cover_look(&a.title, size, 6.0, look);
             }
         }
     }
@@ -185,6 +185,9 @@ pub fn playlist_cover<'a>(app: &'a App, tracks: &[String], liked: bool, name: &s
 pub fn playlist_art<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView, size: f32) -> El<'a> {
     if let Some(h) = app.playlist_picture(&p.id, p.cover) {
         return ui::cover(Some(h), &p.name, size);
+    }
+    if let Some(l) = &p.look {
+        return ui::cover_look(&p.name, size, 6.0, l);
     }
     playlist_cover(app, &p.tracks, p.kind == Kind::Liked, &p.name, size)
 }
@@ -546,6 +549,12 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                 if !a.cover {
                     items.push(item("settings", "Customize cover", Message::CoverOpen(id.clone()), false));
                 }
+                if !a.cover || a.custom_cover {
+                    items.push(item("disc", "Change picture", Message::PickAlbumPicture(id.clone()), false));
+                }
+                if a.custom_cover {
+                    items.push(item("x", "Remove picture", Message::RemoveAlbumPicture(id.clone()), false));
+                }
                 if app.can("share") {
                     items.push(item("send", "Share link…", Message::ShareOpen("album".into(), a.title.clone(), ids), false));
                 }
@@ -559,6 +568,9 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                     items.push(item("disc", "Change picture", Message::PickPlaylistPicture(p.id.clone()), false));
                     if p.cover > 0 {
                         items.push(item("x", "Remove picture", Message::RemovePlaylistPicture(p.id.clone()), false));
+                    }
+                    if !p.is_shared() {
+                        items.push(item("settings", "Customize cover", Message::CoverOpenPlaylist(p.id.clone()), false));
                     }
                 }
                 if p.can_manage() {
@@ -736,7 +748,8 @@ fn main_screen(app: &App) -> El<'_> {
             layers = layers.push(opaque(mouse_area(container(opaque(card)).width(Length::Fill).height(Length::Fill).align_x(Alignment::End).align_y(Alignment::End).padding(Padding { right: 150.0, bottom: 96.0, ..Padding::ZERO })).on_press(Message::DialogCancel)));
             return layers.into();
         }
-        let card = container(pages::dialog(app, d)).width(440).padding(24).style(ui::dialog);
+        let wide = if matches!(d, crate::Dialog::CoverLook { .. }) { 540 } else { 440 };
+        let card = container(pages::dialog(app, d)).width(wide).padding(24).style(ui::dialog);
         layers = layers.push(opaque(mouse_area(container(opaque(card)).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill).style(ui::scrim)).on_press(Message::DialogCancel)));
     }
     layers.into()

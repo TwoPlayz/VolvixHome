@@ -40,6 +40,8 @@ pub enum Edit {
     FollowArtist { name: String, on: bool },
     /// the picture chosen for one of your playlists (0 removes it)
     PlaylistCover { id: String, version: u64 },
+    /// the drawn look of a playlist's cover (None = the automatic one)
+    PlaylistLook { id: String, look: Option<serde_json::Value> },
 }
 
 /// One of the website's settings, or `default` when unset.
@@ -253,6 +255,18 @@ pub fn apply(d: &mut UserData, e: &Edit) {
             list.retain(|n| n.as_str().map(|n| n.to_lowercase() != name.to_lowercase()).unwrap_or(false));
             if *on {
                 list.push(json!(name));
+            }
+        }
+        Edit::PlaylistLook { id, look } => {
+            if let Some(p) = d.playlists.iter_mut().find(|p| p.id == *id) {
+                match look {
+                    Some(l) => {
+                        p.rest.insert("look".into(), l.clone());
+                    }
+                    None => {
+                        p.rest.remove("look");
+                    }
+                }
             }
         }
         Edit::PlaylistCover { id, version } => {

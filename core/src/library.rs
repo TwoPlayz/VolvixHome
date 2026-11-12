@@ -9,7 +9,7 @@ pub struct Library {
     tracks: Vec<Track>,
     album_index: HashMap<String, usize>,
     /// the drawn look chosen for albums without art: album id -> (background, font)
-    looks: HashMap<String, (String, String)>,
+    looks: HashMap<String, Look>,
     track_index: HashMap<String, usize>,
     /// artist names, A to Z (case-insensitive, "The " ignored for sorting)
     artists: Vec<String>,
@@ -40,8 +40,8 @@ impl Library {
     pub fn new(catalog: Catalog) -> Self {
         let mut lib = Library { albums: catalog.albums, tracks: catalog.tracks, scanning: catalog.scanning, ..Default::default() };
         for (id, v) in &catalog.covers {
-            if let (Some(bg), Some(font)) = (v["bg"].as_str(), v["font"].as_str()) {
-                lib.looks.insert(id.clone(), (bg.to_string(), font.to_string()));
+            if let Some(l) = Look::from_value(v) {
+                lib.looks.insert(id.clone(), l);
             }
         }
         lib.album_index = lib.albums.iter().enumerate().map(|(i, a)| (a.id.clone(), i)).collect();
@@ -87,10 +87,10 @@ impl Library {
         &self.artists
     }
     /// The drawn look someone chose for an album that has no cover art.
-    pub fn look(&self, id: &str) -> Option<(&str, &str)> {
-        self.looks.get(id).map(|(b, f)| (b.as_str(), f.as_str()))
+    pub fn look(&self, id: &str) -> Option<&Look> {
+        self.looks.get(id)
     }
-    pub fn set_look(&mut self, id: &str, look: Option<(String, String)>) {
+    pub fn set_look(&mut self, id: &str, look: Option<Look>) {
         match look {
             Some(l) => {
                 self.looks.insert(id.to_string(), l);
@@ -100,6 +100,15 @@ impl Library {
             }
         }
     }
+    /// The app saved or removed a chosen picture: remember it (the server has it too).
+    pub fn set_album_picture_state(&mut self, album_id: &str, on: bool, version: u64) {
+        if let Some(a) = self.albums.iter_mut().find(|a| a.id == album_id) {
+            a.cover = on;
+            a.custom_cover = on;
+            a.cover_v = if on { version } else { 0 };
+        }
+    }
+
     pub fn album(&self, id: &str) -> Option<&Album> {
         self.album_index.get(id).map(|&i| &self.albums[i])
     }

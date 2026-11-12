@@ -149,6 +149,7 @@ Spin.views = Spin.views || {};
             if (!pl.shared) {
               items.push({ label: 'Change picture', icon: 'disc', onClick: function () { S.pl.chooseCover(pl.id); } });
               if (pl.cover) items.push({ label: 'Remove picture', icon: 'x', onClick: function () { S.pl.clearCover(pl.id); } });
+              items.push({ label: 'Customize cover', icon: 'settings', onClick: function () { S.pl.customizeCover(pl.id); } });
             }
             items.push({ label: 'Who can edit', icon: 'users', onClick: function () { S.pl.inviteDialog(pl.id); } });
           }

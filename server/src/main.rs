@@ -607,6 +607,47 @@ async fn get_playlist_cover(State(st): State<Shared>, headers: HeaderMap, Path((
     }
 }
 
+/* ---------------- album pictures: a picture for an album that has no art of its own ---------------- */
+
+fn album_pictures_dir(st: &AppState) -> PathBuf {
+    st.cfg.data_dir.join("album-pictures")
+}
+
+/// Choose a picture for an album with no cover art (the app shrinks it to a square first; over 1 MB is refused).
+/// Everyone in the household sees it. Answers with the album's new cover version.
+async fn put_album_picture(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, body: axum::body::Bytes) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    if !safe_id(&id) { return error(StatusCode::BAD_REQUEST, "Bad album."); }
+    let b = &body[..];
+    let is_image = b.starts_with(&[0xFF, 0xD8]) || b.starts_with(&[0x89, b'P', b'N', b'G']) || (b.starts_with(b"RIFF") && b.len() > 12 && &b[8..12] == b"WEBP");
+    if !is_image { return error(StatusCode::BAD_REQUEST, "That isn't a picture (use a JPEG, PNG or WebP)."); }
+    if b.len() > 1_000_000 { return error(StatusCode::PAYLOAD_TOO_LARGE, "That picture is too big."); }
+    {
+        let lib = st.lib.read().unwrap();
+        if !lib.catalog.albums.iter().any(|a| a.id == id) { return error(StatusCode::NOT_FOUND, "No such album."); }
+        if lib.has_real_cover(&id) { return error(StatusCode::CONFLICT, "This album has its own cover art."); }
+    }
+    let dir = album_pictures_dir(&st);
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("{id}.img"));
+    if std::fs::write(&path, b).is_err() { return error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't save the picture."); }
+    let v = {
+        let mut lib = st.lib.write().unwrap();
+        lib.set_custom_cover(&id, Some(path));
+        lib.catalog.albums.iter().find(|a| a.id == id).map(|a| a.cover_v).unwrap_or(0)
+    };
+    // the old small copies are keyed by the version, so the new picture is made fresh
+    Json(json!({ "coverV": v })).into_response()
+}
+
+async fn delete_album_picture(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    if !safe_id(&id) { return error(StatusCode::BAD_REQUEST, "Bad album."); }
+    let _ = std::fs::remove_file(album_pictures_dir(&st).join(format!("{id}.img")));
+    st.lib.write().unwrap().set_custom_cover(&id, None);
+    StatusCode::NO_CONTENT.into_response()
+}
+
 /* ---------------- per-user app data (playlists, settings, resume point) ---------------- */
 
 async fn get_data(State(st): State<Shared>, headers: HeaderMap) -> Response {
@@ -1115,6 +1156,17 @@ fn on_server(st: &AppState, title: Option<&str>, artist: &str) -> Option<String>
 struct ArtLook {
     bg: String,
     font: String,
+    /// the two colours of the background, and the ink the title is printed in (CSS hex colours; absent = the preset's own)
+    #[serde(default)]
+    c1: Option<String>,
+    #[serde(default)]
+    c2: Option<String>,
+    #[serde(default)]
+    ink: Option<String>,
+}
+
+fn hex_colour(s: &str) -> bool {
+    s.len() >= 4 && s.len() <= 9 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn style_id(s: &str) -> bool {
@@ -1125,8 +1177,9 @@ fn style_id(s: &str) -> bool {
 async fn set_album_art(State(st): State<Shared>, headers: HeaderMap, Path(id): Path<String>, Json(b): Json<ArtLook>) -> Response {
     if let Err(r) = signed_in(&st, &headers) { return r; }
     if !style_id(&b.bg) || !style_id(&b.font) { return error(StatusCode::BAD_REQUEST, "Unknown style."); }
+    if [&b.c1, &b.c2, &b.ink].iter().any(|c| c.as_deref().map(|c| !hex_colour(c)).unwrap_or(false)) { return error(StatusCode::BAD_REQUEST, "Unknown colour."); }
     if !st.lib.read().unwrap().catalog.albums.iter().any(|a| a.id == id) { return error(StatusCode::NOT_FOUND, "No such album."); }
-    let snapshot = { let mut c = st.covers.lock().unwrap(); c.insert(id, json!({ "bg": b.bg, "font": b.font })); serde_json::to_string(&*c).unwrap_or_default() };
+    let snapshot = { let mut c = st.covers.lock().unwrap(); c.insert(id, json!({ "bg": b.bg, "font": b.font, "c1": b.c1, "c2": b.c2, "ink": b.ink })); serde_json::to_string(&*c).unwrap_or_default() };
     vault::write(&st.cfg.data_dir.join("covers.json"), &snapshot);
     StatusCode::NO_CONTENT.into_response()
 }
@@ -2180,7 +2233,8 @@ fn start_scan(st: Shared) {
     }
     tokio::task::spawn_blocking(move || {
         let dir = st.music_dir.read().unwrap().clone();
-        let fresh = library::scan(&dir);
+        let mut fresh = library::scan(&dir);
+        fresh.apply_custom_covers(&st.cfg.data_dir.join("album-pictures"));
         let (a, t) = (fresh.catalog.albums.len(), fresh.catalog.tracks.len());
         *st.lib.write().unwrap() = fresh;
         println!("library: {a} albums, {t} tracks in {}", dir.display());
@@ -2329,6 +2383,7 @@ async fn main() {
         .route("/api/avatar/{id}", get(get_avatar))
         .route("/api/playlists/{id}/cover", axum::routing::put(put_playlist_cover).delete(delete_playlist_cover))
         .route("/api/playlist-cover/{owner}/{id}", get(get_playlist_cover))
+        .route("/api/album/{id}/picture", axum::routing::put(put_album_picture).delete(delete_album_picture))
         .route("/api/library", get(get_library))
         .route("/api/library/rescan", post(rescan))
         .route("/api/library/folder", get(library_folder).put(set_library_folder))

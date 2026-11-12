@@ -37,6 +37,7 @@ fn line_json(l: &Line) -> Value {
     v
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // read back only in tests
 fn line_from_json(l: &Value) -> Option<Line> {
     let words = l["words"].as_array().map(|ws| ws.iter()
         .filter_map(|w| Some(Word { ms: w["ms"].as_i64()?, text: w["text"].as_str()?.to_string() }))
@@ -66,6 +67,7 @@ impl Lyrics {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))] // read back only in tests
     pub fn from_json(v: &Value) -> Option<Lyrics> {
         let synced = v["synced"].as_array()?.iter().filter_map(line_from_json).collect();
         Some(Lyrics {

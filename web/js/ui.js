@@ -265,7 +265,8 @@ window.Spin = window.Spin || {};
     const look = !album.cover && album.look ? album.look : null;
     // no cover and no chosen look: a tinted tile with the album's name (just its first letter when the tile is tiny)
     if (!album.cover && !look) return S.nameTile(album.title || '', extraClass);
-    const text = !album.cover ? '<span class="cover-title">' + S.esc(album.title) + '</span><span class="cover-artist">' + S.esc(album.artist) + '</span>' : '';
+    if (look) return S.lookTile(look, album.title, album.artist, extraClass);
+    const text = '';
     // has a cover file: a plain tile while it loads, so the generated art doesn't flash first; it fades in once decoded.
     // Only if the picture fails does the generated art show.
     const src = album.cover && S.server ? S.server.coverUrl(album.id, big ? 1200 : 640) : '';
@@ -310,6 +311,8 @@ window.Spin = window.Spin || {};
       const owner = playlist.owner === 'u_me' ? (S.data.me && S.data.me.serverId) : playlist.owner;
       return '<div class="cover cover--pic ' + (extraClass || '') + '"><img class="cover-img" src="/api/playlist-cover/' + encodeURIComponent(owner) + '/' + encodeURIComponent(playlist.id) + '?v=' + playlist.cover + '" alt=""></div>';
     }
+    // a look chosen for it (a background, colours and a font), when it has no picture
+    if (playlist && playlist.look && !playlist.shared) return S.lookTile(playlist.look, playlist.name, '', extraClass);
     const albums = [];
     (playlist.tracks || []).forEach(function (entry) {
       const t = S.data.track(entry.id || entry);

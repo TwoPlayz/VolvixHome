@@ -70,6 +70,8 @@ Spin.views = Spin.views || {};
             { label: 'Play next', icon: 'next', onClick: function () { S.player.addNext(album.trackIds); } },
             { label: 'Credits & info', icon: 'book', onClick: function () { S.albumInfoDialog(album.id); } },
             !album.cover ? { label: 'Customize cover', icon: 'settings', onClick: function () { S.coverDialog(album.id); } } : null,
+            !album.cover || album.customCover ? { label: 'Change picture', icon: 'disc', onClick: function () { S.albumPicture.choose(album.id); } } : null,
+            album.customCover ? { label: 'Remove picture', icon: 'x', onClick: function () { S.albumPicture.remove(album.id); } } : null,
             S.data.can('share') ? { label: 'Share link…', icon: 'send', onClick: function () { S.shareDialog('album', album.title, album.trackIds); } } : null,
             { label: 'Go to artist', icon: 'user', onClick: function () { location.hash = S.artistUrl(album.artist); } }
           ] });

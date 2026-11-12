@@ -105,6 +105,9 @@ pub struct Album {
     /// changes whenever the cover image changes (its file time), so the app can cache covers forever under ?v=
     #[serde(rename = "coverV", skip_serializing_if = "is_zero")]
     pub cover_v: u64,
+    /// the art is a picture someone chose (not the album's own), so it can be changed or removed
+    #[serde(rename = "customCover", default, skip_serializing_if = "std::ops::Not::not")]
+    pub custom_cover: bool,
     pub quality: Quality,
     /// newest file time, for "Recently added"
     pub added: u64,
@@ -163,6 +166,8 @@ pub struct Catalog {
 enum CoverSource {
     File(PathBuf),
     Embedded(PathBuf),
+    /// a picture someone chose for an album that had none (kept by the server, shared by the household)
+    Custom(PathBuf),
 }
 
 #[derive(Default)]
@@ -183,14 +188,52 @@ impl Library {
     /// When the album's picture last changed (file time of the cover image, or of the song it's embedded in),
     /// so resized copies can be redone when you swap the picture.
     pub fn cover_stamp(&self, album_id: &str) -> Option<u64> {
-        let p = match self.covers.get(album_id)? { CoverSource::File(p) | CoverSource::Embedded(p) => p };
+        let p = match self.covers.get(album_id)? { CoverSource::File(p) | CoverSource::Embedded(p) | CoverSource::Custom(p) => p };
         let t = std::fs::metadata(p).ok()?.modified().ok()?;
         Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs())
     }
 
+    /// Does the album have real cover art (a file or embedded), as opposed to nothing or a chosen picture?
+    pub fn has_real_cover(&self, album_id: &str) -> bool {
+        matches!(self.covers.get(album_id), Some(CoverSource::File(_)) | Some(CoverSource::Embedded(_)))
+    }
+
+    /// Use (or stop using) a chosen picture for an album that has no art of its own.
+    pub fn set_custom_cover(&mut self, album_id: &str, path: Option<PathBuf>) {
+        if self.has_real_cover(album_id) {
+            return;
+        }
+        match path {
+            Some(p) => {
+                self.covers.insert(album_id.to_string(), CoverSource::Custom(p));
+            }
+            None => {
+                self.covers.remove(album_id);
+            }
+        }
+        let stamp = self.cover_stamp(album_id);
+        let has = self.covers.contains_key(album_id);
+        if let Some(a) = self.catalog.albums.iter_mut().find(|a| a.id == album_id) {
+            a.cover = has;
+            a.cover_v = if has { stamp.unwrap_or(1) } else { 0 };
+            a.custom_cover = has;
+        }
+    }
+
+    /// After a scan: put chosen pictures back on the albums that still have no art.
+    pub fn apply_custom_covers(&mut self, dir: &std::path::Path) {
+        let ids: Vec<String> = self.catalog.albums.iter().filter(|a| !a.cover).map(|a| a.id.clone()).collect();
+        for id in ids {
+            let p = dir.join(format!("{id}.img"));
+            if p.exists() {
+                self.set_custom_cover(&id, Some(p));
+            }
+        }
+    }
+
     pub fn cover(&self, album_id: &str) -> Option<Vec<u8>> {
         match self.covers.get(album_id)? {
-            CoverSource::File(p) => std::fs::read(p).ok(),
+            CoverSource::File(p) | CoverSource::Custom(p) => std::fs::read(p).ok(),
             CoverSource::Embedded(p) => {
                 let tagged = lofty::read_from_path(p).ok()?;
                 let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
@@ -402,6 +445,7 @@ pub fn scan(root: &Path) -> Library {
                 track_ids: Vec::new(),
                 cover: false,
                 cover_v: 0,
+                custom_cover: false,
                 quality: s.quality.clone(),
                 added: 0,
             });

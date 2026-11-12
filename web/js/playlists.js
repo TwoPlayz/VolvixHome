@@ -84,26 +84,24 @@ window.Spin = window.Spin || {};
     },
     /** Choose a picture for one of your own playlists: the middle square of the file, 512 px, kept on the server. */
     chooseCover: function (id) {
-      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
-      inp.onchange = function () {
-        const f = inp.files && inp.files[0]; if (!f) return;
-        const img = new Image(), url = URL.createObjectURL(f);
-        img.onerror = function () { URL.revokeObjectURL(url); S.toast('Couldn\'t read that picture.', 'x'); };
-        img.onload = function () {
-          const N = 512, c = document.createElement('canvas'); c.width = c.height = N;
-          const s = Math.min(img.width, img.height);
-          c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, N, N);
-          URL.revokeObjectURL(url);
-          c.toBlob(function (blob) {
-            fetch('/api/playlists/' + encodeURIComponent(id) + '/cover', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
-              .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Couldn\'t save the picture'); return j; }); })
-              .then(function (r) { S.pl.update(id, { cover: r.cover }); S.toast('Picture updated', 'check'); })
-              .catch(function (x) { S.toast(x.message, 'x'); });
-          }, 'image/jpeg', 0.9);
-        };
-        img.src = url;
-      };
-      inp.click();
+      S.pickPicture({
+        title: 'Adjust the picture', out: 512, saveLabel: 'Use this picture',
+        onSave: function (blob) {
+          return fetch('/api/playlists/' + encodeURIComponent(id) + '/cover', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
+            .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Couldn\'t save the picture'); return j; }); })
+            .then(function (r) { S.pl.update(id, { cover: r.cover }); S.toast('Picture updated', 'check'); });
+        }
+      });
+    },
+    /** Dress a playlist up: a background, two colours, a font and a text colour (shown while it has no picture). */
+    customizeCover: function (id) {
+      const pl = get(id);
+      S.lookDialog({
+        name: pl.name, sub: '', look: pl.look,
+        note: pl.cover ? 'This playlist has a picture, which is shown instead. Remove the picture to see this look.' : '',
+        onSave: function (look) { S.pl.update(id, { look: look }); S.toast('Cover saved', 'check'); return Promise.resolve(); },
+        onReset: function () { S.pl.update(id, { look: null }); S.toast('Back to the automatic cover', 'check'); return Promise.resolve(); }
+      });
     },
     clearCover: function (id) {
       fetch('/api/playlists/' + encodeURIComponent(id) + '/cover', { method: 'DELETE', credentials: 'same-origin' })

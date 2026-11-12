@@ -127,6 +127,65 @@ pub fn lyrics_scroller() -> scrollable::Id {
     scrollable::Id::new("lyrics")
 }
 
+/// What a drawn cover look is for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LookTarget {
+    Album(String),
+    Playlist(String),
+}
+
+/// What a picture being adjusted is for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CropTarget {
+    Playlist(String),
+    Album(String),
+    Avatar,
+}
+
+/// The adjust-a-picture dialog: the picture, how far it is zoomed and which spot of it is in the square.
+#[derive(Debug, Clone)]
+pub struct CropState {
+    pub target: CropTarget,
+    pub img: std::sync::Arc<::image::DynamicImage>,
+    pub zoom: f32,
+    pub cx: f32,
+    pub cy: f32,
+    pub preview: image::Handle,
+}
+
+/// The preview is this many px square.
+pub const CROP_VIEW: f32 = 300.0;
+
+impl PartialEq for CropState {
+    fn eq(&self, o: &CropState) -> bool {
+        std::sync::Arc::ptr_eq(&self.img, &o.img) && self.target == o.target && self.zoom == o.zoom && self.cx == o.cx && self.cy == o.cy
+    }
+}
+
+impl CropState {
+    fn shape(&self) -> pictures::Shape {
+        if self.target == CropTarget::Avatar { pictures::Shape::Circle } else { pictures::Shape::Rounded }
+    }
+    /// Side of the square, in the picture's own pixels.
+    pub fn side(&self) -> f32 {
+        self.img.width().min(self.img.height()) as f32 / self.zoom
+    }
+    fn clamp(&mut self) {
+        let (w, h, s) = (self.img.width() as f32, self.img.height() as f32, self.side());
+        self.cx = self.cx.clamp(s / 2.0, (w - s / 2.0).max(s / 2.0));
+        self.cy = self.cy.clamp(s / 2.0, (h - s / 2.0).max(s / 2.0));
+    }
+    fn refresh(&mut self) {
+        self.clamp();
+        self.preview = pictures::preview(&self.img, self.cx, self.cy, self.side(), 300, self.shape());
+    }
+    fn new(target: CropTarget, img: std::sync::Arc<::image::DynamicImage>) -> CropState {
+        let mut c = CropState { target, cx: img.width() as f32 / 2.0, cy: img.height() as f32 / 2.0, zoom: 1.0, preview: image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0]), img };
+        c.refresh();
+        c
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Page {
     Home,
@@ -327,7 +386,9 @@ pub enum Dialog {
     /// an album's info and who is credited on it
     AlbumInfo { album: String },
     /// choosing how an album without art is drawn
-    CoverLook { album: String, bg: String, font: String },
+    CoverLook { target: LookTarget, name: String, look: volvix_core::Look },
+    /// adjusting a picture (move it, zoom it) before it is used
+    Crop(Box<CropState>),
     /// make a share link for an album or playlist: how long, then the link to copy
     Share { kind: String, name: String, tracks: Vec<String>, days: u32, link: Option<(String, String)>, error: Option<String>, busy: bool },
     /// who can edit a collaborative playlist (ticked = can edit, or invited)
@@ -412,9 +473,24 @@ pub enum Message {
     ShowCredits(String),
     ShowAlbumInfo(String),
     CoverOpen(String),
-    CoverPick(bool, String),
+    CoverOpenPlaylist(String),
+    CoverBg(String),
+    CoverFont(String),
+    /// 0 primary, 1 secondary, 2 text: a colour (hex) picked or typed
+    CoverColour(u8, String),
+    CoverResetColours,
     CoverReset,
-    CoverSaved(String, Option<(String, String)>, Result<(), Error>),
+    CoverSaved(String, Option<volvix_core::Look>, Result<(), Error>),
+    PickAlbumPicture(String),
+    AlbumPictureChosen(String, Option<std::path::PathBuf>),
+    AlbumPictureSaved(String, Result<u64, String>),
+    RemoveAlbumPicture(String),
+    AlbumPictureRemoved(String, Result<(), Error>),
+    CropLoaded(CropTarget, Result<std::sync::Arc<::image::DynamicImage>, String>),
+    CropZoom(f32),
+    CropDown,
+    CropMove(iced::Point),
+    CropUp,
     ShareOpen(String, String, Vec<String>),
     ShareDays(u32),
     ShareCreate,
@@ -680,6 +756,9 @@ pub struct App {
     next_cache_at: Instant,
     /// (songs, bytes) in the cache, for Settings
     pub cache_stats: (usize, u64),
+    /// dragging the picture in the adjust dialog: whether the pointer is down, and where it was last
+    crop_drag: bool,
+    crop_last: Option<iced::Point>,
     /// your other devices (this computer, the website, a phone…): who is online and which one plays
     pub dev_id: String,
     pub connect_devices: Vec<(String, String, bool)>,
@@ -812,6 +891,8 @@ impl App {
         let song_cache = volvix_core::cache::SongCache::new(dir.join("cache"));
         let mut app = App {
             cache_stats: song_cache.stats(),
+            crop_drag: false,
+            crop_last: None,
             dev_id: device_id(&dir),
             connect_devices: vec![],
             dev_active: None,
@@ -1961,15 +2042,7 @@ impl App {
                 );
             }
             Message::PlaylistPictureChosen(id, Some(path)) => {
-                let Some(c) = self.client.clone() else { return Task::none() };
-                self.say("Saving the picture…");
-                return Task::perform(
-                    blocking(move || {
-                        let r = pictures::prepare_square(&path, 512).and_then(|jpeg| c.set_playlist_cover(&id, &jpeg).map_err(|e| e.to_string()));
-                        (id, r)
-                    }),
-                    |(id, r)| Message::PlaylistPictureSaved(id, r),
-                );
+                return Task::perform(blocking(move || pictures::load(&path).map(std::sync::Arc::new)), move |r| Message::CropLoaded(CropTarget::Playlist(id.clone()), r));
             }
             Message::PlaylistPictureChosen(_, None) => {}
             Message::PlaylistPictureSaved(id, r) => match r {
@@ -1999,23 +2072,59 @@ impl App {
             Message::PlaylistCoverLoaded(id, v, bytes) => {
                 self.pl_cover_pending.remove(&(id.clone(), v));
                 if let Some(b) = bytes {
-                    self.pl_covers.insert((id, v), image::Handle::from_bytes(b));
+                    self.pl_covers.insert((id, v), pictures::rounded_handle(&b).unwrap_or_else(|| image::Handle::from_bytes(b)));
                 }
             }
             Message::CoverOpen(id) => {
-                let (bg, font) = self.lib.look(&id).map(|(b, f)| (b.to_string(), f.to_string())).unwrap_or(("sunset".into(), "display".into()));
-                self.dialog = Some(Dialog::CoverLook { album: id, bg, font });
+                let look = self.lib.look(&id).cloned().unwrap_or(volvix_core::Look { bg: "sunset".into(), font: "display".into(), ..Default::default() });
+                let name = self.lib.album(&id).map(|a| a.title.clone()).unwrap_or_default();
+                self.dialog = Some(Dialog::CoverLook { target: LookTarget::Album(id), name, look });
             }
-            Message::CoverPick(is_font, v) => {
-                if let Some(Dialog::CoverLook { bg, font, .. }) = &mut self.dialog {
-                    if is_font { *font = v } else { *bg = v }
+            Message::CoverOpenPlaylist(id) => {
+                let Some(p) = self.playlist(&id) else { return Task::none() };
+                let look = p.look.clone().unwrap_or(volvix_core::Look { bg: "sunset".into(), font: "display".into(), ..Default::default() });
+                self.dialog = Some(Dialog::CoverLook { target: LookTarget::Playlist(id), name: p.name, look });
+            }
+            Message::CoverBg(v) => {
+                if let Some(Dialog::CoverLook { look, .. }) = &mut self.dialog {
+                    look.bg = v;
+                }
+            }
+            Message::CoverFont(v) => {
+                if let Some(Dialog::CoverLook { look, .. }) = &mut self.dialog {
+                    look.font = v;
+                }
+            }
+            Message::CoverColour(which, v) => {
+                if let Some(Dialog::CoverLook { look, .. }) = &mut self.dialog {
+                    let v = if v.trim().is_empty() { None } else { Some(v) };
+                    match which {
+                        0 => look.c1 = v,
+                        1 => look.c2 = v,
+                        _ => look.ink = v,
+                    }
+                }
+            }
+            Message::CoverResetColours => {
+                if let Some(Dialog::CoverLook { look, .. }) = &mut self.dialog {
+                    look.c1 = None;
+                    look.c2 = None;
+                    look.ink = None;
                 }
             }
             Message::CoverReset => {
-                let Some(Dialog::CoverLook { album, .. }) = self.dialog.take() else { return Task::none() };
-                let Some(c) = self.client.clone() else { return Task::none() };
-                let id = album.clone();
-                return Task::perform(blocking(move || c.clear_album_look(&id)), move |r| Message::CoverSaved(album.clone(), None, r));
+                let Some(Dialog::CoverLook { target, .. }) = self.dialog.take() else { return Task::none() };
+                match target {
+                    LookTarget::Playlist(id) => {
+                        self.say("Back to the automatic cover");
+                        return self.edit(vec![Edit::PlaylistLook { id, look: None }]);
+                    }
+                    LookTarget::Album(album) => {
+                        let Some(c) = self.client.clone() else { return Task::none() };
+                        let id = album.clone();
+                        return Task::perform(blocking(move || c.clear_album_look(&id)), move |r| Message::CoverSaved(album.clone(), None, r));
+                    }
+                }
             }
             Message::CoverSaved(album, look, r) => match r {
                 Ok(()) => {
@@ -2024,6 +2133,63 @@ impl App {
                 }
                 Err(e) => self.say(e.to_string()),
             },
+            Message::PickAlbumPicture(id) => {
+                return Task::perform(
+                    blocking(|| rfd::FileDialog::new().set_title("Choose a picture").add_filter("Pictures", &["jpg", "jpeg", "png", "webp"]).pick_file()),
+                    move |p| Message::AlbumPictureChosen(id.clone(), p),
+                );
+            }
+            Message::AlbumPictureChosen(id, Some(path)) => {
+                return Task::perform(blocking(move || pictures::load(&path).map(std::sync::Arc::new)), move |r| Message::CropLoaded(CropTarget::Album(id.clone()), r));
+            }
+            Message::AlbumPictureChosen(_, None) => {}
+            Message::AlbumPictureSaved(id, r) => match r {
+                Ok(v) => {
+                    std::sync::Arc::make_mut(&mut self.lib).set_album_picture_state(&id, true, v);
+                    self.cover_images.retain(|k, _| k.0 != id);
+                    self.say("Picture updated for everyone");
+                    return self.fetch_covers();
+                }
+                Err(e) => self.say(e),
+            },
+            Message::RemoveAlbumPicture(id) => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                return Task::perform(blocking(move || (id.clone(), c.clear_album_picture(&id))), |(id, r)| Message::AlbumPictureRemoved(id, r));
+            }
+            Message::AlbumPictureRemoved(id, r) => match r {
+                Ok(()) => {
+                    std::sync::Arc::make_mut(&mut self.lib).set_album_picture_state(&id, false, 0);
+                    self.cover_images.retain(|k, _| k.0 != id);
+                    self.say("Picture removed");
+                }
+                Err(e) => self.say(e.to_string()),
+            },
+            Message::CropLoaded(target, r) => match r {
+                Ok(img) => self.dialog = Some(Dialog::Crop(Box::new(CropState::new(target, img)))),
+                Err(e) => self.say(e),
+            },
+            Message::CropZoom(z) => {
+                if let Some(Dialog::Crop(c)) = &mut self.dialog {
+                    c.zoom = z.clamp(1.0, 4.0);
+                    c.refresh();
+                }
+            }
+            Message::CropDown => self.crop_drag = true,
+            Message::CropUp => {
+                self.crop_drag = false;
+                self.crop_last = None;
+            }
+            Message::CropMove(p) => {
+                if self.crop_drag {
+                    if let (Some(last), Some(Dialog::Crop(c))) = (self.crop_last, &mut self.dialog) {
+                        let k = c.side() / CROP_VIEW;
+                        c.cx -= (p.x - last.x) * k;
+                        c.cy -= (p.y - last.y) * k;
+                        c.refresh();
+                    }
+                }
+                self.crop_last = Some(p);
+            }
             Message::ShowAlbumInfo(id) => self.dialog = Some(Dialog::AlbumInfo { album: id }),
             Message::ShowCredits(id) => {
                 self.dialog = Some(Dialog::Credits { track: id.clone() });
@@ -2153,7 +2319,8 @@ impl App {
             Message::CoverLoaded(id, size, bytes) => {
                 self.cover_pending.remove(&(id.clone(), size));
                 if let Some(b) = bytes {
-                    self.cover_images.insert((id, size), image::Handle::from_bytes(b));
+                    let custom = self.lib.album(&id).map(|a| a.custom_cover).unwrap_or(false);
+                    self.cover_images.insert((id, size), if custom { pictures::rounded_handle(&b).unwrap_or_else(|| image::Handle::from_bytes(b)) } else { image::Handle::from_bytes(b) });
                 }
             }
             Message::ImageLoaded(path, bytes) => {
@@ -3037,9 +3204,7 @@ impl App {
                 );
             }
             Message::PictureChosen(Some(path)) => {
-                let Some(c) = self.client.clone() else { return Task::none() };
-                self.say("Saving your picture…");
-                return Task::perform(blocking(move || pictures::prepare(&path).and_then(|jpeg| c.set_avatar(&jpeg).map_err(|e| e.to_string()))), Message::PictureSaved);
+                return Task::perform(blocking(move || pictures::load(&path).map(std::sync::Arc::new)), |r| Message::CropLoaded(CropTarget::Avatar, r));
             }
             Message::PictureChosen(None) => {}
             Message::PictureSaved(r) => match r {
@@ -3310,11 +3475,40 @@ impl App {
                 self.edit(vec![Edit::DeletePlaylist(id)])
             }
             Dialog::AddTo { .. } | Dialog::PlayOn | Dialog::Manage { .. } | Dialog::Folder { .. } | Dialog::Credits { .. } | Dialog::AlbumInfo { .. } | Dialog::Share { .. } => Task::none(),
-            Dialog::CoverLook { album, bg, font } => {
+            Dialog::CoverLook { target, look, .. } => {
                 self.dialog = None;
-                let Some(c) = self.client.clone() else { return Task::none() };
-                let (id, b2, f2) = (album.clone(), bg.clone(), font.clone());
-                Task::perform(blocking(move || c.set_album_look(&id, &b2, &f2)), move |r| Message::CoverSaved(album.clone(), Some((bg.clone(), font.clone())), r))
+                // only colours that really are colours are kept
+                let ok = |v: Option<String>| v.filter(|c| ui::hex(c).is_some());
+                let look = volvix_core::Look { bg: look.bg, font: look.font, c1: ok(look.c1), c2: ok(look.c2), ink: ok(look.ink) };
+                match target {
+                    LookTarget::Playlist(id) => {
+                        self.say("Cover saved");
+                        self.edit(vec![Edit::PlaylistLook { id, look: Some(look.to_value()) }])
+                    }
+                    LookTarget::Album(album) => {
+                        let Some(c) = self.client.clone() else { return Task::none() };
+                        let (id, l2) = (album.clone(), look.clone());
+                        Task::perform(blocking(move || c.set_album_look(&id, &l2)), move |r| Message::CoverSaved(album.clone(), Some(look.clone()), r))
+                    }
+                }
+            }
+            Dialog::Crop(c) => {
+                self.dialog = None;
+                let Some(client) = self.client.clone() else { return Task::none() };
+                self.say("Saving the picture…");
+                let (cx, cy, side) = (c.cx, c.cy, c.side());
+                let img = c.img.clone();
+                match c.target {
+                    CropTarget::Playlist(id) => Task::perform(
+                        blocking(move || (id.clone(), pictures::cut_jpeg(&img, cx, cy, side, 512).and_then(|j| client.set_playlist_cover(&id, &j).map_err(|e| e.to_string())))),
+                        |(id, r)| Message::PlaylistPictureSaved(id, r),
+                    ),
+                    CropTarget::Album(id) => Task::perform(
+                        blocking(move || (id.clone(), pictures::cut_jpeg(&img, cx, cy, side, 800).and_then(|j| client.set_album_picture(&id, &j).map_err(|e| e.to_string())))),
+                        |(id, r)| Message::AlbumPictureSaved(id, r),
+                    ),
+                    CropTarget::Avatar => Task::perform(blocking(move || pictures::cut_jpeg(&img, cx, cy, side, 256).and_then(|j| client.set_avatar(&j).map_err(|e| e.to_string()))), Message::PictureSaved),
+                }
             }
             Dialog::Collab { id, picked } => {
                 self.dialog = None;
@@ -3434,7 +3628,15 @@ impl App {
                 tasks.push(self.go(Page::Playlist(id)));
             }
             "home" => tasks.push(self.go(Page::Home)),
-            "discover" => {
+            "crop" => {
+                // a made-up wide picture (coloured bands and a grid) to try moving and zooming
+                let img = ::image::RgbaImage::from_fn(1200, 800, |x, y| {
+                    let line = x % 100 < 3 || y % 100 < 3;
+                    if line { ::image::Rgba([255, 255, 255, 255]) } else { ::image::Rgba([(x * 255 / 1200) as u8, (y * 255 / 800) as u8, 160, 255]) }
+                });
+                let id = self.lib.albums().iter().find(|a| !a.cover).map(|a| a.id.clone()).unwrap_or_default();
+                self.dialog = Some(Dialog::Crop(Box::new(CropState::new(CropTarget::Album(id), std::sync::Arc::new(::image::DynamicImage::ImageRgba8(img))))));
+            }            "discover" => {
                 // pretend Lidarr is connected, and MusicBrainz knows a few more releases by an artist in the library
                 let artist = self.lib.artists().first().cloned().unwrap_or_default();
                 if let Some(m) = &mut self.me {

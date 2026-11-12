@@ -45,6 +45,9 @@ pub struct Album {
     /// the cover's version: changes whenever the picture does, so covers are cached for good under it
     #[serde(default, rename = "coverV")]
     pub cover_v: u64,
+    /// the art is a picture someone chose for an album that had none
+    #[serde(default, rename = "customCover")]
+    pub custom_cover: bool,
     #[serde(default)]
     pub quality: Quality,
     /// newest file time (seconds), for "Recently added"
@@ -224,6 +227,30 @@ pub struct PlaylistEntry {
     pub added_by: String,
     #[serde(default)]
     pub at: u64,
+}
+
+/// How a drawn cover looks: a background, optionally its two colours, a font and the text colour (the website's
+/// `look`). Colours are CSS hex strings; absent = the background's own.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Look {
+    pub bg: String,
+    pub font: String,
+    #[serde(default)]
+    pub c1: Option<String>,
+    #[serde(default)]
+    pub c2: Option<String>,
+    #[serde(default)]
+    pub ink: Option<String>,
+}
+
+impl Look {
+    pub fn from_value(v: &serde_json::Value) -> Option<Look> {
+        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty()).map(String::from);
+        Some(Look { bg: s("bg")?, font: s("font")?, c1: s("c1"), c2: s("c2"), ink: s("ink") })
+    }
+    pub fn to_value(&self) -> serde_json::Value {
+        serde_json::json!({ "bg": self.bg, "font": self.font, "c1": self.c1, "c2": self.c2, "ink": self.ink })
+    }
 }
 
 /// A collaborative playlist as `/api/shared` sends it (people by their server ids).

@@ -547,28 +547,111 @@ pub fn cover_box<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, w: f32,
         .into()
 }
 
-/// The website's drawn-cover backgrounds: (stops as offset + colour, angle in degrees, ink). Patterns the app can't draw
-/// (rings, grid, sunburst, checker) use a plain colour or gradient close to them.
-pub fn look_bg(name: &str) -> (Vec<(f32, Color)>, f32, Color) {
-    let h = |x: u32| rgb((x >> 16) as u8, (x >> 8) as u8, x as u8);
-    match name {
-        "sunset" => (vec![(0.0, h(0xff6a3d)), (0.55, h(0xffb36b)), (1.0, h(0xffd89b))], 135.0, h(0x3a1200)),
-        "ocean" => (vec![(0.0, h(0x0f4c75)), (0.55, h(0x3282b8)), (1.0, h(0x7fd1e8))], 160.0, h(0xffffff)),
-        "midnight" => (vec![(0.0, h(0x0b132b)), (0.6, h(0x1c2541)), (1.0, h(0x3a506b))], 160.0, h(0xe8f1ff)),
-        "forest" => (vec![(0.0, h(0x0f3d2e)), (0.6, h(0x2f7d57)), (1.0, h(0x8fc98a))], 150.0, h(0xf3fff0)),
-        "grape" => (vec![(0.0, h(0x3c1053)), (0.55, h(0x7a3cb8)), (1.0, h(0xc99bff))], 145.0, h(0xffffff)),
-        "rose" => (vec![(0.0, h(0xffd1dc)), (0.6, h(0xff9fb8)), (1.0, h(0xff6f91))], 145.0, h(0x4a0f22)),
-        "ember" => (vec![(0.0, h(0xffcf5a)), (0.45, h(0xff6a2b)), (1.0, h(0x8a1c0d))], 135.0, h(0xffffff)),
-        "mono" => (vec![(0.0, h(0x2b2b2e)), (0.6, h(0x3d3d42)), (1.0, h(0x55555c))], 160.0, h(0xf4f4f5)),
-        "paper" => (vec![(0.0, h(0xf1e9db)), (1.0, h(0xf1e9db))], 0.0, h(0x2a241c)),
-        "stripes" => (vec![(0.0, h(0xe5484d)), (0.25, h(0xe5484d)), (0.25, h(0xc23a3f)), (0.5, h(0xc23a3f)), (0.5, h(0xe5484d)), (0.75, h(0xe5484d)), (0.75, h(0xc23a3f)), (1.0, h(0xc23a3f))], 45.0, h(0xffffff)),
-        "rings" => (vec![(0.0, h(0x1d3557)), (1.0, h(0x274b7a))], 135.0, h(0xf1faee)),
-        "grid" => (vec![(0.0, h(0x101820)), (1.0, h(0x16222e))], 135.0, h(0xe7f6ff)),
-        "sunburst" => (vec![(0.0, h(0xffd23f)), (1.0, h(0xff9f1c))], 135.0, h(0x2b1800)),
-        "checker" => (vec![(0.0, h(0x222222)), (1.0, h(0x444444))], 135.0, h(0xffffff)),
-        "aurora" => (vec![(0.0, h(0x0d1b2a)), (0.45, h(0x1b998b)), (0.75, h(0x7d5ba6)), (1.0, h(0xe0a1ff))], 200.0, h(0xffffff)),
-        _ => (vec![(0.0, h(0x2b1055)), (0.7, h(0x7597de)), (1.0, h(0xffc3a0))], 180.0, h(0xffffff)), // dusk
+/// The website's drawn-cover backgrounds: (name, kind, primary, secondary, text colour, gradient angle). Your own
+/// colours replace the primary and secondary ones; the kind decides how they are used.
+const LOOKS: [(&str, &str, u32, u32, u32, f32); 16] = [
+    ("sunset", "linear", 0xff6a3d, 0xffd89b, 0x3a1200, 135.0),
+    ("ocean", "linear", 0x0f4c75, 0x7fd1e8, 0xffffff, 160.0),
+    ("midnight", "linear", 0x0b132b, 0x3a506b, 0xe8f1ff, 160.0),
+    ("forest", "linear", 0x0f3d2e, 0x8fc98a, 0xf3fff0, 150.0),
+    ("grape", "linear", 0x3c1053, 0xc99bff, 0xffffff, 145.0),
+    ("rose", "linear", 0xffd1dc, 0xff6f91, 0x4a0f22, 145.0),
+    ("ember", "linear", 0xffcf5a, 0x8a1c0d, 0xffffff, 135.0),
+    ("mono", "linear", 0x2b2b2e, 0x55555c, 0xf4f4f5, 160.0),
+    ("paper", "solid", 0xf1e9db, 0xf1e9db, 0x2a241c, 0.0),
+    ("stripes", "stripes", 0xe5484d, 0xc23a3f, 0xffffff, 0.0),
+    ("rings", "rings", 0x1d3557, 0x274b7a, 0xf1faee, 0.0),
+    ("grid", "grid", 0x101820, 0x3a4650, 0xe7f6ff, 0.0),
+    ("sunburst", "sunburst", 0xffd23f, 0xff9f1c, 0x2b1800, 0.0),
+    ("checker", "checker", 0x222222, 0xeeeeee, 0xffffff, 0.0),
+    ("aurora", "linear", 0x0d1b2a, 0xe0a1ff, 0xffffff, 200.0),
+    ("dusk", "linear", 0x2b1055, 0xffc3a0, 0xffffff, 180.0),
+];
+
+/// "#rgb" or "#rrggbb" as a colour (None when it isn't one).
+pub fn hex(s: &str) -> Option<Color> {
+    let h = s.trim().strip_prefix('#')?;
+    let v = |x: &str| u8::from_str_radix(x, 16).ok();
+    match h.len() {
+        3 => Some(rgb(v(&h[0..1])? * 17, v(&h[1..2])? * 17, v(&h[2..3])? * 17)),
+        6 | 8 => Some(rgb(v(&h[0..2])?, v(&h[2..4])?, v(&h[4..6])?)),
+        _ => None,
     }
+}
+
+pub fn to_hex(c: Color) -> String {
+    format!("#{:02x}{:02x}{:02x}", (c.r * 255.0).round() as u8, (c.g * 255.0).round() as u8, (c.b * 255.0).round() as u8)
+}
+
+/// What a look draws with: (kind, primary, secondary, text colour, angle), using the preset's colours where yours are absent.
+pub fn look_parts(look: &volvix_core::Look) -> (&'static str, Color, Color, Color, f32) {
+    let p = LOOKS.iter().find(|l| l.0 == look.bg).unwrap_or(&LOOKS[15]);
+    let h = |x: u32| rgb((x >> 16) as u8, (x >> 8) as u8, x as u8);
+    let own = |v: &Option<String>, d: u32| v.as_deref().and_then(hex).unwrap_or_else(|| h(d));
+    (p.1, own(&look.c1, p.2), own(&look.c2, p.3), own(&look.ink, p.4), p.5)
+}
+
+/// The preset's own primary, secondary and text colours (what the colour boxes show until you pick one).
+pub fn look_defaults(bg: &str) -> (Color, Color, Color) {
+    let p = LOOKS.iter().find(|l| l.0 == bg).unwrap_or(&LOOKS[15]);
+    let h = |x: u32| rgb((x >> 16) as u8, (x >> 8) as u8, x as u8);
+    (h(p.2), h(p.3), h(p.4))
+}
+
+fn mix(a: Color, b: Color) -> Color {
+    Color { r: (a.r + b.r) / 2.0, g: (a.g + b.g) / 2.0, b: (a.b + b.b) / 2.0, a: 1.0 }
+}
+
+/// The patterned backgrounds, drawn as a picture in your two colours (stripes, rings, grid, sunburst, checker).
+fn look_svg(kind: &str, c1: Color, c2: Color) -> Option<String> {
+    let (h1, h2) = (to_hex(c1), to_hex(c2));
+    let body = match kind {
+        "stripes" => {
+            let mut s = format!("<rect width='100' height='100' fill='{h1}'/><g transform='rotate(45 50 50)'>");
+            for i in -10..20 {
+                if i % 2 != 0 {
+                    s += &format!("<rect x='-50' y='{}' width='200' height='7' fill='{h2}'/>", i * 7);
+                }
+            }
+            s + "</g>"
+        }
+        "rings" => {
+            let mut s = format!("<rect width='100' height='100' fill='{h1}'/>");
+            for i in (0..16).rev() {
+                s += &format!("<circle cx='70' cy='30' r='{}' fill='{}'/>", (i + 1) * 6, if i % 2 == 0 { &h2 } else { &h1 });
+            }
+            s
+        }
+        "grid" => {
+            let mut s = format!("<rect width='100' height='100' fill='{h1}'/>");
+            for i in 0..10 {
+                let p = i as f32 * 11.0;
+                s += &format!("<path d='M{p} 0V100M0 {p}H100' stroke='{h2}' stroke-width='0.5'/>");
+            }
+            s
+        }
+        "sunburst" => {
+            let mut s = format!("<rect width='100' height='100' fill='{h1}'/>");
+            for i in 0..18 {
+                let (a0, a1) = (((i * 20 + 10) as f32).to_radians(), ((i * 20 + 20) as f32).to_radians());
+                s += &format!("<path d='M50 38L{:.1} {:.1}L{:.1} {:.1}Z' fill='{h2}'/>", 50.0 + 200.0 * a0.sin(), 38.0 - 200.0 * a0.cos(), 50.0 + 200.0 * a1.sin(), 38.0 - 200.0 * a1.cos());
+            }
+            s
+        }
+        "checker" => {
+            let mut s = format!("<rect width='100' height='100' fill='{h2}'/>");
+            for y in 0..10 {
+                for x in 0..10 {
+                    if (x + y) % 2 == 0 {
+                        s += &format!("<rect x='{}' y='{}' width='10' height='10' fill='{h1}'/>", x * 10, y * 10);
+                    }
+                }
+            }
+            s
+        }
+        _ => return None,
+    };
+    Some(format!("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'>{body}</svg>"))
 }
 
 /// The website's cover fonts, as far as Windows has them.
@@ -585,85 +668,37 @@ pub fn look_font(name: &str) -> (Font, bool) {
     }
 }
 
-/// The website's patterned backgrounds, drawn as a picture (stripes, rings, grid, sunburst, checker).
-fn look_svg(name: &str) -> Option<String> {
-    let body = match name {
-        "stripes" => {
-            let mut s = String::from("<rect width='100' height='100' fill='#e5484d'/><g transform='rotate(45 50 50)'>");
-            for i in -10..20 {
-                if i % 2 != 0 {
-                    s += &format!("<rect x='-50' y='{}' width='200' height='7' fill='#c23a3f'/>", i * 7);
-                }
-            }
-            s + "</g>"
-        }
-        "rings" => {
-            let mut s = String::from("<rect width='100' height='100' fill='#1d3557'/>");
-            for i in (0..16).rev() {
-                s += &format!("<circle cx='70' cy='30' r='{}' fill='{}'/>", (i + 1) * 6, if i % 2 == 0 { "#274b7a" } else { "#1d3557" });
-            }
-            s
-        }
-        "grid" => {
-            let mut s = String::from("<rect width='100' height='100' fill='#101820'/>");
-            for i in 0..10 {
-                let p = i as f32 * 11.0;
-                s += &format!("<path d='M{p} 0V100M0 {p}H100' stroke='white' stroke-opacity='0.12' stroke-width='0.5'/>");
-            }
-            s
-        }
-        "sunburst" => {
-            let mut s = String::from("<rect width='100' height='100' fill='#ffd23f'/>");
-            for i in 0..18 {
-                let (a0, a1) = (((i * 20 + 10) as f32).to_radians(), ((i * 20 + 20) as f32).to_radians());
-                s += &format!("<path d='M50 38L{:.1} {:.1}L{:.1} {:.1}Z' fill='#ff9f1c'/>", 50.0 + 200.0 * a0.sin(), 38.0 - 200.0 * a0.cos(), 50.0 + 200.0 * a1.sin(), 38.0 - 200.0 * a1.cos());
-            }
-            s
-        }
-        "checker" => {
-            let mut s = String::from("<rect width='100' height='100' fill='#eee'/>");
-            for y in 0..10 {
-                for x in 0..10 {
-                    if (x + y) % 2 == 0 {
-                        s += &format!("<rect x='{}' y='{}' width='10' height='10' fill='#222'/>", x * 10, y * 10);
-                    }
-                }
-            }
-            s
-        }
-        _ => return None,
-    };
-    Some(format!("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'>{body}</svg>"))
-}
-
-/// A drawn cover in the look someone chose (background + font) for an album without art.
-pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, bg: &str, font: &str) -> Element<'a, M> {
-    let (stops, angle, ink) = look_bg(bg);
-    let (font, upper) = look_font(font);
+/// A drawn cover in the look someone chose (background, colours, font) for an album or playlist.
+pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, look: &volvix_core::Look) -> Element<'a, M> {
+    let (kind, c1, c2, ink, angle) = look_parts(look);
+    let (font, upper) = look_font(&look.font);
     let name = title.trim();
     let shown = if upper { name.to_uppercase() } else { name.to_string() };
-    let body: Element<'a, M> = if size <= 76.0 {
+    let body: Element<'a, M> = if name.is_empty() {
+        Space::new(0, 0).into()
+    } else if size <= 76.0 {
         text(name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default()).font(font).size(size * 0.4).color(ink).into()
     } else {
         let n = name.chars().count();
         let pct = if n <= 10 { 0.17 } else if n <= 22 { 0.13 } else if n <= 40 { 0.105 } else { 0.085 };
         text(shown).font(font).size(size * pct).color(ink).align_x(iced::alignment::Horizontal::Center).width(Length::Fixed(size * 0.82)).wrapping(text::Wrapping::WordOrGlyph).into()
     };
-    if let Some(doc) = look_svg(bg) {
+    if let Some(doc) = look_svg(kind, c1, c2) {
         let art = iced::widget::svg(iced::widget::svg::Handle::from_memory(doc.into_bytes())).width(size).height(size).content_fit(iced::ContentFit::Cover);
         return iced::widget::stack![art, container(body).width(size).height(size).center_x(size).center_y(size)].width(size).height(size).into();
     }
-    let mut g = iced::gradient::Linear::new(angle.to_radians());
-    for (o, c) in stops {
-        g = g.add_stop(o, c);
-    }
+    let background: Background = if kind == "solid" {
+        c1.into()
+    } else {
+        Background::Gradient(iced::Gradient::Linear(iced::gradient::Linear::new(angle.to_radians()).add_stop(0.0, c1).add_stop(0.55, mix(c1, c2)).add_stop(1.0, c2)))
+    };
     container(body)
         .width(size)
         .height(size)
         .center_x(size)
         .center_y(size)
         .clip(true)
-        .style(move |_| container::Style { background: Some(Background::Gradient(iced::Gradient::Linear(g))), border: border::rounded(radius), ..Default::default() })
+        .style(move |_| container::Style { background: Some(background), border: border::rounded(radius), ..Default::default() })
         .into()
 }
 

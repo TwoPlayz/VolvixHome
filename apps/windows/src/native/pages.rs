@@ -1525,43 +1525,103 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 None => column![ui::dim("That song isn't here any more.", 14), close].spacing(14).into(),
             }
         }
-        Dialog::CoverLook { album, bg, font } => {
+        Dialog::CoverLook { name, look, .. } => {
             const BGS: [(&str, &str); 16] = [("sunset", "Sunset"), ("ocean", "Ocean"), ("midnight", "Midnight"), ("forest", "Forest"), ("grape", "Grape"), ("rose", "Rose"), ("ember", "Ember"), ("mono", "Graphite"), ("paper", "Paper"), ("stripes", "Stripes"), ("rings", "Rings"), ("grid", "Grid"), ("sunburst", "Sunburst"), ("checker", "Checker"), ("aurora", "Aurora"), ("dusk", "Dusk")];
             const FONTS: [(&str, &str); 7] = [("display", "Modern"), ("serif", "Serif"), ("mono", "Typewriter"), ("rounded", "Rounded"), ("condensed", "Poster"), ("script", "Script"), ("slab", "Slab")];
-            let title = app.lib.album(album).map(|a| a.title.clone()).unwrap_or_default();
+            const PALETTE: [&str; 12] = ["#ff6a3d", "#ffd23f", "#8fc98a", "#1b998b", "#7fd1e8", "#3282b8", "#3c1053", "#c99bff", "#ff6f91", "#e5484d", "#ffffff", "#111111"];
             let mut swatches = Row::new().spacing(6);
             let mut sw_rows = Column::new().spacing(6);
-            for (i, (k, name)) in BGS.iter().enumerate() {
-                let on = bg == k;
-                let b = button(ui::cover_look::<Message>("", 34.0, 5.0, k, "display")).padding(2).style(move |t, s| {
-                    let mut st = ui::flat(t, s);
-                    st.border = iced::Border { color: if on { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 8.0.into() };
-                    st
-                }).on_press(Message::CoverPick(false, k.to_string()));
-                swatches = swatches.push(ui::tip(b, name));
-                if i % 5 == 4 {
+            for (i, (k, label)) in BGS.iter().enumerate() {
+                let on = look.bg == *k;
+                // each background is drawn in the colours picked below, so you see what they do to it
+                let shown = volvix_core::Look { bg: k.to_string(), font: "display".into(), c1: look.c1.clone().filter(|c| ui::hex(c).is_some()), c2: look.c2.clone().filter(|c| ui::hex(c).is_some()), ink: None };
+                let b = button(ui::cover_look::<Message>("", 34.0, 5.0, &shown)).padding(2).style(move |t, st| {
+                    let mut x = ui::flat(t, st);
+                    x.border = iced::Border { color: if on { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 8.0.into() };
+                    x
+                }).on_press(Message::CoverBg(k.to_string()));
+                swatches = swatches.push(ui::tip(b, label));
+                if i % 6 == 5 {
                     sw_rows = sw_rows.push(std::mem::replace(&mut swatches, Row::new().spacing(6)));
                 }
             }
             sw_rows = sw_rows.push(swatches);
             let mut fonts = Row::new().spacing(6);
-            for (k, name) in FONTS {
-                let on = font == k;
+            for (k, label) in FONTS {
+                let on = look.font == k;
                 let (f, upper) = ui::look_font(k);
-                let label = if upper { name.to_uppercase() } else { name.to_string() };
-                fonts = fonts.push(button(text(label).font(f).size(15).wrapping(text::Wrapping::None)).padding([7, 10]).style(move |t, s| {
-                    let mut st = ui::secondary(t, s);
-                    st.border = iced::Border { color: if on { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 10.0.into() };
-                    st
-                }).on_press(Message::CoverPick(true, k.to_string())));
+                let text_label = if upper { label.to_uppercase() } else { label.to_string() };
+                fonts = fonts.push(button(text(text_label).font(f).size(15).wrapping(text::Wrapping::None)).padding([7, 10]).style(move |t, st| {
+                    let mut x = ui::secondary(t, st);
+                    x.border = iced::Border { color: if on { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 10.0.into() };
+                    x
+                }).on_press(Message::CoverFont(k.to_string())));
             }
-            let pick = column![text("Background").size(13).font(ui::FONT_BOLD), sw_rows, text("Font").size(13).font(ui::FONT_BOLD), Row::with_children(vec![fonts.wrap().into()])].spacing(8).width(Length::Fill);
+            let (d1, d2, d3) = ui::look_defaults(&look.bg);
+            let colour_row = |label: &'static str, which: u8, cur: &Option<String>, def: Color| -> El<'a> {
+                let mut pal = Row::new().spacing(4).align_y(Alignment::Center);
+                for hexc in PALETTE {
+                    let col = ui::hex(hexc).unwrap_or(Color::WHITE);
+                    let picked = cur.as_deref().map(|c| c.eq_ignore_ascii_case(hexc)).unwrap_or(false);
+                    pal = pal.push(
+                        button(container(iced::widget::Space::new(18, 18)).style(move |_: &iced::Theme| container::Style { background: Some(col.into()), border: iced::Border { color: ui::BORDER_STRONG(), width: 1.0, radius: 9.0.into() }, ..Default::default() }))
+                            .padding(2)
+                            .style(move |t, st| {
+                                let mut x = ui::flat(t, st);
+                                x.border = iced::Border { color: if picked { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 12.0.into() };
+                                x
+                            })
+                            .on_press(Message::CoverColour(which, hexc.to_string())),
+                    );
+                }
+                let shown = cur.clone().unwrap_or_default();
+                row![
+                    container(text(label).size(13)).width(76),
+                    pal,
+                    text_input(&ui::to_hex(def), &shown).on_input(move |v| Message::CoverColour(which, v)).padding(6).size(13).width(84).style(ui::input),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .into()
+            };
             column![
                 ui::title("Customize cover", 22),
-                row![ui::cover_look::<Message>(&title, 150.0, 6.0, bg, font), pick].spacing(18),
-                row![ui::btn("Use the automatic look", ui::Btn::Secondary).on_press(Message::CoverReset), horizontal_space(), ui::btn("Cancel", ui::Btn::Secondary).on_press(Message::DialogCancel), ui::btn("Save", ui::Btn::Primary).on_press(Message::DialogOk)].spacing(10),
+                row![
+                    ui::cover_look::<Message>(name, 170.0, 6.0, look),
+                    column![text("Background").size(13).font(ui::FONT_BOLD), sw_rows, text("Font").size(13).font(ui::FONT_BOLD), Row::with_children(vec![fonts.wrap().into()])].spacing(8).width(Length::Fill),
+                ]
+                .spacing(18),
+                text("Colours").size(13).font(ui::FONT_BOLD),
+                colour_row("Primary", 0, &look.c1, d1),
+                colour_row("Secondary", 1, &look.c2, d2),
+                colour_row("Text", 2, &look.ink, d3),
+                row![
+                    ui::btn("Use the automatic look", ui::Btn::Secondary).on_press(Message::CoverReset),
+                    ui::btn("Reset colours", ui::Btn::Ghost).on_press(Message::CoverResetColours),
+                    horizontal_space(),
+                    ui::btn("Cancel", ui::Btn::Secondary).on_press(Message::DialogCancel),
+                    ui::btn("Save", ui::Btn::Primary).on_press(Message::DialogOk)
+                ]
+                .spacing(10),
             ]
-            .spacing(14)
+            .spacing(12)
+            .into()
+        }
+        Dialog::Crop(c) => {
+            let view = iced::widget::mouse_area(image(c.preview.clone()).width(crate::CROP_VIEW).height(crate::CROP_VIEW))
+                .on_press(Message::CropDown)
+                .on_release(Message::CropUp)
+                .on_exit(Message::CropUp)
+                .on_move(Message::CropMove)
+                .interaction(iced::mouse::Interaction::Grab);
+            column![
+                ui::title("Adjust the picture", 22),
+                container(view).width(Length::Fill).center_x(Length::Fill),
+                row![ui::wi("minus", 14.0, ui::TEXT_2()), iced::widget::slider(1.0..=4.0, c.zoom, Message::CropZoom).step(0.01_f32), ui::wi("plus", 14.0, ui::TEXT_2())].spacing(10).align_y(Alignment::Center),
+                ui::dim("Drag to move it. Use the slider to zoom.", 13),
+                row![horizontal_space(), ui::btn("Cancel", ui::Btn::Secondary).on_press(Message::DialogCancel), ui::btn("Use this picture", ui::Btn::Primary).on_press(Message::DialogOk)].spacing(10),
+            ]
+            .spacing(12)
             .into()
         }
         Dialog::AlbumInfo { album } => {

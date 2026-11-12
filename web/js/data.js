@@ -38,7 +38,7 @@ window.Spin = window.Spin || {};
         id: a.id, title: a.title, artist: a.artist, year: a.year || null, genre: a.genre || null,
         label: a.label || null, copyright: a.copyright || null, catalogNumber: a.catalogNumber || null,
         trackIds: (a.trackIds || []).filter(function (id) { return TRACKS[id]; }),
-        cover: !!a.cover, coverV: a.coverV || 0, added: a.added || 0, art: artFor(a.id), look: (cat.covers && cat.covers[a.id]) || null,
+        cover: !!a.cover, customCover: !!a.customCover, coverV: a.coverV || 0, added: a.added || 0, art: artFor(a.id), look: (cat.covers && cat.covers[a.id]) || null,
         format: 'digital',
         // e.g. "24/96" for the quality badge; lossy files report their bitrate instead
         maxQuality: q.lossless && q.bits ? q.bits + '/' + (q.khz || 44.1) : null,

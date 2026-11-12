@@ -28,6 +28,8 @@ pub struct PlaylistView {
     pub invited: Vec<String>,
     /// version of the picture someone chose for it (0 = none: it shows its songs' albums)
     pub cover: u64,
+    /// the look someone chose for its cover (a background, colours, a font), shown while it has no picture
+    pub look: Option<crate::model::Look>,
 }
 
 impl PlaylistView {
@@ -55,6 +57,7 @@ fn own(p: &Playlist) -> PlaylistView {
         collaborators: vec![],
         invited: vec![],
         cover: p.rest.get("cover").and_then(|v| v.as_u64()).unwrap_or(0),
+        look: p.rest.get("look").and_then(crate::model::Look::from_value),
     }
 }
 
@@ -69,6 +72,7 @@ fn shared(p: &SharedPlaylist, me: &str, kind: Option<Kind>) -> PlaylistView {
         collaborators: p.collaborators.clone(),
         invited: p.invited.clone(),
         cover: 0,
+        look: None,
     }
 }
 

@@ -2,25 +2,6 @@
 //! round (profile pictures) or square (playlists).
 use std::path::Path;
 
-/// A picture file as the square JPEG to send for a profile picture: the middle of the picture, 256 px.
-pub fn prepare(path: &Path) -> Result<Vec<u8>, String> {
-    prepare_square(path, 256)
-}
-
-/// The same at any size (a playlist's picture is 512 px).
-pub fn prepare_square(path: &Path, size: u32) -> Result<Vec<u8>, String> {
-    let img = ::image::open(path).map_err(|e| format!("Couldn't read that picture ({e})."))?;
-    let square = img.resize_to_fill(size, size, ::image::imageops::FilterType::Lanczos3).to_rgb8();
-    let mut out = Vec::new();
-    ::image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90)
-        .encode(square.as_raw(), size, size, ::image::ColorType::Rgb8)
-        .map_err(|e| format!("Couldn't prepare that picture ({e})."))?;
-    if out.len() > 900_000 {
-        return Err("That picture is too big.".into());
-    }
-    Ok(out)
-}
-
 /// A picture from the server, cut to a circle (the corners are made see-through), ready to show.
 pub fn round_handle(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
     let img = ::image::load_from_memory(bytes).ok()?.resize_to_fill(256, 256, ::image::imageops::FilterType::Lanczos3).to_rgba8();
@@ -36,4 +17,95 @@ pub fn round_handle(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
         }
     }
     Some(iced::widget::image::Handle::from_rgba(w, h, raw))
+}
+
+/// A chosen picture (a playlist's, or an album's that had no art) with its corners rounded, ready to show.
+pub fn rounded_handle(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
+    let img = ::image::load_from_memory(bytes).ok()?;
+    let (w, h) = (img.width().min(1024), img.height().min(1024));
+    let mut px = if (w, h) == (img.width(), img.height()) { img.to_rgba8() } else { img.resize(w, h, ::image::imageops::FilterType::Triangle).to_rgba8() };
+    let (w, h) = px.dimensions();
+    let r = w.min(h) as f32 * 0.045;
+    let (hw, hh) = (w as f32 / 2.0, h as f32 / 2.0);
+    let raw = px.as_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let (qx, qy) = (((x as f32 + 0.5) - hw).abs() - (hw - r), ((y as f32 + 0.5) - hh).abs() - (hh - r));
+            let d = (qx.max(0.0) * qx.max(0.0) + qy.max(0.0) * qy.max(0.0)).sqrt() + qx.max(qy).min(0.0) - r;
+            let cover = (0.5 - d).clamp(0.0, 1.0);
+            if cover < 1.0 {
+                let i = ((y * w + x) * 4 + 3) as usize;
+                raw[i] = (raw[i] as f32 * cover) as u8;
+            }
+        }
+    }
+    Some(iced::widget::image::Handle::from_rgba(w, h, px.into_raw()))
+}
+
+/// How the picture being adjusted will be shown, so the preview matches it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Shape {
+    /// album and playlist art: square with rounded corners
+    Rounded,
+    /// a profile picture
+    Circle,
+}
+
+/// A picture file opened for adjusting (shrunk a little so moving and zooming it stays quick).
+pub fn load(path: &Path) -> Result<::image::DynamicImage, String> {
+    let img = ::image::open(path).map_err(|e| format!("Couldn't read that picture ({e})."))?;
+    let (w, h) = (img.width(), img.height());
+    let big = w.max(h);
+    if big > 1800 {
+        let k = 1800.0 / big as f32;
+        return Ok(img.resize(((w as f32 * k) as u32).max(1), ((h as f32 * k) as u32).max(1), ::image::imageops::FilterType::Triangle));
+    }
+    Ok(img)
+}
+
+/// The square of the picture centred on (cx, cy) with sides of `side` pixels, at `out` px.
+fn cut(img: &::image::DynamicImage, cx: f32, cy: f32, side: f32, out: u32, filter: ::image::imageops::FilterType) -> ::image::RgbaImage {
+    let (w, h) = (img.width() as f32, img.height() as f32);
+    let side = side.clamp(1.0, w.min(h));
+    let x0 = (cx - side / 2.0).clamp(0.0, w - side);
+    let y0 = (cy - side / 2.0).clamp(0.0, h - side);
+    let part = ::image::imageops::crop_imm(img, x0 as u32, y0 as u32, side as u32, side as u32).to_image();
+    ::image::imageops::resize(&part, out, out, filter)
+}
+
+/// What the adjust dialog shows: the chosen square, with the shape it will have (the corners / outside the circle see-through).
+pub fn preview(img: &::image::DynamicImage, cx: f32, cy: f32, side: f32, out: u32, shape: Shape) -> iced::widget::image::Handle {
+    let mut px = cut(img, cx, cy, side, out, ::image::imageops::FilterType::Triangle);
+    let (w, h) = px.dimensions();
+    let r = match shape {
+        Shape::Circle => w as f32 / 2.0,
+        Shape::Rounded => w as f32 * 0.047,
+    };
+    let half = w as f32 / 2.0;
+    let raw = px.as_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            // signed distance to the rounded square (negative inside), then a one-pixel soft edge
+            let (qx, qy) = ((fx - half).abs() - (half - r), (fy - half).abs() - (half - r));
+            let d = (qx.max(0.0) * qx.max(0.0) + qy.max(0.0) * qy.max(0.0)).sqrt() + qx.max(qy).min(0.0) - r;
+            let cover = (0.5 - d).clamp(0.0, 1.0);
+            let i = ((y * w + x) * 4 + 3) as usize;
+            raw[i] = (raw[i] as f32 * cover) as u8;
+        }
+    }
+    iced::widget::image::Handle::from_rgba(w, h, px.into_raw())
+}
+
+/// The chosen square as the JPEG the server keeps.
+pub fn cut_jpeg(img: &::image::DynamicImage, cx: f32, cy: f32, side: f32, out: u32) -> Result<Vec<u8>, String> {
+    let sq = ::image::DynamicImage::ImageRgba8(cut(img, cx, cy, side, out, ::image::imageops::FilterType::Lanczos3)).to_rgb8();
+    let mut bytes = Vec::new();
+    ::image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90)
+        .encode(sq.as_raw(), out, out, ::image::ColorType::Rgb8)
+        .map_err(|e| format!("Couldn't prepare that picture ({e})."))?;
+    if bytes.len() > 900_000 {
+        return Err("That picture is too big.".into());
+    }
+    Ok(bytes)
 }

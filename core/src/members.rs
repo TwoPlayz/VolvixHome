@@ -59,8 +59,20 @@ impl Client {
     }
 
     /// Choose how an album without cover art is drawn (for everyone on the server).
-    pub fn set_album_look(&self, album: &str, bg: &str, font: &str) -> Result<()> {
-        self.request("PUT", &format!("/api/album/{}/art", enc(album))).send_json(serde_json::json!({ "bg": bg, "font": font }))?;
+    pub fn set_album_look(&self, album: &str, look: &crate::model::Look) -> Result<()> {
+        self.request("PUT", &format!("/api/album/{}/art", enc(album))).send_json(look.to_value())?;
+        Ok(())
+    }
+
+    /// A picture for an album that has no cover art (a JPEG, a square). Answers with the album's new cover version.
+    pub fn set_album_picture(&self, album: &str, jpeg: &[u8]) -> Result<u64> {
+        let res = self.request("PUT", &format!("/api/album/{}/picture", enc(album))).set("Content-Type", "image/jpeg").send_bytes(jpeg)?;
+        let v: Value = res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))?;
+        Ok(v["coverV"].as_u64().unwrap_or(1))
+    }
+
+    pub fn clear_album_picture(&self, album: &str) -> Result<()> {
+        self.request("DELETE", &format!("/api/album/{}/picture", enc(album))).call()?;
         Ok(())
     }
 
