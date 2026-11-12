@@ -75,7 +75,7 @@ struct NowPlayingView: View {
                             Image(systemName: "chevron.down").font(.system(size: 20, weight: .semibold)).foregroundColor(Theme.text).frame(width: 44, height: 44)
                         }
                         Spacer()
-                        Text("Now Playing").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2)
+                        Text(player.partyOn ? "Listening party" : (player.contextName.map { "Playing from " + $0 } ?? "Now Playing")).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2).lineLimit(1)
                         Spacer()
                         HStack(spacing: 0) {
                             Button { showLyrics.toggle() } label: {

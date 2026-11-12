@@ -153,6 +153,9 @@ struct NoteItem: Identifiable, Hashable {
     var done: String?
     var partyID: String? = nil
     var from: String? = nil
+    var playlistID: String? = nil
+    var targetID: String? = nil
+    var targetKind: String? = nil
 }
 
 struct Member: Identifiable, Hashable {

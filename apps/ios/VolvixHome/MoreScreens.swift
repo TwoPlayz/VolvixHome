@@ -1,65 +1,5 @@
 import SwiftUI
 
-// MARK: - Notifications
-
-struct NotificationsView: View {
-    @EnvironmentObject var app: AppModel
-    @EnvironmentObject var party: PartyHub
-    @State private var joining: NoteItem?
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                Text("Notifications").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text).padding(.bottom, 6)
-                if app.notes.isEmpty {
-                    Text("Nothing new. Playlist invites, party invites and music you requested show up here.")
-                        .font(.system(size: 15)).foregroundColor(Theme.text2)
-                }
-                ForEach(app.notes) { n in
-                    HStack(alignment: .top, spacing: 12) {
-                        Circle().fill(n.read ? Color.clear : Theme.accent).frame(width: 8, height: 8).padding(.top, 6)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(n.text).font(.system(size: 15)).foregroundColor(Theme.text)
-                            Text(ago(n.at)).font(.system(size: 12)).foregroundColor(Theme.text2)
-                            if let d = n.done, !d.isEmpty {
-                                Text(d.capitalized).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text2)
-                            } else if n.kind == "party_invite", n.partyID != nil {
-                                Button { joining = n } label: {
-                                    Text("Join").font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
-                                        .padding(.horizontal, 16).padding(.vertical, 6).background(Theme.accent).clipShape(Capsule())
-                                }
-                                .padding(.top, 2)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(12)
-                    .background(Theme.surface2)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            .padding(16)
-        }
-        .background(Theme.surface)
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $joining) { n in
-            JoinPartySheet(partyID: n.partyID ?? "", host: n.from ?? "the host").environmentObject(party)
-        }
-        .task {
-            // they stay marked as new while you look, and count as read once you leave them
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            app.markNotesRead()
-        }
-    }
-
-    private func ago(_ seconds: Int) -> String {
-        let d = Date(timeIntervalSince1970: TimeInterval(seconds))
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .short
-        return f.localizedString(for: d, relativeTo: Date())
-    }
-}
-
 // MARK: - Household
 
 struct HouseholdView: View {
@@ -402,9 +342,8 @@ struct LyricsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if let l = lyrics, !l.synced.isEmpty {
                         ForEach(Array(l.synced.enumerated()), id: \.offset) { i, line in
-                            Text(line.text.isEmpty ? "♪" : line.text)
+                            lineText(line, i)
                                 .font(.system(size: 26, weight: .bold))
-                                .foregroundColor(color(i))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                                 .onTapGesture { player.seek(to: Double(line.ms) / 1000) }
@@ -433,6 +372,17 @@ struct LyricsView: View {
             lyrics = await app.api?.lyrics(trackID)
             loaded = true
         }
+    }
+
+    /// A line of lyrics; if the song has word timing, the words already sung are lit.
+    private func lineText(_ line: LyricLine, _ i: Int) -> Text {
+        if i == current, !line.words.isEmpty {
+            let ms = Int(player.position * 1000) + 250
+            var t = Text("")
+            for w in line.words { t = t + Text(w.text).foregroundColor(ms >= w.ms ? Theme.text : Theme.text3) }
+            return t
+        }
+        return Text(line.text.isEmpty ? "♪" : line.text).foregroundColor(color(i))
     }
 
     private func color(_ i: Int) -> Color {

@@ -78,7 +78,10 @@ extension API {
                 read: (n["read"] as? Bool) ?? false,
                 done: n["done"] as? String,
                 partyID: (n["data"] as? [String: Any])?["partyId"] as? String,
-                from: (n["data"] as? [String: Any])?["from"] as? String))
+                from: (n["data"] as? [String: Any])?["from"] as? String,
+                playlistID: (n["data"] as? [String: Any])?["playlistId"] as? String,
+                targetID: (n["data"] as? [String: Any])?["albumId"] as? String,
+                targetKind: (n["data"] as? [String: Any])?["kind"] as? String))
         }
         return (out, (o["unread"] as? Int) ?? 0)
     }

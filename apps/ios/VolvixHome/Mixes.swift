@@ -255,8 +255,8 @@ struct MixView: View {
                     }
                     .padding(.horizontal, 16)
                     HStack(spacing: 10) {
-                        PillButton(title: "Play", icon: "play.fill") { player.play(m.ids) }
-                        PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(m.ids, shuffled: true) }
+                        PillButton(title: "Play", icon: "play.fill") { player.play(m.ids, from: m.title) }
+                        PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(m.ids, shuffled: true, from: m.title) }
                         PillButton(title: saved ? "Saved" : "Save", icon: saved ? "checkmark" : "plus", primary: false) {
                             if saved { return }
                             saved = true
@@ -267,7 +267,7 @@ struct MixView: View {
                     }
                     LazyVStack(spacing: 0) {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { i, t in
-                            TrackRow(track: t, showCover: true) { player.play(m.ids, startAt: i) }
+                            TrackRow(track: t, showCover: true) { player.play(m.ids, startAt: i, from: m.title) }
                         }
                     }
                     .padding(.top, 6)

@@ -29,6 +29,8 @@ final class PlayerModel: ObservableObject {
     /// in a listening party the shared queue drives this player
     weak var party: PartyHub?
     @Published private(set) var partyOn = false
+    /// what the music is playing from (an album, a playlist…), for the full player
+    @Published private(set) var contextName: String?
     private var applyingParty = false
     private var silent = false
     private var xfading = false
@@ -77,9 +79,10 @@ final class PlayerModel: ObservableObject {
     // MARK: starting music
 
     /// Play these songs, starting at one of them.
-    func play(_ ids: [String], startAt: Int = 0, shuffled: Bool = false) {
+    func play(_ ids: [String], startAt: Int = 0, shuffled: Bool = false, from: String? = nil) {
         guard !ids.isEmpty else { return }
         if inParty { partyPlay(ids, startAt, shuffled); return }
+        contextName = from
         var list = ids
         var start = max(0, min(startAt, ids.count - 1))
         // with no server, only what is downloaded can play
@@ -277,6 +280,16 @@ final class PlayerModel: ObservableObject {
 
     private func load(autoplay: Bool) {
         guard let app = app, let api = app.api, let id = currentID, let url = api.streamURL(id) else { return }
+        if app.user?.hideExplicit == true, !inParty, let t = app.track(id), t.explicit {
+            if index + 1 < queue.count {
+                index += 1
+                load(autoplay: autoplay)
+            } else {
+                problem = "Explicit songs are turned off for you."
+                isPlaying = false
+            }
+            return
+        }
         problem = nil
         loading = true
         position = 0

@@ -182,6 +182,7 @@ struct LibraryView: View {
     @EnvironmentObject var downloads: DownloadStore
     @EnvironmentObject var player: PlayerModel
     @State private var tab: Tab = .albums
+    @State private var sort = "added"
     @State private var allArtists = false
     @State private var creating = false
     @State private var newName = ""
@@ -199,6 +200,22 @@ struct LibraryView: View {
             }
             .padding(.vertical, 12)
 
+            if tab == .albums || tab == .songs {
+                HStack {
+                    Spacer()
+                    Menu {
+                        Picker("Sort", selection: $sort) {
+                            Text("Recently added").tag("added")
+                            Text("Title").tag("title")
+                            Text("Artist").tag("artist")
+                            Text("Release year").tag("year")
+                        }
+                    } label: {
+                        Label("Sort: " + sortLabel, systemImage: "arrow.up.arrow.down").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.bottom, 4)
+            }
             ScrollView {
                 switch tab {
                 case .albums: albums
@@ -223,7 +240,7 @@ struct LibraryView: View {
     private var albums: some View {
         let cols = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
         return LazyVGrid(columns: cols, spacing: 18) {
-            ForEach(app.albums.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }) { a in
+            ForEach(sortedAlbums) { a in
                 NavigationLink(value: Route.album(a.id)) {
                     VStack(alignment: .leading, spacing: 6) {
                         CoverView(albumID: a.id)
@@ -284,12 +301,33 @@ struct LibraryView: View {
     }
 
     private var songs: some View {
-        let list = Array(app.allTracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }.prefix(2000))
+        let list = Array(sortedAlbums.flatMap { app.tracks(of: $0) }.prefix(2000))
         let ids = list.map { $0.id }
         return LazyVStack(spacing: 0) {
             ForEach(Array(list.enumerated()), id: \.element.id) { i, t in
-                TrackRow(track: t, showCover: true) { player.play(ids, startAt: i) }
+                TrackRow(track: t, showCover: true) { player.play(ids, startAt: i, from: "Your Library") }
             }
+        }
+    }
+
+    private var sortLabel: String {
+        switch sort {
+        case "title": return "Title"
+        case "artist": return "Artist"
+        case "year": return "Release year"
+        default: return "Recently added"
+        }
+    }
+
+    private var sortedAlbums: [Album] {
+        switch sort {
+        case "title": return app.albums.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case "artist": return app.albums.sorted { a, b in
+            let c = a.artist.localizedCaseInsensitiveCompare(b.artist)
+            return c == .orderedSame ? (a.year ?? 0) < (b.year ?? 0) : c == .orderedAscending
+        }
+        case "year": return app.albums.sorted { ($0.year ?? 0) > ($1.year ?? 0) }
+        default: return app.albums.sorted { $0.added > $1.added }
         }
     }
 
@@ -353,8 +391,8 @@ struct AlbumView: View {
                     }
                     .padding(.horizontal, 16)
                     HStack(spacing: 12) {
-                        PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
-                        PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
+                        PillButton(title: "Play", icon: "play.fill") { player.play(ids, from: album.title) }
+                        PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true, from: album.title) }
                         DownloadButton(ids: ids)
                     }
                     HStack(spacing: 12) {
@@ -363,7 +401,7 @@ struct AlbumView: View {
                     }
                     LazyVStack(spacing: 0) {
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { i, t in
-                            TrackRow(track: t, number: i + 1) { player.play(ids, startAt: i) }
+                            TrackRow(track: t, number: i + 1) { player.play(ids, startAt: i, from: album.title) }
                         }
                     }
                     .padding(.top, 6)
@@ -375,166 +413,6 @@ struct AlbumView: View {
         }
         .background(Theme.surface)
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-struct ArtistView: View {
-    @EnvironmentObject var app: AppModel
-    @EnvironmentObject var player: PlayerModel
-    let name: String
-    @State private var more = false
-
-    var body: some View {
-        let albums = app.albums(by: name).sorted { ($0.year ?? 0) > ($1.year ?? 0) }
-        let ids = albums.flatMap { app.tracks(of: $0).map { $0.id } }
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 16) {
-                    ArtistPic(name: name, corner: 16).frame(width: 120, height: 120)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Artist").font(.system(size: 13)).foregroundColor(Theme.text2)
-                        Text(name).font(.system(size: 26, weight: .bold)).foregroundColor(Theme.text)
-                        Text("\(albums.count) album\(albums.count == 1 ? "" : "s")").font(.system(size: 13)).foregroundColor(Theme.text2)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-
-                HStack(spacing: 12) {
-                    if !ids.isEmpty {
-                        PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
-                        PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
-                    }
-                    PillButton(title: app.isFollowing(name) ? "Following" : "Follow", icon: app.isFollowing(name) ? "checkmark" : "plus", primary: false) { app.toggleFollow(name) }
-                }
-                .padding(.horizontal, 16)
-
-                if let bio = app.info(for: name)?.bio, !bio.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(bio).font(.system(size: 14)).foregroundColor(Theme.text2).lineLimit(more ? nil : 4)
-                        Button(more ? "Show less" : "Read more") { more.toggle() }.font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text)
-                        Text("From Wikipedia").font(.system(size: 11)).foregroundColor(Theme.text3)
-                    }
-                    .padding(.horizontal, 16)
-                }
-
-                if !albums.isEmpty {
-                    SectionTitle(text: "Albums")
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 18) {
-                        ForEach(albums) { a in
-                            NavigationLink(value: Route.album(a.id)) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    CoverView(albumID: a.id)
-                                    Text(a.title).font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
-                                    Text(a.year.map { String($0) } ?? "").font(.system(size: 12)).foregroundColor(Theme.text2)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-            }
-            .padding(.bottom, 24)
-        }
-        .background(Theme.surface)
-        .navigationBarTitleDisplayMode(.inline)
-        .task { app.loadInfo(name) }
-    }
-}
-
-// MARK: - Search
-
-struct SearchView: View {
-    @EnvironmentObject var app: AppModel
-    @EnvironmentObject var player: PlayerModel
-    @State private var query = ""
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        let r = app.search(query)
-        VStack(spacing: 0) {
-            TopBar()
-            Text("Search").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundColor(Theme.text2)
-                TextField("Artists, albums, songs", text: $query)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .focused($focused)
-                    .foregroundColor(Theme.text)
-                if !query.isEmpty {
-                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundColor(Theme.text3) }
-                }
-            }
-            .padding(12)
-            .background(Theme.surface3)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .padding(16)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                        Text("Find anything in your library.").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.top, 40).frame(maxWidth: .infinity)
-                    } else {
-                        if r.artists.isEmpty && r.albums.isEmpty && r.tracks.isEmpty {
-                            Text("Nothing in your library for \"\(query)\".").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.horizontal, 16)
-                        }
-                        if !r.artists.isEmpty {
-                            SectionTitle(text: "Artists")
-                            LazyVStack(spacing: 0) {
-                                ForEach(r.artists, id: \.self) { n in
-                                    NavigationLink(value: Route.artist(n)) {
-                                        HStack(spacing: 14) {
-                                            ArtistPic(name: n).frame(width: 48, height: 48)
-                                            Text(n).font(.system(size: 16)).foregroundColor(Theme.text)
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, 16).padding(.vertical, 5)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        if !r.albums.isEmpty {
-                            SectionTitle(text: "Albums")
-                            LazyVStack(spacing: 0) {
-                                ForEach(r.albums) { a in
-                                    NavigationLink(value: Route.album(a.id)) {
-                                        HStack(spacing: 14) {
-                                            CoverView(albumID: a.id, corner: 6).frame(width: 48, height: 48)
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(a.title).font(.system(size: 16)).foregroundColor(Theme.text).lineLimit(1)
-                                                Text(a.artist).font(.system(size: 13)).foregroundColor(Theme.text2).lineLimit(1)
-                                            }
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, 16).padding(.vertical, 5)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        if !r.tracks.isEmpty {
-                            SectionTitle(text: "Songs")
-                            let ids = r.tracks.map { $0.id }
-                            LazyVStack(spacing: 0) {
-                                ForEach(Array(r.tracks.enumerated()), id: \.element.id) { i, t in
-                                    TrackRow(track: t, showCover: true) { player.play(ids, startAt: i) }
-                                }
-                            }
-                        }
-                        GetMoreSection(query: query)
-                    }
-                }
-                .padding(.bottom, 24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-        }
-        .background(Theme.surface)
-        .navigationBarHidden(true)
     }
 }
 

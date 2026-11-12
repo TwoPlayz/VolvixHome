@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
     private(set) var allTracks: [Track] = []
     /// every name in the credits (lower case -> as written), for links to a person's credits page
     private(set) var creditNames: [String: String] = [:]
+    private(set) var appearsByArtist: [String: [Album]] = [:]
     var userData: [String: Any] = [:]
     private var infoAsked: Set<String> = []
     private var infoRunning = 0
@@ -299,6 +300,7 @@ final class AppModel: ObservableObject {
         albumsByArtist = [:]
         allTracks = []
         creditNames = [:]
+        appearsByArtist = [:]
         userData = [:]
         stats = Stats()
         fx = FxSettings()
@@ -335,6 +337,13 @@ final class AppModel: ObservableObject {
             }
         }
         creditNames = credit
+        // albums an artist is on without being the album's artist
+        var appears: [String: [String: Album]] = [:]
+        for t in c.tracks {
+            guard let a = byAlbum[t.albumId], !t.artist.isEmpty, a.artist.lowercased() != t.artist.lowercased() else { continue }
+            appears[t.artist, default: [:]][a.id] = a
+        }
+        appearsByArtist = appears.mapValues { Array($0.values) }
     }
 
     private func readUserData() {
@@ -366,6 +375,10 @@ final class AppModel: ObservableObject {
     func track(_ id: String) -> Track? { trackByID[id] }
     func album(_ id: String) -> Album? { albumByID[id] }
     func albums(by artist: String) -> [Album] { albumsByArtist[artist] ?? [] }
+    func appearsOn(_ artist: String) -> [Album] {
+        let own = Set(albums(by: artist).map { $0.id })
+        return (appearsByArtist[artist] ?? []).filter { !own.contains($0.id) }
+    }
     func tracks(of album: Album) -> [Track] {
         album.trackIds.compactMap { trackByID[$0] }.sorted { a, b in
             if a.disc != b.disc { return a.disc < b.disc }

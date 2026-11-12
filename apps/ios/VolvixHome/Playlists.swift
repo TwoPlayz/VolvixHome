@@ -339,8 +339,8 @@ struct PlaylistView: View {
                     .padding(.horizontal, 16)
                     if !ids.isEmpty {
                         HStack(spacing: 10) {
-                            PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
-                            PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
+                            PillButton(title: "Play", icon: "play.fill") { player.play(ids, from: p.name) }
+                            PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true, from: p.name) }
                             DownloadButton(ids: ids)
                         }
                     }
@@ -357,7 +357,7 @@ struct PlaylistView: View {
                         ForEach(Array(p.trackIDs.enumerated()), id: \.offset) { i, tid in
                             if let t = app.track(tid) {
                                 let rm: (() -> Void)? = p.editable ? { remove(p, at: i, track: t) } : nil
-                                TrackRow(track: t, showCover: true, onRemove: rm) { player.play(ids, startAt: ids.firstIndex(of: tid) ?? 0) }
+                                TrackRow(track: t, showCover: true, onRemove: rm) { player.play(ids, startAt: ids.firstIndex(of: tid) ?? 0, from: p.name) }
                             }
                         }
                     }
