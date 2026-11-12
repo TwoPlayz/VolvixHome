@@ -28,14 +28,21 @@ window.Spin = window.Spin || {};
   const settings = function () { return S.store.state.settings || {}; };
   const dbToGain = function (db) { return Math.pow(10, db / 20); };
 
+  // In the iPhone app the Web Audio chain (equalizer, crossfade, leveling) can make iOS go quiet when the app is in the
+  // background, so there it is only built when the equalizer is switched on.
+  const iosApp = function () { return S.native === 'ios'; };
+  const eqOn = function () { const s = settings(); return !!(s.eq && s.eq.on); };
+
   function needed() {
     const s = settings();
+    if (iosApp()) return eqOn();
     return !!(s.eq && s.eq.on) || Number(s.crossfade) > 0 || (s.leveling && s.leveling !== 'off');
   }
 
   /** Build the audio chain (once). Returns false if this browser can't. */
   function ensure() {
     if (nodes) return true;
+    if (iosApp() && !eqOn()) return false;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC || !S.player || !S.player.audio) return false;
     try {
@@ -67,6 +74,10 @@ window.Spin = window.Spin || {};
     if (needed()) ensure();
     if (ctx && ctx.state === 'suspended') ctx.resume().catch(function () { /* waits for a tap */ });
   }
+  // keep sound coming out when the app goes to the background or iOS interrupts the context
+  const revive = function () { if (ctx && ctx.state !== 'running' && S.player && S.player.state && S.player.state.playing) ctx.resume().catch(function () {}); };
+  document.addEventListener('visibilitychange', revive);
+  setInterval(revive, 2000);
   ['pointerdown', 'keydown', 'touchend'].forEach(function (ev) { document.addEventListener(ev, function () { if (ctx && ctx.state === 'suspended') ctx.resume().catch(function () {}); }, { passive: true }); });
 
   /** Loudness correction for a song, in dB (0 when its file has no ReplayGain tags). */

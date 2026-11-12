@@ -9,6 +9,17 @@ struct VolvixHomeApp: App {
 
     init() {
         // allow audio to keep playing when the app is backgrounded or the screen locks
+        Self.activateAudio()
+        let nc = NotificationCenter.default
+        // take the audio session back after a call, Siri or anything else that interrupted it, and when leaving the app
+        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { n in
+            if let v = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt, AVAudioSession.InterruptionType(rawValue: v) == .ended { Self.activateAudio() }
+        }
+        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in Self.activateAudio() }
+        nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in Self.activateAudio() }
+    }
+
+    private static func activateAudio() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
     }
