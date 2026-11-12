@@ -144,6 +144,7 @@ struct GetButton: View {
 
 /// One thing found on MusicBrainz, with its Get button.
 struct FoundRow: View {
+    @EnvironmentObject var app: AppModel
     let item: FoundItem
     let isArtist: Bool
     let isSong: Bool
@@ -151,18 +152,31 @@ struct FoundRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RemoteSquare(path: item.image, title: item.label, corner: 8).frame(width: 52, height: 52)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.label).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
-                Text(subtitle).font(.system(size: 12)).foregroundColor(Theme.text2).lineLimit(1)
+            // tap the picture or the name for the page: an artist's releases, or the release's songs
+            NavigationLink(value: route) {
+                HStack(spacing: 12) {
+                    RemoteSquare(path: item.image, title: item.label, corner: 8).frame(width: 52, height: 52)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.label).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
+                        Text(subtitle).font(.system(size: 12)).foregroundColor(Theme.text2).lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                }
             }
-            Spacer(minLength: 6)
+            .buttonStyle(.plain)
             GetButton(item: item, kind: isArtist ? "artist" : "album", foreignId: target, label: isArtist ? "Get all" : "Get", asked: $asked)
         }
         .padding(10)
         .background(Theme.surface2)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
+    }
+
+    private var route: Route {
+        if isArtist { return .discoverArtist(item.foreignId ?? "") }
+        if let s = item.onServerValue, !isSong, app.album(s) != nil { return .album(s) }
+        if isSong { return .discoverAlbum(item.albumId ?? item.singleId ?? "") }
+        return .discoverAlbum(item.foreignId ?? "")
     }
 
     /// Lidarr gets whole releases: a song gets its single when there is one, else its album.

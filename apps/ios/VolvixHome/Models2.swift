@@ -38,6 +38,8 @@ struct FoundItem: Decodable, Identifiable, Hashable {
     var singleId: String?
     var image: String?
     var onServer: Bool
+    /// when it is here: the id of the album / name of the artist in your library
+    var onServerValue: String?
     var requested: Bool
     var disambiguation: String?
 
@@ -64,6 +66,7 @@ struct FoundItem: Decodable, Identifiable, Hashable {
             onServer = b
         } else if let s = try? c.decode(String.self, forKey: .onServer) {
             onServer = !s.isEmpty
+            onServerValue = s.isEmpty ? nil : s
         } else {
             onServer = false
         }

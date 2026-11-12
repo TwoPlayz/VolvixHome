@@ -8,6 +8,8 @@ enum Route: Hashable {
     case playlist(String)
     case notifications
     case account
+    case discoverAlbum(String)
+    case discoverArtist(String)
 }
 
 /// An album's cover (a rounded square). Without art it shows the title on a tint, like the website.

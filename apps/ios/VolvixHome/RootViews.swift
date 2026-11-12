@@ -170,6 +170,8 @@ struct MainTabs: View {
                     case .playlist(let id): PlaylistView(id: id)
                     case .notifications: NotificationsView()
                     case .account: AccountView()
+                    case .discoverAlbum(let id): DiscoverAlbumView(id: id)
+                    case .discoverArtist(let id): DiscoverArtistView(id: id)
                     }
                 }
         }
