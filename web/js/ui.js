@@ -46,6 +46,11 @@ window.Spin = window.Spin || {};
 
   /* ---------- basics ---------- */
   S.$ = (sel, root) => (root || document).querySelector(sel);
+  /** The element that scrolls the page: on a phone only the content under the top bar, on a computer the whole main area. */
+  S.scroller = function () {
+    const phone = window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
+    return (phone && document.getElementById('view')) || document.getElementById('main');
+  };
   S.$$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 
   S.esc = function (value) {

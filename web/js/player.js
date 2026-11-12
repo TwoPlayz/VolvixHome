@@ -244,6 +244,25 @@ window.Spin = window.Spin || {};
   window.addEventListener('pagehide', function () { saveResume(true); });
   document.addEventListener('visibilitychange', function () { if (document.hidden) saveResume(true); });
 
+  // iOS can pause the page's audio by itself as the app goes to the background. Nobody asked for that (st.playing is still
+  // true), so start it again, a few times at most; and again when the app comes back to the front.
+  let systemPauses = [];
+  const keepGoing = function (why) {
+    if (!st.playing || remote || audio.ended || !audio.currentSrc || !audio.paused) return;
+    if (S.cast && S.cast.active) return;
+    if (S.audioLog) S.audioLog.add(why + ': starting it again');
+    audio.play().catch(function (e) { if (S.audioLog) S.audioLog.add('could not start again (' + (e && e.name) + ')'); });
+  };
+  audio.addEventListener('pause', function () {
+    if (!st.playing || remote || audio.ended) return;
+    const now = Date.now();
+    systemPauses = systemPauses.filter(function (t) { return now - t < 15000; });
+    if (systemPauses.length >= 4) return;
+    systemPauses.push(now);
+    setTimeout(function () { keepGoing('paused by the system'); }, 200);
+  });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) keepGoing('back in the app'); });
+
   function recordRecent() {
     if (!st.context || st.context.type !== 'album') return;
     if (S.store.state.settings && S.store.state.settings.privateSession) return; // private session: no history

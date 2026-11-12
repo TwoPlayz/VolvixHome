@@ -1601,8 +1601,14 @@ select.input {
   .sidebar { display: none; }
   .topbar .avatar-btn { display: inline-block; }
   .main { border-radius: 0; }
-  /* the bar keeps its see-through blur; it just reaches up over the status-bar strip */
-  .topbar { padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
+  /* the top bar stays put, over the status-bar strip; only the content below it scrolls */
+  .main { overflow: hidden; display: flex; flex-direction: column; }
+  .topbar { position: static; flex: none; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: var(--surface); }
+  .view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .proof, .social-side, .acct-nav { position: static; }
+  /* the bottom tabs: no browser tap flash, a quick dim while pressed instead */
+  .tabbar .tab { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; outline: none; transition: opacity .1s; }
+  .tabbar .tab:active { opacity: .55; }
   .nav-arrow { display: none; }
   .mobile-brand { display: block; }
   .view { padding: 4px 16px 32px; }

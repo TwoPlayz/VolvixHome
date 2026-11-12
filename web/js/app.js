@@ -237,7 +237,7 @@ window.Spin.views = window.Spin.views || {};
       hideSplash();
       S.notify.updateBell();
       setActive(path);
-      if (!opts || !opts.keepScroll) S.$('#main').scrollTop = 0;
+      if (!opts || !opts.keepScroll) S.scroller().scrollTop = 0;
       track(path);
       const h1 = view.querySelector('h1');
       document.title = (h1 ? h1.textContent + ' · ' : '') + 'Volvix';
@@ -245,7 +245,7 @@ window.Spin.views = window.Spin.views || {};
     /** Re-render the current screen in place (after data changes), keeping scroll position. */
     refresh: function () {
       if (!shellMounted) return;
-      const main = S.$('#main');
+      const main = S.scroller();
       const top = main.scrollTop;
       S.app.render(S.router.current(), { keepScroll: true });
       main.scrollTop = top;

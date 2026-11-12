@@ -102,7 +102,7 @@ Spin.views = Spin.views || {};
       clear.addEventListener('click', function () { ui.q = ''; input.value = ''; input.focus(); update(); });
       root.onclick = function (e) {
         const ty = e.target.closest('[data-type]');
-        if (ty) { ui.type = ty.dataset.type; update(); if (ty.classList.contains('see-all')) S.$('#main').scrollTop = 0; }
+        if (ty) { ui.type = ty.dataset.type; update(); if (ty.classList.contains('see-all')) S.scroller().scrollTop = 0; }
       };
       if (!('ontouchstart' in window)) input.focus();
       lookFurther();
