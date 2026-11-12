@@ -15,8 +15,10 @@ struct Album: Codable, Identifiable, Hashable {
     var cover: Bool
     var coverV: Int
     var added: Int
+    var label: String?
+    var copyright: String?
 
-    enum CodingKeys: String, CodingKey { case id, title, artist, year, genre, trackIds, cover, coverV, added }
+    enum CodingKeys: String, CodingKey { case id, title, artist, year, genre, trackIds, cover, coverV, added, label, copyright }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -29,6 +31,8 @@ struct Album: Codable, Identifiable, Hashable {
         cover = (try? c.decode(Bool.self, forKey: .cover)) ?? false
         coverV = (try? c.decode(Int.self, forKey: .coverV)) ?? 0
         added = (try? c.decode(Int.self, forKey: .added)) ?? 0
+        label = try? c.decode(String.self, forKey: .label)
+        copyright = try? c.decode(String.self, forKey: .copyright)
     }
 }
 
@@ -41,8 +45,10 @@ struct Track: Codable, Identifiable, Hashable {
     var disc: Int
     var duration: Int
     var explicit: Bool
+    var credits: [Credit]
+    var replayGain: ReplayGain?
 
-    enum CodingKeys: String, CodingKey { case id, title, artist, albumId, no, disc, duration, explicit }
+    enum CodingKeys: String, CodingKey { case id, title, artist, albumId, no, disc, duration, explicit, credits, replayGain }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -54,7 +60,15 @@ struct Track: Codable, Identifiable, Hashable {
         disc = (try? c.decode(Int.self, forKey: .disc)) ?? 1
         duration = (try? c.decode(Int.self, forKey: .duration)) ?? 0
         explicit = (try? c.decode(Bool.self, forKey: .explicit)) ?? false
+        credits = (try? c.decode([Credit].self, forKey: .credits)) ?? []
+        replayGain = try? c.decode(ReplayGain.self, forKey: .replayGain)
     }
+}
+
+struct ReplayGain: Codable, Hashable {
+    var track: Double?
+    var album: Double?
+    var peak: Double?
 }
 
 struct Catalog: Decodable {

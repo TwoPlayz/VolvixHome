@@ -8,6 +8,17 @@ extension API {
         try await decode(MeInfo.self, "/api/me")
     }
 
+    /// What MusicBrainz knows about who made a song (the server looks it up).
+    func credits(_ trackID: String) async -> [Credit]? {
+        guard let data = try? await send(try request("/api/credits/" + encode(trackID))),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = o["credits"] as? [[String: Any]] else { return nil }
+        return list.compactMap { c in
+            guard let r = c["role"] as? String, let n = c["names"] as? String else { return nil }
+            return Credit(role: r, names: n)
+        }
+    }
+
     func lyrics(_ trackID: String) async -> LyricsData? {
         let a = try? await decode(LyricsAnswer.self, "/api/lyrics/" + encode(trackID))
         return a?.lyrics
@@ -65,7 +76,9 @@ extension API {
                 text: (n["text"] as? String) ?? "",
                 at: (n["at"] as? Int) ?? 0,
                 read: (n["read"] as? Bool) ?? false,
-                done: n["done"] as? String))
+                done: n["done"] as? String,
+                partyID: (n["data"] as? [String: Any])?["partyId"] as? String,
+                from: (n["data"] as? [String: Any])?["from"] as? String))
         }
         return (out, (o["unread"] as? Int) ?? 0)
     }

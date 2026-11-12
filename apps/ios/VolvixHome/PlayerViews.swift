@@ -54,7 +54,10 @@ struct NowPlayingView: View {
     @EnvironmentObject var player: PlayerModel
     @EnvironmentObject var devices: DeviceHub
     @EnvironmentObject var casting: CastHub
+    @EnvironmentObject var party: PartyHub
     @Environment(\.dismiss) private var dismiss
+    @State private var showParty = false
+    @State private var showCredits = false
     @State private var addingTV = false
     @State private var tvAddress = ""
     @State private var scrubbing = false
@@ -115,6 +118,10 @@ struct NowPlayingView: View {
                                 Image(systemName: "laptopcomputer.and.iphone").font(.system(size: 18)).foregroundColor(Theme.text).frame(width: 44, height: 44)
                             }
                             AirPlayButton().frame(width: 36, height: 36).frame(width: 44, height: 44)
+                            Button { showParty = true } label: {
+                                Image(systemName: party.active ? "person.3.fill" : "person.3").font(.system(size: 17))
+                                    .foregroundColor(party.active ? Theme.accent : Theme.text).frame(width: 44, height: 44)
+                            }
                             Button { showQueue = true } label: {
                                 Image(systemName: "list.bullet").font(.system(size: 18)).foregroundColor(Theme.text).frame(width: 44, height: 44)
                             }
@@ -136,6 +143,8 @@ struct NowPlayingView: View {
                             Text(t.title).font(.system(size: 22, weight: .bold)).foregroundColor(Theme.text).lineLimit(1)
                             Text(t.artist).font(.system(size: 16)).foregroundColor(Theme.text2).lineLimit(1)
                         }
+                        .contentShape(Rectangle())
+                        .onTapGesture { showCredits = true }
                         Spacer()
                         Button { app.toggleLike(t.id) } label: {
                             Image(systemName: app.isLiked(t.id) ? "heart.fill" : "heart")
@@ -196,6 +205,10 @@ struct NowPlayingView: View {
             }
         }
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(app).environmentObject(player) }
+        .sheet(isPresented: $showParty) { PartySheet().environmentObject(app).environmentObject(player).environmentObject(party) }
+        .sheet(isPresented: $showCredits) {
+            if let id = player.currentID { CreditsSheet(trackID: id).environmentObject(app).environmentObject(player) }
+        }
         .alert("Add a TV or speaker", isPresented: $addingTV) {
             TextField("192.168.1.40", text: $tvAddress)
             Button("Add") { let a = tvAddress; tvAddress = ""; Task { await casting.add(host: a) } }
@@ -205,11 +218,11 @@ struct NowPlayingView: View {
         }
         .environmentObject(app)
         .overlay(alignment: .top) {
-            if let n = devices.notice ?? casting.notice {
+            if let n = devices.notice ?? casting.notice ?? party.notice {
                 Text(n).font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 14).padding(.vertical, 8).background(Theme.surface3).clipShape(Capsule())
                     .padding(.top, 8)
-                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil; casting.notice = nil }
+                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil; casting.notice = nil; party.notice = nil }
             }
         }
     }
@@ -242,7 +255,7 @@ struct QueueView: View {
             .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
             .background(Theme.surface)
-            .navigationTitle("Queue")
+            .navigationTitle(player.partyOn ? "Party queue" : "Queue")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }

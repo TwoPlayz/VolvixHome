@@ -26,6 +26,8 @@ final class AppModel: ObservableObject {
     @Published var notes: [NoteItem] = []
     @Published var unread = 0
     @Published var members: [Member] = []
+    @Published var stats = Stats()
+    @Published var fx = FxSettings()
     @Published var artistInfos: [String: ArtistInfoData] = [:]
     @Published var quality: String = UserDefaults.standard.string(forKey: "volvix.quality") ?? "original"
     /// "system", "dark" or "light"
@@ -37,7 +39,9 @@ final class AppModel: ObservableObject {
     private(set) var albumByID: [String: Album] = [:]
     private(set) var albumsByArtist: [String: [Album]] = [:]
     private(set) var allTracks: [Track] = []
-    private var userData: [String: Any] = [:]
+    /// every name in the credits (lower case -> as written), for links to a person's credits page
+    private(set) var creditNames: [String: String] = [:]
+    var userData: [String: Any] = [:]
     private var infoAsked: Set<String> = []
     private var infoRunning = 0
 
@@ -256,7 +260,10 @@ final class AppModel: ObservableObject {
         albumByID = [:]
         albumsByArtist = [:]
         allTracks = []
+        creditNames = [:]
         userData = [:]
+        stats = Stats()
+        fx = FxSettings()
     }
 
     private func index(_ c: Catalog) {
@@ -275,6 +282,16 @@ final class AppModel: ObservableObject {
         for a in c.artists { names.insert(a.name) }
         for a in c.albums { names.insert(a.artist) }
         artistNames = names.filter { !$0.isEmpty }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        var credit: [String: String] = [:]
+        for t in c.tracks {
+            for cr in t.credits where cr.role != "ISRC" {
+                for n in cr.names.components(separatedBy: ", ") {
+                    let clean = n.trimmingCharacters(in: .whitespaces)
+                    if !clean.isEmpty && credit[clean.lowercased()] == nil { credit[clean.lowercased()] = clean }
+                }
+            }
+        }
+        creditNames = credit
     }
 
     private func readUserData() {
@@ -291,6 +308,8 @@ final class AppModel: ObservableObject {
             list.append(PlaylistInfo(id: id, name: (p["name"] as? String) ?? "Playlist", description: (p["description"] as? String) ?? "", trackIDs: ids, liked: liked))
         }
         playlists = list
+        stats = Stats(userData["stats"] as? [String: Any])
+        fx = FxSettings(userData["settings"] as? [String: Any])
     }
 
     // MARK: looking things up
@@ -344,7 +363,7 @@ final class AppModel: ObservableObject {
 
     // MARK: changing your data (fetch the server's copy, change it, send it back, like the other apps)
 
-    private func edit(_ change: @escaping (inout [String: Any]) -> Void) {
+    func edit(_ change: @escaping (inout [String: Any]) -> Void) {
         guard let api = api else { return }
         Task {
             var d = (try? await api.userData()) ?? userData
@@ -406,15 +425,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func createPlaylist(_ name: String, adding trackID: String? = nil) {
+    func createPlaylist(_ name: String, adding trackID: String? = nil, tracks: [String] = [], description: String = "") {
         let clean = name.trimmingCharacters(in: .whitespaces)
         if clean.isEmpty { return }
         let id = "pl_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12))
         let now = Int(Date().timeIntervalSince1970 * 1000)
         var entries: [[String: Any]] = []
+        for t in tracks { entries.append(["id": t, "addedBy": "u_me", "at": now]) }
         if let t = trackID { entries.append(["id": t, "addedBy": "u_me", "at": now]) }
-        let pl: [String: Any] = ["id": id, "name": clean, "description": "", "owner": "u_me", "public": false, "collaborative": false, "collaborators": [String](), "tracks": entries]
-        playlists.append(PlaylistInfo(id: id, name: clean, description: "", trackIDs: trackID.map { [$0] } ?? [], liked: false))
+        let pl: [String: Any] = ["id": id, "name": clean, "description": description, "owner": "u_me", "public": false, "collaborative": false, "collaborators": [String](), "tracks": entries]
+        playlists.append(PlaylistInfo(id: id, name: clean, description: description, trackIDs: tracks + (trackID.map { [$0] } ?? []), liked: false))
         edit { d in
             var lists = (d["playlists"] as? [[String: Any]]) ?? []
             let at = (lists.first.map { ($0["liked"] as? Bool) == true || ($0["id"] as? String) == "pl_liked" } ?? false) ? 1 : 0

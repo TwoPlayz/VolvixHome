@@ -115,6 +115,27 @@ struct SignInView: View {
     }
 }
 
+extension View {
+    /// Where every Route leads (used by each tab, and by sheets that can open pages).
+    func routeDestinations() -> some View {
+        navigationDestination(for: Route.self) { route in
+            switch route {
+            case .album(let id): AlbumView(id: id)
+            case .artist(let name): ArtistView(name: name)
+            case .playlist(let id): PlaylistView(id: id)
+            case .notifications: NotificationsView()
+            case .account: AccountView()
+            case .discoverAlbum(let id): DiscoverAlbumView(id: id)
+            case .discoverArtist(let id): DiscoverArtistView(id: id)
+            case .mix(let id): MixView(id: id)
+            case .rewind(let year): RewindView(year: year)
+            case .credit(let name): CreditView(name: name)
+            case .playback: PlaybackSettingsView()
+            }
+        }
+    }
+}
+
 /// The app's screens: Home, Search, Library, Account, with the mini player above the tab bar.
 struct MainTabs: View {
     @EnvironmentObject var app: AppModel
@@ -122,6 +143,7 @@ struct MainTabs: View {
     @EnvironmentObject var downloads: DownloadStore
     @EnvironmentObject var devices: DeviceHub
     @EnvironmentObject var casting: CastHub
+    @EnvironmentObject var party: PartyHub
     @State private var showFull = false
 
     var body: some View {
@@ -134,7 +156,7 @@ struct MainTabs: View {
         }
         .tint(Theme.accent)
         .fullScreenCover(isPresented: $showFull) {
-            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads).environmentObject(devices).environmentObject(casting)
+            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads).environmentObject(devices).environmentObject(casting).environmentObject(party)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if app.offline {
@@ -148,13 +170,14 @@ struct MainTabs: View {
             player.attach(app, downloads: downloads)
             devices.attach(app, player: player)
             casting.attach(app, player: player)
+            party.attach(app, player: player)
         }
         .overlay(alignment: .top) {
-            if !showFull, let n = devices.notice ?? casting.notice {
+            if !showFull, let n = devices.notice ?? casting.notice ?? party.notice {
                 Text(n).font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 14).padding(.vertical, 8).background(Theme.surface3).clipShape(Capsule())
                     .padding(.top, 8)
-                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil; casting.notice = nil }
+                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil; casting.notice = nil; party.notice = nil }
             }
         }
         .task { await app.pollLoop() }
@@ -162,18 +185,7 @@ struct MainTabs: View {
 
     private func tab<Content: View>(_ content: Content) -> some View {
         NavigationStack {
-            content
-                .navigationDestination(for: Route.self) { route in
-                    switch route {
-                    case .album(let id): AlbumView(id: id)
-                    case .artist(let name): ArtistView(name: name)
-                    case .playlist(let id): PlaylistView(id: id)
-                    case .notifications: NotificationsView()
-                    case .account: AccountView()
-                    case .discoverAlbum(let id): DiscoverAlbumView(id: id)
-                    case .discoverArtist(let id): DiscoverArtistView(id: id)
-                    }
-                }
+            content.routeDestinations()
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayer(showFull: $showFull) }
     }

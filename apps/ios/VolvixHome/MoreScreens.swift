@@ -4,6 +4,8 @@ import SwiftUI
 
 struct NotificationsView: View {
     @EnvironmentObject var app: AppModel
+    @EnvironmentObject var party: PartyHub
+    @State private var joining: NoteItem?
 
     var body: some View {
         ScrollView {
@@ -21,6 +23,12 @@ struct NotificationsView: View {
                             Text(ago(n.at)).font(.system(size: 12)).foregroundColor(Theme.text2)
                             if let d = n.done, !d.isEmpty {
                                 Text(d.capitalized).font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text2)
+                            } else if n.kind == "party_invite", n.partyID != nil {
+                                Button { joining = n } label: {
+                                    Text("Join").font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 6).background(Theme.accent).clipShape(Capsule())
+                                }
+                                .padding(.top, 2)
                             }
                         }
                         Spacer(minLength: 0)
@@ -34,6 +42,9 @@ struct NotificationsView: View {
         }
         .background(Theme.surface)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $joining) { n in
+            JoinPartySheet(partyID: n.partyID ?? "", host: n.from ?? "the host").environmentObject(party)
+        }
         .task {
             // they stay marked as new while you look, and count as read once you leave them
             try? await Task.sleep(nanoseconds: 1_500_000_000)

@@ -5,6 +5,10 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
+    @EnvironmentObject var downloads: DownloadStore
+    @State private var mixes: [Mix] = []
+    @State private var mostPlayed: [Album] = []
+    @State private var picks: [Album] = []
 
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
@@ -34,6 +38,8 @@ struct HomeView: View {
                             .font(.system(size: 15)).foregroundColor(Theme.text2).padding(.horizontal, 16)
                     }
 
+                    RewindBanner()
+
                     if !quick.isEmpty {
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                             ForEach(quick.indices, id: \.self) { i in
@@ -62,15 +68,33 @@ struct HomeView: View {
                         .padding(.horizontal, 16)
                     }
 
+                    if !mixes.isEmpty {
+                        Shelf(title: "Made for you") {
+                            ForEach(mixes) { m in MixCard(mix: m) }
+                        }
+                    }
+
                     if !app.recentAlbums.isEmpty {
                         Shelf(title: "Recently played") {
                             ForEach(app.recentAlbums.prefix(12)) { a in AlbumCard(album: a) }
                         }
                     }
 
+                    if mostPlayed.count >= 2 {
+                        Shelf(title: "Your most played") {
+                            ForEach(mostPlayed) { a in AlbumCard(album: a) }
+                        }
+                    }
+
                     if !app.albums.isEmpty {
                         Shelf(title: "Recently added") {
                             ForEach(app.newestAlbums.prefix(12)) { a in AlbumCard(album: a) }
+                        }
+                    }
+
+                    if picks.count >= 3 {
+                        Shelf(title: "Picked for today") {
+                            ForEach(picks) { a in AlbumCard(album: a) }
                         }
                     }
 
@@ -93,6 +117,11 @@ struct HomeView: View {
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
+        .task(id: app.stats.log.count * 100000 + app.allTracks.count + (app.offline ? 1 : 0)) {
+            mixes = MixEngine.mixes(app, playable: { app.offline ? downloads.has($0) : true })
+            mostPlayed = MixEngine.topAlbums(app, 10)
+            picks = MixEngine.randomAlbums(app, 10)
+        }
     }
 }
 
@@ -584,6 +613,21 @@ struct AccountView: View {
 
     private let qualities: [(String, String)] = [("original", "Original"), ("high", "High"), ("normal", "Normal"), ("low", "Data saver")]
 
+    private func accountRow(_ icon: String, _ title: String, _ sub: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon).font(.system(size: 18)).foregroundColor(Theme.accent).frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
+                Text(sub).font(.system(size: 12)).foregroundColor(Theme.text2)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.system(size: 13)).foregroundColor(Theme.text3)
+        }
+        .padding(12)
+        .background(Theme.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -619,6 +663,10 @@ struct AccountView: View {
                         }
                         .pickerStyle(.segmented)
                     }
+                }
+                NavigationLink(value: Route.playback) { accountRow("slider.horizontal.3", "Playback", "Crossfade, volume leveling, equalizer") }.buttonStyle(.plain)
+                if let y = app.rewindYears.last {
+                    NavigationLink(value: Route.rewind(y)) { accountRow("gobackward", "Rewind \(String(y))", "Your year in music") }.buttonStyle(.plain)
                 }
                 PillButton(title: "Sign out", icon: "rectangle.portrait.and.arrow.right", primary: false) { Task { await app.signOut() } }
                 PillButton(title: "Switch server", icon: "arrow.triangle.2.circlepath", primary: false) { app.switchServer() }

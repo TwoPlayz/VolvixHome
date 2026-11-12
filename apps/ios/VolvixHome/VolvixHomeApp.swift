@@ -10,6 +10,7 @@ struct VolvixHomeApp: App {
     @StateObject private var downloads = DownloadStore()
     @StateObject private var devices = DeviceHub()
     @StateObject private var casting = CastHub()
+    @StateObject private var party = PartyHub()
 
     init() {
         // sound keeps playing when the app is in the background or the screen locks
@@ -25,6 +26,7 @@ struct VolvixHomeApp: App {
                 .environmentObject(downloads)
                 .environmentObject(devices)
                 .environmentObject(casting)
+                .environmentObject(party)
                 .background(Theme.surface.ignoresSafeArea())
                 .preferredColorScheme(app.colorScheme)
         }

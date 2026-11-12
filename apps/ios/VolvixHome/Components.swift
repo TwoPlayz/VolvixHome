@@ -10,6 +10,10 @@ enum Route: Hashable {
     case account
     case discoverAlbum(String)
     case discoverArtist(String)
+    case mix(String)
+    case rewind(Int)
+    case credit(String)
+    case playback
 }
 
 /// An album's cover (a rounded square). Without art it shows the title on a tint, like the website.
@@ -231,6 +235,7 @@ struct TrackRow: View {
     var showCover = false
     var onRemove: (() -> Void)? = nil
     let onPlay: () -> Void
+    @State private var showCredits = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -268,6 +273,7 @@ struct TrackRow: View {
                         }
                     } label: { Label("Add to playlist", systemImage: "plus.square.on.square") }
                 }
+                Button { showCredits = true } label: { Label("Credits", systemImage: "book") }
                 if let remove = onRemove {
                     Button(role: .destructive) { remove() } label: { Label("Remove from this playlist", systemImage: "minus.circle") }
                 }
@@ -280,6 +286,9 @@ struct TrackRow: View {
         .opacity(app.offline && !downloads.has(track.id) ? 0.4 : 1)
         .contentShape(Rectangle())
         .onTapGesture { onPlay() }
+        .sheet(isPresented: $showCredits) {
+            CreditsSheet(trackID: track.id).environmentObject(app).environmentObject(player).environmentObject(downloads)
+        }
     }
 }
 

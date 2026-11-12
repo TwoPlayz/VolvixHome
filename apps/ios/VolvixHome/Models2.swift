@@ -151,6 +151,8 @@ struct NoteItem: Identifiable, Hashable {
     var at: Int
     var read: Bool
     var done: String?
+    var partyID: String? = nil
+    var from: String? = nil
 }
 
 struct Member: Identifiable, Hashable {

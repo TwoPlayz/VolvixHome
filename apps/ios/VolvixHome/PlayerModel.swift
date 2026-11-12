@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import MediaPlayer
 import UIKit
+import Combine
 
 /// The music player: a queue, play/pause/seek, and the lock screen and headphone buttons.
 /// Plays through the system's own audio engine, so it keeps going in the background.
@@ -22,8 +23,20 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var sleepAt: Date?
     @Published private(set) var sleepAfterSong = false
 
-    private let player = AVPlayer()
+    private var player = AVPlayer()
+    private var observedPlayer: AVPlayer?
     private var timeObserver: Any?
+    /// in a listening party the shared queue drives this player
+    weak var party: PartyHub?
+    @Published private(set) var partyOn = false
+    private var applyingParty = false
+    private var silent = false
+    private var xfading = false
+    private var fadingOut: AVPlayer?
+    private var currentProc: EQProcessor?
+    private var fxWatch: AnyCancellable?
+    private let recorder = PlayRecorder()
+    private var lastDriftCheck = Date.distantPast
     private var endObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
     private weak var app: AppModel?
@@ -48,9 +61,10 @@ final class PlayerModel: ObservableObject {
         self.downloads = downloads
         setUpAudioSession()
         setUpRemoteCommands()
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] t in
-            Task { @MainActor in self?.tick(t) }
+        observe(player)
+        fxWatch = app.$fx.sink { [weak self] f in Task { @MainActor in self?.fxChanged(f) } }
+        NotificationCenter.default.addObserver(forName: .eqNeedsRate, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in if let f = self?.app?.fx { self?.fxChanged(f) } }
         }
         NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
             let raw = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) ?? 0
@@ -64,6 +78,7 @@ final class PlayerModel: ObservableObject {
     /// Play these songs, starting at one of them.
     func play(_ ids: [String], startAt: Int = 0, shuffled: Bool = false) {
         guard !ids.isEmpty else { return }
+        if inParty { partyPlay(ids, startAt, shuffled); return }
         var list = ids
         var start = max(0, min(startAt, ids.count - 1))
         // with no server, only what is downloaded can play
@@ -93,23 +108,27 @@ final class PlayerModel: ObservableObject {
     }
 
     func playNext(_ id: String) {
+        if inParty { party?.fire("addNext", ["ids": [id]]); party?.notice = "Playing next in the party"; return }
         if queue.isEmpty { play([id]); return }
         queue.insert(id, at: min(index + 1, queue.count))
     }
 
     func addToQueue(_ id: String) {
+        if inParty { party?.fire("add", ["ids": [id]]); party?.notice = "Added to the party queue"; return }
         if queue.isEmpty { play([id]); return }
         queue.append(id)
     }
 
     func jump(to i: Int) {
         guard i >= 0, i < queue.count else { return }
+        if inParty && !applyingParty { party?.fire("playAt", ["index": i]); return }
         index = i
         load(autoplay: true)
     }
 
     func removeFromQueue(at i: Int) {
         guard i > index, i < queue.count else { return }
+        if inParty { party?.fire("remove", ["index": i]); return }
         queue.remove(at: i)
     }
 
@@ -132,6 +151,7 @@ final class PlayerModel: ObservableObject {
     /// Carry on with a queue handed over from another device.
     func restore(_ ids: [String], index i: Int, position: Double, playing: Bool, repeatMode mode: Repeat) {
         guard !ids.isEmpty, i >= 0, i < ids.count else { return }
+        if inParty { return }
         queue = ids
         index = i
         repeatMode = mode
@@ -149,6 +169,7 @@ final class PlayerModel: ObservableObject {
 
     func resume() {
         guard hasCurrent else { return }
+        if inParty && !applyingParty { party?.fire("play"); return }
         if cast?.isCasting != true { hub?.announce() }
         if cast?.isCasting == true && !suppressCast { cast?.control("play") }
         player.play()
@@ -158,6 +179,8 @@ final class PlayerModel: ObservableObject {
     }
 
     func pause() {
+        if inParty && !applyingParty { party?.fire("pause"); return }
+        fadingOut?.pause()
         if cast?.isCasting == true && !suppressCast { cast?.control("pause") }
         player.pause()
         isPlaying = false
@@ -167,6 +190,7 @@ final class PlayerModel: ObservableObject {
 
     func next() {
         if queue.isEmpty { return }
+        if inParty && !applyingParty { party?.fire("next"); return }
         if index + 1 < queue.count {
             index += 1
             load(autoplay: true)
@@ -180,6 +204,7 @@ final class PlayerModel: ObservableObject {
     }
 
     func previous() {
+        if inParty && !applyingParty { party?.fire("prev"); return }
         // a few seconds in: back to the start of the song; at the start: the one before
         if position > 3 || index <= 0 {
             seek(to: 0)
@@ -190,8 +215,9 @@ final class PlayerModel: ObservableObject {
     }
 
     /// Keep playing but make no sound here (the TV has it).
-    func setSilent(_ silent: Bool) {
-        player.isMuted = silent
+    func setSilent(_ on: Bool) {
+        silent = on
+        player.isMuted = on
     }
 
     /// The TV changed (its remote, the Google Home app): follow it without telling it back.
@@ -205,7 +231,12 @@ final class PlayerModel: ObservableObject {
     }
 
     func seek(to seconds: Double) {
+        if inParty && !applyingParty { party?.fire("seek", ["posMs": Int(max(0, seconds) * 1000)]); return }
         if cast?.isCasting == true && !suppressCast { cast?.control("seek", value: max(0, seconds)) }
+        seekLocal(seconds)
+    }
+
+    private func seekLocal(_ seconds: Double) {
         let t = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
         player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
         position = max(0, seconds)
@@ -264,6 +295,8 @@ final class PlayerModel: ObservableObject {
             Task { @MainActor in self?.itemStatus(failed: failed, ready: ready, duration: secs, error: text) }
         }
         player.replaceCurrentItem(with: item)
+        player.isMuted = silent
+        attachEffects(item, id: id)
         if autoplay {
             player.play()
             isPlaying = true
@@ -289,7 +322,7 @@ final class PlayerModel: ObservableObject {
             if secs.isFinite && secs > 0 { duration = secs }
             if let p = pendingSeek {
                 pendingSeek = nil
-                seek(to: p)
+                seekLocal(p)
             }
             publishNowPlaying()
         }
@@ -305,20 +338,32 @@ final class PlayerModel: ObservableObject {
 
     /// Move songs in the part of the queue that is still to come.
     func moveUpcoming(from offsets: IndexSet, to destination: Int) {
+        if inParty {
+            if let rel = offsets.first {
+                let to = destination > rel ? destination - 1 : destination
+                party?.fire("move", ["from": index + 1 + rel, "to": index + 1 + to])
+            }
+            return
+        }
         var rest = upcoming
         rest.move(fromOffsets: offsets, toOffset: destination)
         queue = Array(queue[...max(index, 0)]) + rest
     }
 
     private func finished() {
+        if inParty {
+            // the shared queue moves on; a device that is making sound tells the party its song ended
+            if party?.output == "own" { party?.fire("ended", ["index": index]) }
+            return
+        }
         if sleepAfterSong {
             sleepAfterSong = false
             pause()
-            seek(to: 0)
+            seekLocal(0)
             return
         }
         if repeatMode == .one {
-            seek(to: 0)
+            seekLocal(0)
             player.play()
             return
         }
@@ -334,8 +379,13 @@ final class PlayerModel: ObservableObject {
         }
         if let at = sleepAt, Date() >= at {
             sleepAt = nil
-            pause()
+            quiet()
         }
+        if isPlaying, let app = app, let id = currentID, let t = app.track(id) {
+            recorder.tick(track: t, dt: 0.5, app: app)
+        }
+        maybeCrossfade()
+        keepInStep()
         let playing = player.timeControlStatus == .playing
         if playing != isPlaying && player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
             isPlaying = playing
@@ -417,6 +467,162 @@ final class PlayerModel: ObservableObject {
                     self.publishNowPlaying()
                 }
             }
+        }
+    }
+
+    // MARK: listening party
+
+    private var inParty: Bool { party?.active == true }
+
+    /// Pause only this phone (the sleep timer): in a party nobody else is stopped.
+    private func quiet() {
+        applyingParty = true
+        pause()
+        applyingParty = false
+    }
+
+    /// What a party starts from: the queue around now, the song and the spot.
+    func partySnapshot() -> [String: Any] {
+        let from = max(0, min(index - 50, queue.count))
+        let to = min(queue.count, from + 500)
+        let slice = Array(queue[from..<to])
+        return ["queue": slice, "index": max(0, index - from), "posMs": Int(position * 1000), "playing": isPlaying]
+    }
+
+    private func partyPlay(_ ids: [String], _ startAt: Int, _ shuffled: Bool) {
+        guard let p = party else { return }
+        var list = ids
+        var start = max(0, min(startAt, ids.count - 1))
+        if p.isHost {
+            // the host replaces the shared queue
+            if shuffled || shuffle {
+                let first = list.remove(at: start)
+                list.shuffle()
+                list.insert(first, at: 0)
+                start = 0
+            }
+            p.fire("setQueue", ["ids": Array(list.prefix(500)), "start": start, "playing": true])
+        } else {
+            // guests add to the shared queue instead of replacing it for everyone
+            let add = start > 0 ? [ids[start]] : ids
+            p.fire("add", ["ids": shuffled ? add.shuffled() : add])
+            p.notice = add.count == 1 ? "Added to the party queue" : "Added \(add.count) songs to the party queue"
+        }
+    }
+
+    /// Follow the party: its queue, its song and where it is in it. With "host" output this phone stays silent.
+    func applyParty(_ s: PartyState, output: String, offsetMs: Double) {
+        applyingParty = true
+        defer { applyingParty = false }
+        partyOn = true
+        let before = currentID
+        queue = s.queue
+        index = s.index
+        setSilent(output == "host")
+        guard s.index >= 0, s.index < s.queue.count else {
+            player.pause()
+            isPlaying = false
+            publishNowPlaying()
+            return
+        }
+        let serverNow = Date().timeIntervalSince1970 * 1000 + offsetMs
+        let expected = (s.playing ? s.posMs + (serverNow - s.updatedAt) : s.posMs) / 1000
+        if currentID != before || player.currentItem == nil {
+            pendingSeek = expected > 0.5 ? expected : nil
+            load(autoplay: s.playing)
+            return
+        }
+        if abs(position - expected) > 1.5 { seekLocal(max(0, expected)) }
+        if s.playing && !isPlaying {
+            player.play()
+            isPlaying = true
+            publishNowPlaying()
+        } else if !s.playing && isPlaying {
+            player.pause()
+            isPlaying = false
+            publishNowPlaying()
+        }
+    }
+
+    func releaseParty() {
+        partyOn = false
+        setSilent(cast?.isCasting == true)
+    }
+
+    /// If the shared position and ours have drifted apart (a stall, a slow start), catch up.
+    private func keepInStep() {
+        guard inParty, isPlaying, let s = party?.state, s.playing, Date().timeIntervalSince(lastDriftCheck) > 5 else { return }
+        lastDriftCheck = Date()
+        let offset = s.serverNow - Date().timeIntervalSince1970 * 1000
+        applyParty(s, output: party?.output ?? "own", offsetMs: offset)
+    }
+
+    // MARK: sound: equalizer, loudness, crossfade
+
+    private func observe(_ p: AVPlayer) {
+        if let o = timeObserver, let old = observedPlayer { old.removeTimeObserver(o) }
+        observedPlayer = p
+        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+        timeObserver = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] t in
+            Task { @MainActor in self?.tick(t) }
+        }
+    }
+
+    private func fxChanged(_ f: FxSettings) {
+        let shared = EQShared.shared
+        shared.configure(on: f.eqOn, gains: f.eqGains, pre: f.eqPre, sampleRate: shared.sampleRate)
+        if let id = currentID {
+            currentProc?.levelGain = Float(pow(10, AudioFX.levelDb(app?.track(id), mode: f.leveling) / 20))
+            if f.processing, let item = player.currentItem, item.audioMix == nil { attachEffects(item, id: id) }
+        }
+    }
+
+    /// Nothing is processed unless the equalizer or leveling is switched on.
+    private func attachEffects(_ item: AVPlayerItem, id: String) {
+        guard let app = app, app.fx.processing else { return }
+        let level = AudioFX.levelDb(app.track(id), mode: app.fx.leveling)
+        Task { [weak self] in
+            let proc = await AudioFX.attach(to: item, levelDb: level)
+            await MainActor.run {
+                if let me = self, me.player.currentItem === item { me.currentProc = proc }
+            }
+        }
+    }
+
+    /// Near the end of a song, the next one comes in on a second player while this one fades out.
+    private func maybeCrossfade() {
+        guard let app = app, !xfading, isPlaying, app.fx.crossfade > 0, repeatMode != .one, cast?.isCasting != true, !inParty, !sleepAfterSong else { return }
+        let fade = Double(app.fx.crossfade)
+        let left = duration - position
+        guard duration > fade + 4, left <= fade, left > 0.4 else { return }
+        var next = index + 1
+        if next >= queue.count {
+            if repeatMode == .all { next = 0 } else { return }
+        }
+        if !app.fx.crossfadeAlbums, let a = currentID.flatMap({ app.track($0) }), let b = app.track(queue[next]), a.albumId == b.albumId, b.no == a.no + 1 { return }
+        if app.offline, let d = downloads, !d.has(queue[next]) { return }
+        xfading = true
+        let outgoing = player
+        fadingOut = outgoing
+        let incoming = AVPlayer()
+        incoming.volume = 0
+        player = incoming
+        observe(incoming)
+        index = next
+        load(autoplay: true)
+        let steps = max(1, Int(fade * 20))
+        Task { [weak self] in
+            for s in 1...steps {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                let f = Float(s) / Float(steps)
+                incoming.volume = f
+                outgoing.volume = 1 - f
+            }
+            outgoing.pause()
+            outgoing.replaceCurrentItem(with: nil)
+            incoming.volume = 1
+            self?.fadingOut = nil
+            self?.xfading = false
         }
     }
 
