@@ -142,6 +142,7 @@ struct DownloadItem: Identifiable, Hashable {
     var artist: String
     var state: String
     var progress: Double
+    var image: String? = nil
 }
 
 struct NoteItem: Identifiable, Hashable {

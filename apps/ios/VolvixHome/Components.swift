@@ -84,7 +84,7 @@ struct RemoteSquare: View {
         .task(id: path) {
             image = nil
             guard let p = path, let api = app.api, let url = api.imageURL(p) else { return }
-            image = await ImageLoader.shared.image(url, auth: api.authHeader)
+            image = await ImageLoader.shared.image(url, auth: api.authFor(url))
         }
     }
 }

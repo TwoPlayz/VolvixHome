@@ -60,7 +60,8 @@ extension API {
                 title: (d["title"] as? String) ?? "",
                 artist: (d["artist"] as? String) ?? "",
                 state: (d["state"] as? String) ?? "",
-                progress: (d["progress"] as? Double) ?? 0))
+                progress: (d["progress"] as? Double) ?? 0,
+                image: d["image"] as? String))
         }
         return out
     }
@@ -120,5 +121,15 @@ extension API {
     }
 
     /// A picture the server hands out by path (found music's covers, artist photos).
-    func imageURL(_ path: String) -> URL? { url(path) }
+    func imageURL(_ path: String) -> URL? {
+        // found music's pictures are full addresses on other sites; the server's own are paths
+        if path.hasPrefix("http://") || path.hasPrefix("https://") { return URL(string: path) }
+        return url(path)
+    }
+
+    /// The sign-in is only sent to your own server, never to another site that holds a picture.
+    func authFor(_ url: URL) -> String? {
+        guard let mine = URL(string: base)?.host, url.host == mine else { return nil }
+        return authHeader
+    }
 }

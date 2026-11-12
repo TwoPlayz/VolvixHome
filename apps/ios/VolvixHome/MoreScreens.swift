@@ -239,10 +239,13 @@ struct RequestsView: View {
                         Text("Downloading").font(.system(size: 20, weight: .bold)).foregroundColor(Theme.text)
                         if downloads.isEmpty { Text("Nothing downloading right now.").font(.system(size: 14)).foregroundColor(Theme.text2) }
                         ForEach(downloads) { d in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(d.title).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
-                                Text(d.artist + " · " + stateText(d)).font(.system(size: 12)).foregroundColor(Theme.text2).lineLimit(1)
-                                ProgressView(value: min(1, max(0, d.progress))).tint(Theme.accent)
+                            HStack(spacing: 12) {
+                                RemoteSquare(path: d.image, title: d.title, corner: 8).frame(width: 52, height: 52)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(d.title).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
+                                    Text(d.artist + " · " + stateText(d)).font(.system(size: 12)).foregroundColor(Theme.text2).lineLimit(1)
+                                    ProgressView(value: min(1, max(0, d.progress))).tint(Theme.accent)
+                                }
                             }
                             .padding(12).background(Theme.surface2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
