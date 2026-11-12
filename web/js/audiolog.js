@@ -35,6 +35,7 @@ window.Spin = window.Spin || {};
   watch();
 
   S.audioLog = {
+    add: add,
     text: function () { return lines.join('\n') || 'Nothing logged yet.'; },
     clear: function () { lines = []; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } add('— cleared'); }
   };

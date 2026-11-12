@@ -196,7 +196,7 @@ window.Spin = window.Spin || {};
     const scope = o.scope || document;
     const touch = e.pointerType === 'touch';
     const startX = e.clientX, startY = e.clientY;
-    const scrollEl = o.scroller || S.$('#main');
+    const scrollEl = o.scroller || S.scroller();
     let dragging = false, hold = null, auto = null, lastY = startY, ghost = null;
     let items = [], fromPos = -1, toPos = -1, grab = 0, step = 0, scroll0 = 0;
 
