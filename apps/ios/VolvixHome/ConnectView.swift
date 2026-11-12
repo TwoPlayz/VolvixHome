@@ -31,9 +31,9 @@ struct ConnectView: View {
                     .submitLabel(.go)
                     .onSubmit(connect)
                     .padding(12)
-                    .background(Color(white: 0.08))
+                    .background(Theme.surface3)
+                    .foregroundColor(Theme.text)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12)))
 
                 Text("For example http://volvix.lan:4747, or a web address if it's set up for the internet.")
                     .font(.system(size: 12)).foregroundColor(Color(white: 0.45))
