@@ -569,6 +569,7 @@ Spin.views = Spin.views || {};
       group('About',
         row('Volvix Home', status ? 'Version ' + status.version : '', '', { icon: 'disc' }) +
         // only inside the Windows / iPhone apps: go back to the screen where you enter a server address
+        row('Playback log', 'For finding out why sound stops or glitches: what the audio did, with times.', '<button class="btn btn-secondary btn-sm" data-act="audio-log">Show</button>', { icon: 'info' }) +
         (window.VOLVIX_NATIVE ? row('Server', location.host, '<button class="btn btn-secondary btn-sm" data-act="switch-server">Switch server</button>', { icon: 'devices' }) : ''));
   }
 
@@ -679,6 +680,13 @@ Spin.views = Spin.views || {};
             S.server.json('PUT', '/api/lidarr', { url: '' }).then(function (r) { lidarr = r; S.toast('Lidarr disconnected'); S.app.refresh(); });
           }
           else if (act.dataset.act === 'reload') location.reload();
+          else if (act.dataset.act === 'audio-log') {
+            S.modal({
+              title: 'Playback log',
+              body: '<p class="modal-text">What the audio did, newest last. Play a song, switch to another app, come back, then open this.</p><pre class="dj-script" style="white-space:pre-wrap;padding:10px;font-size:12px;max-height:50vh;overflow:auto">' + S.esc(S.audioLog.text()) + '</pre>',
+              actions: [{ label: 'Clear', kind: 'secondary', onClick: function (close) { S.audioLog.clear(); close(); } }, { label: 'Close', kind: 'primary' }]
+            });
+          }
           else if (act.dataset.act === 'rescan') {
             S.server.json('POST', '/api/library/rescan').then(function () {
               S.toast('Checking the music folder…', 'library');
