@@ -1609,6 +1609,8 @@ select.input {
   /* the bottom tabs: no browser tap flash, a quick dim while pressed instead */
   .tabbar .tab { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; outline: none; transition: opacity .1s; }
   .tabbar .tab:active { opacity: .55; }
+  /* with a keyboard (Tab key) the bottom tab is marked by a soft background, not the red outline */
+  .tabbar .tab:focus-visible { outline: none; background: var(--hover); border-radius: 10px; }
   .nav-arrow { display: none; }
   .mobile-brand { display: block; }
   .view { padding: 4px 16px 32px; }
