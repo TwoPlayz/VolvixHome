@@ -113,37 +113,7 @@ struct HomeView: View {
                 .padding(.bottom, 24)
             }
             .refreshable { await app.refresh() }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 0) {
-                    TopBar()
-            Text("Your Library").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(Tab.allCases, id: \.self) { t in chip(t.rawValue, on: tab == t) { tab = t } }
-                }
-                .padding(.horizontal, 16)
-            }
-            .padding(.vertical, 12)
-
-            if tab == .albums || tab == .songs {
-                HStack {
-                    Spacer()
-                    Menu {
-                        Picker("Sort", selection: $sort) {
-                            Text("Recently added").tag("added")
-                            Text("Title").tag("title")
-                            Text("Artist").tag("artist")
-                            Text("Release year").tag("year")
-                        }
-                    } label: {
-                        Label("Sort: " + sortLabel, systemImage: "arrow.up.arrow.down").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2)
-                    }
-                }
-                .padding(.horizontal, 16).padding(.bottom, 4)
-            }
-                }
-            }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
@@ -232,7 +202,37 @@ struct LibraryView: View {
                 }
             }
             .refreshable { await app.refresh() }
-            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    TopBar()
+            Text("Your Library").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Tab.allCases, id: \.self) { t in chip(t.rawValue, on: tab == t) { tab = t } }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.vertical, 12)
+
+            if tab == .albums || tab == .songs {
+                HStack {
+                    Spacer()
+                    Menu {
+                        Picker("Sort", selection: $sort) {
+                            Text("Recently added").tag("added")
+                            Text("Title").tag("title")
+                            Text("Artist").tag("artist")
+                            Text("Release year").tag("year")
+                        }
+                    } label: {
+                        Label("Sort: " + sortLabel, systemImage: "arrow.up.arrow.down").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.bottom, 4)
+            }
+                }
+            }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)

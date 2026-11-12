@@ -156,7 +156,10 @@ struct MainTabs: View {
     @State private var paths: [NavigationPath] = Array(repeating: NavigationPath(), count: 5)
 
     var body: some View {
-        TabView(selection: $selected) {
+        TabView(selection: Binding(get: { selected }, set: { new in
+            if new == selected { tappedAgain(new) }
+            selected = new
+        })) {
             tab(HomeView(), 0).tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
             tab(SearchView(), 1).tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(1)
             tab(LibraryView(), 2).tabItem { Label("Library", systemImage: "books.vertical.fill") }.tag(2)
@@ -196,6 +199,16 @@ struct MainTabs: View {
             }
         }
         .task { await app.pollLoop() }
+    }
+
+    /// The tab you are already on was tapped: back to its first page, then to the top of the list.
+    private func tappedAgain(_ i: Int) {
+        if !paths[i].isEmpty {
+            paths[i] = NavigationPath()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { scrollActiveScrollViewToTop() }
+        } else {
+            scrollActiveScrollViewToTop()
+        }
     }
 
     private func tab<Content: View>(_ content: Content, _ i: Int) -> some View {

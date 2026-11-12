@@ -171,6 +171,17 @@ window.Spin.views = window.Spin.views || {};
     });
   }
 
+  // tapping the tab you are already on: back to the top of its page (from a page inside it, the normal link goes to its first page)
+  document.addEventListener('click', function (e) {
+    const tab = e.target.closest && e.target.closest('.tabbar .tab');
+    if (!tab || tab.getAttribute('aria-current') !== 'page') return;
+    const cur = (location.hash || '').replace(/^#/, '').split('?')[0];
+    if (cur !== tab.dataset.route) return;
+    e.preventDefault();
+    const sc = S.scroller();
+    if (sc && sc.scrollTo) sc.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
   /* ---------- back: in-app history, so Back never leaves the app ---------- */
   const ROOTS = ['/home', '/search', '/library', '/household', '/requests'];
   const trail = [];
