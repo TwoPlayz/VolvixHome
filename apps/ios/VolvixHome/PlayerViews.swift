@@ -88,7 +88,7 @@ struct NowPlayingView: View {
     @EnvironmentObject var devices: DeviceHub
     @EnvironmentObject var casting: CastHub
     @EnvironmentObject var party: PartyHub
-    @Environment(\.dismiss) private var dismiss
+    let onClose: () -> Void
     @State private var showParty = false
     @State private var showCredits = false
     @State private var addingTV = false
@@ -106,11 +106,11 @@ struct NowPlayingView: View {
 
     /// Drag the header or the cover down to close the player, like the website.
     private var swipeDown: some Gesture {
-        DragGesture()
-            .onChanged { v in if v.translation.height > 0 { dragY = v.translation.height } }
+        DragGesture(minimumDistance: 6, coordinateSpace: .global)
+            .onChanged { v in dragY = max(0, v.translation.height) }
             .onEnded { v in
                 if v.translation.height > 140 || v.predictedEndTranslation.height > 420 {
-                    dismiss()
+                    onClose()
                 } else {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { dragY = 0 }
                 }
@@ -119,7 +119,7 @@ struct NowPlayingView: View {
 
     private func go(_ r: Route) {
         app.openRoute = r
-        dismiss()
+        onClose()
     }
 
     private func tool(_ icon: String, on: Bool = false) -> some View {
@@ -135,7 +135,7 @@ struct NowPlayingView: View {
                 VStack(spacing: 0) {
                     // where it is playing from
                     HStack {
-                        Button { dismiss() } label: {
+                        Button { onClose() } label: {
                             Image(systemName: "chevron.down").font(.system(size: 22, weight: .semibold)).foregroundColor(Theme.text).frame(width: 44, height: 44)
                         }
                         Spacer()
@@ -264,7 +264,7 @@ struct NowPlayingView: View {
             } else {
                 VStack(spacing: 12) {
                     Text("Nothing playing").foregroundColor(Theme.text2)
-                    PillButton(title: "Close", primary: false) { dismiss() }
+                    PillButton(title: "Close", primary: false) { onClose() }
                 }
             }
         }

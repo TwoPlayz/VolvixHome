@@ -173,8 +173,16 @@ struct MainTabs: View {
             app.openRoute = nil
         }
         .tint(Theme.accent)
-        .fullScreenCover(isPresented: $showFull) {
-            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads).environmentObject(devices).environmentObject(casting).environmentObject(party)
+        .overlay {
+            ZStack {
+                if showFull {
+                    NowPlayingView(onClose: { showFull = false })
+                        .environmentObject(app).environmentObject(player).environmentObject(downloads).environmentObject(devices).environmentObject(casting).environmentObject(party)
+                        .transition(.move(edge: .bottom))
+                        .zIndex(1)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: showFull)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if app.offline {
