@@ -12,6 +12,8 @@ struct ServerError: LocalizedError {
 final class API {
     let base: String
     var token: String?
+    /// "original", or "high" / "normal" / "low" when the server can convert songs (needs ffmpeg there)
+    var quality: String = "original"
     private let session: URLSession
 
     init(base: String, token: String?) {
@@ -111,7 +113,9 @@ final class API {
     // MARK: addresses
 
     func streamURL(_ trackID: String) -> URL? {
-        url("/api/stream/" + encode(trackID))
+        var p = "/api/stream/" + encode(trackID)
+        if quality == "high" || quality == "normal" || quality == "low" { p += "?q=" + quality }
+        return url(p)
     }
 
     func coverURL(_ albumID: String, version: Int, large: Bool = false) -> URL? {

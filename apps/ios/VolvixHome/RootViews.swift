@@ -126,13 +126,15 @@ struct MainTabs: View {
             tab(HomeView()).tabItem { Label("Home", systemImage: "house.fill") }
             tab(SearchView()).tabItem { Label("Search", systemImage: "magnifyingglass") }
             tab(LibraryView()).tabItem { Label("Library", systemImage: "books.vertical.fill") }
-            tab(AccountView()).tabItem { Label("Account", systemImage: "person.crop.circle") }
+            tab(HouseholdView()).tabItem { Label("Household", systemImage: "person.2.fill") }
+            tab(RequestsView()).tabItem { Label("Requests", systemImage: "arrow.down.circle") }
         }
         .tint(Theme.accent)
         .fullScreenCover(isPresented: $showFull) {
             NowPlayingView().environmentObject(app).environmentObject(player)
         }
         .onAppear { player.attach(app) }
+        .task { await app.pollLoop() }
     }
 
     private func tab<Content: View>(_ content: Content) -> some View {
@@ -143,6 +145,8 @@ struct MainTabs: View {
                     case .album(let id): AlbumView(id: id)
                     case .artist(let name): ArtistView(name: name)
                     case .playlist(let id): PlaylistView(id: id)
+                    case .notifications: NotificationsView()
+                    case .account: AccountView()
                     }
                 }
         }

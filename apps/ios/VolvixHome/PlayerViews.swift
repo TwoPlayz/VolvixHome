@@ -56,6 +56,7 @@ struct NowPlayingView: View {
     @State private var scrubbing = false
     @State private var scrubTo: Double = 0
     @State private var showQueue = false
+    @State private var showLyrics = false
 
     var body: some View {
         ZStack {
@@ -69,15 +70,27 @@ struct NowPlayingView: View {
                         Spacer()
                         Text("Now Playing").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2)
                         Spacer()
-                        Button { showQueue = true } label: {
-                            Image(systemName: "list.bullet").font(.system(size: 18)).foregroundColor(Theme.text).frame(width: 44, height: 44)
+                        HStack(spacing: 0) {
+                            Button { showLyrics.toggle() } label: {
+                                Image(systemName: showLyrics ? "quote.bubble.fill" : "quote.bubble").font(.system(size: 18))
+                                    .foregroundColor(showLyrics ? Theme.accent : Theme.text).frame(width: 44, height: 44)
+                            }
+                            AirPlayButton().frame(width: 36, height: 36).frame(width: 44, height: 44)
+                            Button { showQueue = true } label: {
+                                Image(systemName: "list.bullet").font(.system(size: 18)).foregroundColor(Theme.text).frame(width: 44, height: 44)
+                            }
                         }
                     }
                     Spacer(minLength: 0)
-                    CoverView(albumID: t.albumId, corner: 12)
-                        .frame(maxWidth: 340, maxHeight: 340)
-                        .padding(.horizontal, 28)
-                        .shadow(color: Color.black.opacity(0.4), radius: 20, y: 10)
+                    if showLyrics {
+                        LyricsView(trackID: t.id)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        CoverView(albumID: t.albumId, corner: 12)
+                            .frame(maxWidth: 340, maxHeight: 340)
+                            .padding(.horizontal, 28)
+                            .shadow(color: Color.black.opacity(0.4), radius: 20, y: 10)
+                    }
                     Spacer(minLength: 0)
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 3) {
@@ -144,6 +157,7 @@ struct NowPlayingView: View {
             }
         }
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(app).environmentObject(player) }
+        .environmentObject(app)
     }
 }
 

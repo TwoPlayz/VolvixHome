@@ -1,6 +1,11 @@
 import Foundation
 import SwiftUI
 
+struct ArtistInfoData: Hashable {
+    var bio: String?
+    var imageURL: URL?
+}
+
 /// Everything the app knows: the server, who is signed in, the library and your saved data.
 @MainActor
 final class AppModel: ObservableObject {
@@ -8,12 +13,19 @@ final class AppModel: ObservableObject {
 
     @Published var phase: Phase = .connect
     @Published var user: User?
+    @Published var me: MeInfo?
     @Published var message: String?          // a problem to show on the current screen
     @Published var albums: [Album] = []
     @Published var artistNames: [String] = []
     @Published var recent: [String] = []     // album ids, newest first
     @Published var playlists: [PlaylistInfo] = []
+    @Published var follows: Set<String> = []
     @Published var busy = false
+    @Published var notes: [NoteItem] = []
+    @Published var unread = 0
+    @Published var members: [Member] = []
+    @Published var artistInfos: [String: ArtistInfoData] = [:]
+    @Published var quality: String = UserDefaults.standard.string(forKey: "volvix.quality") ?? "original"
 
     private(set) var api: API?
     private(set) var serverURL: String = ""
@@ -22,6 +34,8 @@ final class AppModel: ObservableObject {
     private(set) var albumsByArtist: [String: [Album]] = [:]
     private(set) var allTracks: [Track] = []
     private var userData: [String: Any] = [:]
+    private var infoAsked: Set<String> = []
+    private var infoRunning = 0
 
     private let serverKey = "volvix.home.server"
     private let tokenKey = "volvix.home.token"
@@ -32,6 +46,7 @@ final class AppModel: ObservableObject {
             serverURL = s
             let token = d.string(forKey: tokenKey)
             api = API(base: s, token: token)
+            api?.quality = quality
             phase = (token ?? "").isEmpty ? .signIn : .loading
         }
     }
@@ -48,6 +63,7 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(serverURL, forKey: serverKey)
         UserDefaults.standard.removeObject(forKey: tokenKey)
         api = API(base: serverURL, token: nil)
+        api?.quality = quality
         message = nil
         phase = .signIn
     }
@@ -58,6 +74,7 @@ final class AppModel: ObservableObject {
         api = nil
         serverURL = ""
         user = nil
+        me = nil
         clearLibrary()
         phase = .connect
     }
@@ -84,9 +101,16 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.removeObject(forKey: tokenKey)
         api?.token = nil
         user = nil
+        me = nil
         clearLibrary()
         message = nil
         phase = .signIn
+    }
+
+    func setQuality(_ q: String) {
+        quality = q
+        UserDefaults.standard.set(q, forKey: "volvix.quality")
+        api?.quality = q
     }
 
     // MARK: loading
@@ -94,15 +118,17 @@ final class AppModel: ObservableObject {
     func load() async {
         guard let api = api else { return }
         do {
-            let me = try await api.me()
+            let info = try await api.meInfo()
             let catalog = try await api.library()
             let data = (try? await api.userData()) ?? [:]
-            user = me
+            me = info
+            user = info.user
             index(catalog)
             userData = data
             readUserData()
             message = nil
             phase = .ready
+            await pollOnce()
         } catch let e as ServerError {
             if e.signedOut {
                 UserDefaults.standard.removeObject(forKey: tokenKey)
@@ -127,6 +153,32 @@ final class AppModel: ObservableObject {
             userData = data
             readUserData()
         }
+        await pollOnce()
+    }
+
+    /// The things that change while the app is open: notifications and what the household is playing.
+    func pollOnce() async {
+        guard let api = api else { return }
+        let n = await api.notifications()
+        notes = n.items
+        unread = n.unread
+        members = await api.household()
+    }
+
+    /// Keep looking every few seconds while the app is on screen.
+    func pollLoop() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            if phase != .ready { continue }
+            await pollOnce()
+        }
+    }
+
+    func markNotesRead() {
+        guard let api = api, unread > 0 else { return }
+        unread = 0
+        notes = notes.map { n in var m = n; m.read = true; return m }
+        Task { await api.markNotificationsRead() }
     }
 
     private func clearLibrary() {
@@ -134,6 +186,12 @@ final class AppModel: ObservableObject {
         artistNames = []
         recent = []
         playlists = []
+        follows = []
+        notes = []
+        unread = 0
+        members = []
+        artistInfos = [:]
+        infoAsked = []
         trackByID = [:]
         albumByID = [:]
         albumsByArtist = [:]
@@ -161,6 +219,7 @@ final class AppModel: ObservableObject {
 
     private func readUserData() {
         recent = (userData["recent"] as? [String]) ?? []
+        follows = Set(((userData["followedArtists"] as? [String]) ?? []).map { $0.lowercased() })
         var list: [PlaylistInfo] = []
         let raw = (userData["playlists"] as? [[String: Any]]) ?? []
         for p in raw {
@@ -188,9 +247,12 @@ final class AppModel: ObservableObject {
     func playlist(_ id: String) -> PlaylistInfo? { playlists.first { $0.id == id } }
     var liked: PlaylistInfo? { playlists.first { $0.liked } }
     func isLiked(_ trackID: String) -> Bool { liked?.trackIDs.contains(trackID) ?? false }
+    var yourPlaylists: [PlaylistInfo] { playlists.filter { !$0.liked } }
 
     var recentAlbums: [Album] { recent.compactMap { albumByID[$0] } }
     var newestAlbums: [Album] { albums.sorted { $0.added > $1.added } }
+
+    func isFollowing(_ artist: String) -> Bool { follows.contains(artist.lowercased()) }
 
     func search(_ q: String) -> (artists: [String], albums: [Album], tracks: [Track]) {
         let needle = q.trimmingCharacters(in: .whitespaces)
@@ -200,6 +262,24 @@ final class AppModel: ObservableObject {
         let found = albums.filter { hit($0.title) || hit($0.artist) }
         let songs = allTracks.filter { hit($0.title) || hit($0.artist) }
         return (Array(artists.prefix(8)), Array(found.prefix(20)), Array(songs.prefix(40)))
+    }
+
+    // MARK: artist photos (a few at a time, kept)
+
+    func info(for artist: String) -> ArtistInfoData? { artistInfos[artist] }
+
+    func loadInfo(_ artist: String) {
+        guard let api = api, me?.artistInfo == true else { return }
+        if infoAsked.contains(artist) || infoRunning >= 3 { return }
+        infoAsked.insert(artist)
+        infoRunning += 1
+        Task {
+            let r = await api.artistInfo(artist)
+            var data = ArtistInfoData(bio: r?.bio, imageURL: nil)
+            if let p = r?.image, let url = api.imageURL(p) { data.imageURL = url }
+            artistInfos[artist] = data
+            infoRunning -= 1
+        }
     }
 
     // MARK: changing your data (fetch the server's copy, change it, send it back, like the other apps)
@@ -250,6 +330,71 @@ final class AppModel: ObservableObject {
             entries.removeAll { ($0["id"] as? String) == trackID }
             if on { entries.insert(["id": trackID, "addedBy": "u_me", "at": now], at: 0) }
             lists[i]["tracks"] = entries
+            d["playlists"] = lists
+        }
+    }
+
+    func toggleFollow(_ artist: String) {
+        let key = artist.lowercased()
+        let on = !follows.contains(key)
+        if on { follows.insert(key) } else { follows.remove(key) }
+        edit { d in
+            var list = (d["followedArtists"] as? [String]) ?? []
+            list.removeAll { $0.lowercased() == key }
+            if on { list.append(artist) }
+            d["followedArtists"] = list
+        }
+    }
+
+    func createPlaylist(_ name: String, adding trackID: String? = nil) {
+        let clean = name.trimmingCharacters(in: .whitespaces)
+        if clean.isEmpty { return }
+        let id = "pl_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12))
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        var entries: [[String: Any]] = []
+        if let t = trackID { entries.append(["id": t, "addedBy": "u_me", "at": now]) }
+        let pl: [String: Any] = ["id": id, "name": clean, "description": "", "owner": "u_me", "public": false, "collaborative": false, "collaborators": [String](), "tracks": entries]
+        playlists.append(PlaylistInfo(id: id, name: clean, description: "", trackIDs: trackID.map { [$0] } ?? [], liked: false))
+        edit { d in
+            var lists = (d["playlists"] as? [[String: Any]]) ?? []
+            let at = (lists.first.map { ($0["liked"] as? Bool) == true || ($0["id"] as? String) == "pl_liked" } ?? false) ? 1 : 0
+            lists.insert(pl, at: min(at, lists.count))
+            d["playlists"] = lists
+        }
+    }
+
+    func addTrack(_ trackID: String, to playlistID: String) {
+        let now = Int(Date().timeIntervalSince1970 * 1000)
+        if let i = playlists.firstIndex(where: { $0.id == playlistID }) { playlists[i].trackIDs.append(trackID) }
+        edit { d in
+            var lists = (d["playlists"] as? [[String: Any]]) ?? []
+            guard let i = lists.firstIndex(where: { ($0["id"] as? String) == playlistID }) else { return }
+            var entries = (lists[i]["tracks"] as? [[String: Any]]) ?? []
+            entries.append(["id": trackID, "addedBy": "u_me", "at": now])
+            lists[i]["tracks"] = entries
+            d["playlists"] = lists
+        }
+    }
+
+    func removeTrack(at position: Int, from playlistID: String) {
+        if let i = playlists.firstIndex(where: { $0.id == playlistID }), position >= 0, position < playlists[i].trackIDs.count {
+            playlists[i].trackIDs.remove(at: position)
+        }
+        edit { d in
+            var lists = (d["playlists"] as? [[String: Any]]) ?? []
+            guard let i = lists.firstIndex(where: { ($0["id"] as? String) == playlistID }) else { return }
+            var entries = (lists[i]["tracks"] as? [[String: Any]]) ?? []
+            if position >= 0 && position < entries.count { entries.remove(at: position) }
+            lists[i]["tracks"] = entries
+            d["playlists"] = lists
+        }
+    }
+
+    func deletePlaylist(_ playlistID: String) {
+        playlists.removeAll { $0.id == playlistID }
+        edit { d in
+            var lists = (d["playlists"] as? [[String: Any]]) ?? []
+            lists.removeAll { ($0["id"] as? String) == playlistID }
             d["playlists"] = lists
         }
     }

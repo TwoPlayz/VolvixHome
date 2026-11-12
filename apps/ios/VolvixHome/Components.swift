@@ -1,10 +1,13 @@
 import SwiftUI
+import AVKit
 
 /// Where a tap on a card or a name goes.
 enum Route: Hashable {
     case album(String)
     case artist(String)
     case playlist(String)
+    case notifications
+    case account
 }
 
 /// An album's cover (a rounded square). Without art it shows the title on a tint, like the website.
@@ -44,20 +47,72 @@ struct CoverView: View {
     }
 }
 
-/// An artist's picture stand-in: their initials on a tint (a rounded square).
-struct ArtistPic: View {
-    let name: String
-    var corner: CGFloat = 10
+/// A picture the server hands out by path (found music's covers), as a rounded square.
+struct RemoteSquare: View {
+    @EnvironmentObject var app: AppModel
+    let path: String?
+    var title: String = ""
+    var corner: CGFloat = 8
+    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
-            Theme.tint(name)
-            Text(initials(name))
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(Color.white.opacity(0.92))
+            if let image = image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Theme.tint(title.isEmpty ? "x" : title)
+                    Text(String(title.prefix(1)).uppercased()).font(.system(size: 20, weight: .bold)).foregroundColor(Color.white.opacity(0.9))
+                }
+            }
         }
         .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .task(id: path) {
+            image = nil
+            guard let p = path, let api = app.api, let url = api.imageURL(p) else { return }
+            image = await ImageLoader.shared.image(url, auth: api.authHeader)
+        }
+    }
+}
+
+/// An artist's picture: their photo (a rounded square) when the server has one, else their initials on a tint.
+struct ArtistPic: View {
+    @EnvironmentObject var app: AppModel
+    let name: String
+    var corner: CGFloat = 10
+    var photo = true
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image = image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Theme.tint(name)
+                    Text(initials(name)).font(.system(size: 22, weight: .bold)).foregroundColor(Color.white.opacity(0.92))
+                }
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .task(id: name) { await load() }
+    }
+
+    private func load() async {
+        image = nil
+        guard photo, app.me?.artistInfo == true else { return }
+        app.loadInfo(name)
+        var tries = 0
+        while app.info(for: name) == nil && tries < 40 {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            if Task.isCancelled { return }
+            app.loadInfo(name)
+            tries += 1
+        }
+        guard let url = app.info(for: name)?.imageURL, let api = app.api else { return }
+        image = await ImageLoader.shared.image(url, auth: api.authHeader)
     }
 }
 
@@ -69,6 +124,42 @@ struct SectionTitle: View {
             .foregroundColor(Theme.text)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
+    }
+}
+
+/// The bar across the top of the main screens: the logo, notifications and your account.
+struct TopBar: View {
+    @EnvironmentObject var app: AppModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RecordMark().frame(width: 26, height: 26)
+            Text("Volvix").font(.system(size: 20, weight: .heavy)).foregroundColor(Theme.text)
+            Spacer()
+            NavigationLink(value: Route.notifications) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell").font(.system(size: 19)).foregroundColor(Theme.text2).frame(width: 40, height: 40)
+                    if app.unread > 0 {
+                        Text(app.unread > 99 ? "99+" : "\(app.unread)")
+                            .font(.system(size: 10, weight: .bold)).foregroundColor(.white)
+                            .padding(.horizontal, 5).frame(minWidth: 17, minHeight: 17)
+                            .background(Theme.accent).clipShape(Capsule())
+                            .offset(x: 2, y: 2)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            NavigationLink(value: Route.account) {
+                ZStack {
+                    Circle().fill(Theme.tint(app.user?.name ?? "me"))
+                    Text(initials(app.user?.name ?? "?")).font(.system(size: 13, weight: .bold)).foregroundColor(.white)
+                }
+                .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 }
 
@@ -135,6 +226,7 @@ struct TrackRow: View {
     let track: Track
     var number: Int? = nil
     var showCover = false
+    var onRemove: (() -> Void)? = nil
     let onPlay: () -> Void
 
     var body: some View {
@@ -160,6 +252,16 @@ struct TrackRow: View {
                 Button { player.addToQueue(track.id) } label: { Label("Add to queue", systemImage: "text.append") }
                 Button { app.toggleLike(track.id) } label: {
                     Label(app.isLiked(track.id) ? "Remove from Liked Songs" : "Add to Liked Songs", systemImage: app.isLiked(track.id) ? "heart.slash" : "heart")
+                }
+                if !app.yourPlaylists.isEmpty {
+                    Menu {
+                        ForEach(app.yourPlaylists) { p in
+                            Button(p.name) { app.addTrack(track.id, to: p.id) }
+                        }
+                    } label: { Label("Add to playlist", systemImage: "plus.square.on.square") }
+                }
+                if let remove = onRemove {
+                    Button(role: .destructive) { remove() } label: { Label("Remove from this playlist", systemImage: "minus.circle") }
                 }
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 16)).foregroundColor(Theme.text2).frame(width: 34, height: 34)
@@ -204,4 +306,17 @@ struct ProblemBox: View {
             .background(Theme.accent.opacity(0.14))
             .clipShape(RoundedRectangle(cornerRadius: 10))
     }
+}
+
+/// The system's own speaker picker: AirPlay speakers and TVs, and Bluetooth headphones.
+struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let v = AVRoutePickerView()
+        v.tintColor = UIColor(Theme.text)
+        v.activeTintColor = UIColor(Theme.accent)
+        v.prioritizesVideoDevices = false
+        return v
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }

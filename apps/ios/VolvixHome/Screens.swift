@@ -14,7 +14,7 @@ struct HomeView: View {
         return "Good evening"
     }
 
-    /// The tiles at the top: your recent albums, with Liked Songs first.
+    /// The tiles at the top: Liked Songs, then your recent albums.
     private var quick: [(String, Route, String?)] {
         var out: [(String, Route, String?)] = []
         if let l = app.liked { out.append((l.name, Route.playlist(l.id), nil)) }
@@ -23,71 +23,74 @@ struct HomeView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                Text(greeting).font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text).padding(.horizontal, 16)
+        VStack(spacing: 0) {
+            TopBar()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    Text(greeting).font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text).padding(.horizontal, 16)
 
-                if app.albums.isEmpty {
-                    Text("Your library is empty so far. Music shows up here when the server finds it.")
-                        .font(.system(size: 15)).foregroundColor(Theme.text2).padding(.horizontal, 16)
-                }
+                    if app.albums.isEmpty {
+                        Text("Your library is empty so far. Music shows up here when the server finds it.")
+                            .font(.system(size: 15)).foregroundColor(Theme.text2).padding(.horizontal, 16)
+                    }
 
-                if !quick.isEmpty {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                        ForEach(quick.indices, id: \.self) { i in
-                            let q = quick[i]
-                            NavigationLink(value: q.1) {
-                                HStack(spacing: 0) {
-                                    if let id = q.2 {
-                                        CoverView(albumID: id, corner: 0).frame(width: 52, height: 52)
-                                    } else {
-                                        ZStack {
-                                            LinearGradient(colors: [Color(hex: 0x4B3FD6), Theme.accent], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                            Image(systemName: "heart.fill").foregroundColor(.white)
+                    if !quick.isEmpty {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                            ForEach(quick.indices, id: \.self) { i in
+                                let q = quick[i]
+                                NavigationLink(value: q.1) {
+                                    HStack(spacing: 0) {
+                                        if let id = q.2 {
+                                            CoverView(albumID: id, corner: 0).frame(width: 52, height: 52)
+                                        } else {
+                                            ZStack {
+                                                LinearGradient(colors: [Color(hex: 0x4B3FD6), Theme.accent], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                                Image(systemName: "heart.fill").foregroundColor(.white)
+                                            }
+                                            .frame(width: 52, height: 52)
                                         }
-                                        .frame(width: 52, height: 52)
+                                        Text(q.0).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text).lineLimit(2).padding(.horizontal, 10)
+                                        Spacer(minLength: 0)
                                     }
-                                    Text(q.0).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text).lineLimit(2).padding(.horizontal, 10)
-                                    Spacer(minLength: 0)
+                                    .frame(height: 52)
+                                    .background(Theme.surface3.opacity(0.7))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 }
-                                .frame(height: 52)
-                                .background(Theme.surface3.opacity(0.7))
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 16)
+                    }
+
+                    if !app.recentAlbums.isEmpty {
+                        Shelf(title: "Recently played") {
+                            ForEach(app.recentAlbums.prefix(12)) { a in AlbumCard(album: a) }
                         }
                     }
-                    .padding(.horizontal, 16)
-                }
 
-                if !app.recentAlbums.isEmpty {
-                    Shelf(title: "Recently played") {
-                        ForEach(app.recentAlbums.prefix(12)) { a in AlbumCard(album: a) }
+                    if !app.albums.isEmpty {
+                        Shelf(title: "Recently added") {
+                            ForEach(app.newestAlbums.prefix(12)) { a in AlbumCard(album: a) }
+                        }
+                    }
+
+                    if !app.playlists.isEmpty {
+                        Shelf(title: "Your playlists") {
+                            ForEach(app.playlists) { p in PlaylistCard(playlist: p) }
+                        }
+                    }
+
+                    if !app.artistNames.isEmpty {
+                        Shelf(title: "Artists") {
+                            ForEach(app.artistNames.prefix(12), id: \.self) { n in ArtistCard(name: n) }
+                        }
                     }
                 }
-
-                if !app.albums.isEmpty {
-                    Shelf(title: "Recently added") {
-                        ForEach(app.newestAlbums.prefix(12)) { a in AlbumCard(album: a) }
-                    }
-                }
-
-                if !app.playlists.isEmpty {
-                    Shelf(title: "Your playlists") {
-                        ForEach(app.playlists) { p in PlaylistCard(playlist: p) }
-                    }
-                }
-
-                if !app.artistNames.isEmpty {
-                    Shelf(title: "Artists") {
-                        ForEach(app.artistNames.prefix(12), id: \.self) { n in ArtistCard(name: n) }
-                    }
-                }
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .refreshable { await app.refresh() }
         }
-        .refreshable { await app.refresh() }
         .background(Theme.surface)
         .navigationBarHidden(true)
     }
@@ -147,11 +150,15 @@ struct LibraryView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
     @State private var tab: Tab = .albums
+    @State private var allArtists = false
+    @State private var creating = false
+    @State private var newName = ""
 
     var body: some View {
         VStack(spacing: 0) {
+            TopBar()
             Text("Your Library").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
             Picker("", selection: $tab) {
                 ForEach(Tab.allCases, id: \.self) { t in Text(t.rawValue).tag(t) }
             }
@@ -170,6 +177,11 @@ struct LibraryView: View {
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
+        .alert("New playlist", isPresented: $creating) {
+            TextField("Name", text: $newName)
+            Button("Create") { app.createPlaylist(newName); newName = "" }
+            Button("Cancel", role: .cancel) { newName = "" }
+        }
     }
 
     private var albums: some View {
@@ -189,24 +201,49 @@ struct LibraryView: View {
         .padding(16)
     }
 
+    private var shownArtists: [String] {
+        allArtists ? app.artistNames : app.artistNames.filter { app.isFollowing($0) }
+    }
+
     private var artists: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(app.artistNames, id: \.self) { n in
-                NavigationLink(value: Route.artist(n)) {
-                    HStack(spacing: 14) {
-                        ArtistPic(name: n).frame(width: 56, height: 56)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(n).font(.system(size: 16)).foregroundColor(Theme.text).lineLimit(1)
-                            let c = app.albums(by: n).count
-                            Text(c == 0 ? "Appears on albums" : "\(c) album\(c == 1 ? "" : "s")").font(.system(size: 13)).foregroundColor(Theme.text2)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.system(size: 13)).foregroundColor(Theme.text3)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                chip("Following", on: !allArtists) { allArtists = false }
+                chip("All artists", on: allArtists) { allArtists = true }
             }
+            .padding(.horizontal, 16)
+            if shownArtists.isEmpty {
+                Text("You're not following any artists yet. Open an artist and press Follow.")
+                    .font(.system(size: 15)).foregroundColor(Theme.text2).padding(.horizontal, 16).padding(.top, 8)
+            }
+            LazyVStack(spacing: 0) {
+                ForEach(shownArtists, id: \.self) { n in
+                    NavigationLink(value: Route.artist(n)) {
+                        HStack(spacing: 14) {
+                            ArtistPic(name: n).frame(width: 56, height: 56)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(n).font(.system(size: 16)).foregroundColor(Theme.text).lineLimit(1)
+                                let c = app.albums(by: n).count
+                                Text(c == 0 ? "Appears on albums" : "\(c) album\(c == 1 ? "" : "s")").font(.system(size: 13)).foregroundColor(Theme.text2)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 13)).foregroundColor(Theme.text3)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 14, weight: .semibold))
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(on ? Theme.text : Theme.surface3)
+                .foregroundColor(on ? Color.black : Theme.text)
+                .clipShape(Capsule())
         }
     }
 
@@ -221,21 +258,25 @@ struct LibraryView: View {
     }
 
     private var playlists: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(app.playlists) { p in
-                NavigationLink(value: Route.playlist(p.id)) {
-                    HStack(spacing: 14) {
-                        PlaylistArt(playlist: p).frame(width: 56, height: 56)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(p.name).font(.system(size: 16)).foregroundColor(Theme.text).lineLimit(1)
-                            Text("\(p.trackIDs.count) song\(p.trackIDs.count == 1 ? "" : "s")").font(.system(size: 13)).foregroundColor(Theme.text2)
+        VStack(alignment: .leading, spacing: 8) {
+            PillButton(title: "New playlist", icon: "plus", primary: false) { creating = true }
+                .padding(.horizontal, 16)
+            LazyVStack(spacing: 0) {
+                ForEach(app.playlists) { p in
+                    NavigationLink(value: Route.playlist(p.id)) {
+                        HStack(spacing: 14) {
+                            PlaylistArt(playlist: p).frame(width: 56, height: 56)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.name).font(.system(size: 16)).foregroundColor(Theme.text).lineLimit(1)
+                                Text("\(p.trackIDs.count) song\(p.trackIDs.count == 1 ? "" : "s")").font(.system(size: 13)).foregroundColor(Theme.text2)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 13)).foregroundColor(Theme.text3)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.system(size: 13)).foregroundColor(Theme.text3)
+                        .padding(.horizontal, 16).padding(.vertical, 6)
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 6)
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -289,6 +330,7 @@ struct ArtistView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
     let name: String
+    @State private var more = false
 
     var body: some View {
         let albums = app.albums(by: name).sorted { ($0.year ?? 0) > ($1.year ?? 0) }
@@ -296,7 +338,7 @@ struct ArtistView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 16) {
-                    ArtistPic(name: name, corner: 16).frame(width: 110, height: 110)
+                    ArtistPic(name: name, corner: 16).frame(width: 120, height: 120)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Artist").font(.system(size: 13)).foregroundColor(Theme.text2)
                         Text(name).font(.system(size: 26, weight: .bold)).foregroundColor(Theme.text)
@@ -307,10 +349,20 @@ struct ArtistView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                if !ids.isEmpty {
-                    HStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    if !ids.isEmpty {
                         PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
                         PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
+                    }
+                    PillButton(title: app.isFollowing(name) ? "Following" : "Follow", icon: app.isFollowing(name) ? "checkmark" : "plus", primary: false) { app.toggleFollow(name) }
+                }
+                .padding(.horizontal, 16)
+
+                if let bio = app.info(for: name)?.bio, !bio.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(bio).font(.system(size: 14)).foregroundColor(Theme.text2).lineLimit(more ? nil : 4)
+                        Button(more ? "Show less" : "Read more") { more.toggle() }.font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text)
+                        Text("From Wikipedia").font(.system(size: 11)).foregroundColor(Theme.text3)
                     }
                     .padding(.horizontal, 16)
                 }
@@ -336,13 +388,16 @@ struct ArtistView: View {
         }
         .background(Theme.surface)
         .navigationBarTitleDisplayMode(.inline)
+        .task { app.loadInfo(name) }
     }
 }
 
 struct PlaylistView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
+    @Environment(\.dismiss) private var dismiss
     let id: String
+    @State private var confirmDelete = false
 
     var body: some View {
         ScrollView {
@@ -365,8 +420,12 @@ struct PlaylistView: View {
                     }
                     LazyVStack(spacing: 0) {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { i, t in
-                            TrackRow(track: t, showCover: true) { player.play(ids, startAt: i) }
+                            TrackRow(track: t, showCover: true, onRemove: { remove(p, at: i, track: t) }) { player.play(ids, startAt: i) }
                         }
+                    }
+                    if !p.liked {
+                        Button("Delete playlist", role: .destructive) { confirmDelete = true }
+                            .font(.system(size: 14)).padding(.top, 12)
                     }
                 }
                 .padding(.bottom, 24)
@@ -376,6 +435,14 @@ struct PlaylistView: View {
         }
         .background(Theme.surface)
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Delete this playlist?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { app.deletePlaylist(id); dismiss() }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func remove(_ p: PlaylistInfo, at i: Int, track: Track) {
+        if p.liked { app.toggleLike(track.id) } else { app.removeTrack(at: i, from: p.id) }
     }
 }
 
@@ -390,8 +457,9 @@ struct SearchView: View {
     var body: some View {
         let r = app.search(query)
         VStack(spacing: 0) {
+            TopBar()
             Text("Search").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundColor(Theme.text2)
                 TextField("Artists, albums, songs", text: $query)
@@ -409,12 +477,13 @@ struct SearchView: View {
             .padding(16)
 
             ScrollView {
-                if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text("Find anything in your library.").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.top, 40)
-                } else if r.artists.isEmpty && r.albums.isEmpty && r.tracks.isEmpty {
-                    Text("Nothing in your library for \"\(query)\".").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.top, 40)
-                } else {
-                    VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 22) {
+                    if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Text("Find anything in your library.").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.top, 40).frame(maxWidth: .infinity)
+                    } else {
+                        if r.artists.isEmpty && r.albums.isEmpty && r.tracks.isEmpty {
+                            Text("Nothing in your library for \"\(query)\".").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.horizontal, 16)
+                        }
                         if !r.artists.isEmpty {
                             SectionTitle(text: "Artists")
                             LazyVStack(spacing: 0) {
@@ -459,9 +528,10 @@ struct SearchView: View {
                                 }
                             }
                         }
+                        GetMoreSection(query: query)
                     }
-                    .padding(.bottom, 24)
                 }
+                .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
         }
@@ -475,13 +545,15 @@ struct SearchView: View {
 struct AccountView: View {
     @EnvironmentObject var app: AppModel
 
+    private let qualities: [(String, String)] = [("original", "Original"), ("high", "High"), ("normal", "Normal"), ("low", "Data saver")]
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Account").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
                 if let u = app.user {
                     HStack(spacing: 14) {
-                        ArtistPic(name: u.name, corner: 28).frame(width: 56, height: 56)
+                        ArtistPic(name: u.name, corner: 28, photo: false).frame(width: 56, height: 56)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(u.name).font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
                             Text(u.admin ? "Admin" : "Member").font(.system(size: 13)).foregroundColor(Theme.text2)
@@ -492,6 +564,16 @@ struct AccountView: View {
                     Text("Server").font(.system(size: 13)).foregroundColor(Theme.text2)
                     Text(app.serverURL).font(.system(size: 15)).foregroundColor(Theme.text)
                 }
+                if app.me?.transcoding == true {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Streaming quality").font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
+                        Text("Smaller files use less data. Original sends the file as it is.").font(.system(size: 13)).foregroundColor(Theme.text2)
+                        Picker("", selection: Binding(get: { app.quality }, set: { app.setQuality($0) })) {
+                            ForEach(qualities, id: \.0) { q in Text(q.1).tag(q.0) }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
                 PillButton(title: "Sign out", icon: "rectangle.portrait.and.arrow.right", primary: false) { Task { await app.signOut() } }
                 PillButton(title: "Switch server", icon: "arrow.triangle.2.circlepath", primary: false) { app.switchServer() }
                 Text("Volvix Home for iPhone · native app (preview)").font(.system(size: 12)).foregroundColor(Theme.text3).padding(.top, 8)
@@ -499,6 +581,6 @@ struct AccountView: View {
             .padding(16)
         }
         .background(Theme.surface)
-        .navigationBarHidden(true)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
