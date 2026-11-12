@@ -1924,7 +1924,7 @@ fn play_on(app: &App) -> El<'_> {
             if app.cast_devices.is_empty() {
                 list = list.push(ui::dim("No TVs or speakers found yet", 13));
             }
-            list = list.push(item("plus", "Add a TV or speaker by address…".into(), None, false, Some(Message::CastAddOpen), false));
+            list = list.push(item("plus", if app.cast_devices.is_empty() { "Can't find it? Add by address…" } else { "Not listed? Add by address…" }.into(), None, false, Some(Message::CastAddOpen), false));
         }
     }
     // the listening party lives here too: start it, invite people, leave or end it

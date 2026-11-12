@@ -859,7 +859,10 @@ fn bell(app: &App) -> El<'_> {
     let n = app.notes.unread;
     let mut r = row![ic(icon::BELL, 16)].spacing(4).align_y(Alignment::Center);
     if n > 0 {
-        r = r.push(container(text(if n > 99 { "99+".to_string() } else { n.to_string() }).size(11)).padding([1, 6]).style(ui::badge));
+        // a fixed-size pill so the number is never squeezed: round for one digit, wider for more
+        let label = if n > 99 { "99+".to_string() } else { n.to_string() };
+        let w = match label.len() { 1 => 18.0, 2 => 24.0, _ => 30.0 };
+        r = r.push(container(text(label).size(11).font(ui::FONT_BOLD).wrapping(iced::widget::text::Wrapping::None)).width(w).height(18).center_x(Length::Fixed(w)).center_y(Length::Fixed(18.0)).style(ui::badge));
     }
     ui::tip(button(r).padding(8).style(ui::icon_btn(app.page == Page::Notifications && !app.now_playing)).on_press(Message::Go(Page::Notifications)), "Notifications")
 }

@@ -599,6 +599,8 @@ pub enum Message {
     ArtistInfoLoaded(String, Option<String>, Option<Vec<u8>>),
     ArtistMbid(String, Option<String>),
     DiscoverLoaded(String, Result<serde_json::Value, Error>),
+    /// the server was asked whether it is back (true = it answered)
+    ServerAnswered(bool),
     DiscoverAlbumLoaded(String, Result<serde_json::Value, Error>),
     DescEdit(iced::widget::text_editor::Action),
     CancelRequest(String),
@@ -849,6 +851,8 @@ pub struct App {
     resume_saved_at: Instant,
     last_advanced: u64,
     next_pull: Instant,
+    /// when the server could not be reached: when to look again
+    next_reconnect: Instant,
     /// the song whose successor has been opened ahead of time (crossfade)
     preload_for: Option<String>,
     pub account_menu: bool,
@@ -1011,6 +1015,7 @@ impl App {
             resume_saved_at: Instant::now(),
             last_advanced: 0,
             next_pull: Instant::now() + Duration::from_secs(6),
+            next_reconnect: Instant::now() + Duration::from_secs(8),
             preload_for: None,
             account_menu: false,
             profile_name: None,
@@ -1924,8 +1929,16 @@ impl App {
                     self.form_error = Some(e.to_string());
                 }
             },
+            Message::ServerAnswered(up) => {
+                if up && self.offline {
+                    if let Some(c) = self.client.clone() {
+                        return load_everything(c, self.downloads.clone());
+                    }
+                }
+            }
             Message::Loaded(r) => {
                 self.busy = false;
+                let was_offline = self.offline;
                 match r {
                     Ok(l) => {
                         self.lib = l.lib;
@@ -1942,8 +1955,12 @@ impl App {
                         self.save_session();
                         self.refresh_mixes();
                         if self.offline {
-                            self.say("The server can't be reached. Your downloads still play.");
-                            self.lib_tab = LibTab::Downloaded;
+                            if !was_offline {
+                                self.say("The server can't be reached. Your downloads still play.");
+                                self.lib_tab = LibTab::Downloaded;
+                            }
+                        } else if was_offline {
+                            self.say("Back online");
                         }
                         let mut tasks = vec![self.fetch_covers(), self.sync_downloads()];
                         if let Some(c) = self.client.clone().filter(|_| !self.offline) {
@@ -2819,6 +2836,9 @@ impl App {
                 }
             }
             Message::NotesLoaded(r) => {
+                if std::env::var("VH_DEMO").as_deref() == Ok("badge") {
+                    return Task::none(); // the demo shows a made-up count
+                }
                 if let Ok(n) = r {
                     // something new: say so
                     let known: HashSet<&String> = self.notes.items.iter().map(|n| &n.id).collect();
@@ -3750,6 +3770,10 @@ impl App {
             "settings" => tasks.push(self.go(Page::Settings)),
             "household" => tasks.push(self.go(Page::Household)),
             "notifications" => tasks.push(self.go(Page::Notifications)),
+            "badge" => {
+                // look at the bell's count (VH_DEMO_UNREAD = how many)
+                self.notes.unread = std::env::var("VH_DEMO_UNREAD").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+            }
             "dialog" => self.dialog = Some(Dialog::NewPlaylist { name: "Sunday morning".into(), description: String::new(), add: vec![], collaborative: false, public: false }),
             "credits" => {
                 tasks.push(self.update(Message::PlayAlbum(first.0, 0)));
@@ -3847,6 +3871,13 @@ impl App {
             tasks.push(self.prefetch());
             if self.page == Page::Settings {
                 self.cache_stats = self.song_cache.stats();
+            }
+        }
+        // the server could not be reached: keep looking, and come back by itself when it answers
+        if self.offline && self.screen == Screen::Main && Instant::now() >= self.next_reconnect {
+            self.next_reconnect = Instant::now() + Duration::from_secs(8);
+            if let Some(c) = self.client.clone() {
+                tasks.push(Task::perform(blocking(move || c.me().is_ok()), Message::ServerAnswered));
             }
         }
         // pick up what was changed elsewhere (the website, another computer): playlists, likes, recently played, settings

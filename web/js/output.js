@@ -55,10 +55,12 @@ window.Spin = window.Spin || {};
         items.push({ label: dev.name + (dev.model ? ' · ' + dev.model : ''), icon: 'devices', onClick: function () { C.start(dev); } });
       });
       if (!C.devices.length) items.push({ label: 'No TVs or speakers found yet', icon: 'info', onClick: function () { C.refresh(); } });
-      items.push({ label: 'Add a TV or speaker by address…', icon: 'plus', onClick: C.addByAddress });
     }
-    if (P && P.menuItems) P.menuItems().forEach(function (i) { items.push(i); });
+    // AirPlay belongs with the TVs and speakers
     if (C.airplay()) items.push({ label: 'AirPlay…', icon: 'volume', onClick: C.airplayPicker });
+    // they are found by themselves; the address is only for when the server can't see them (e.g. it runs in Docker)
+    if (!C.active) items.push({ label: C.devices.length ? 'Not listed? Add by address…' : 'Can\'t find it? Add by address…', icon: 'plus', onClick: C.addByAddress });
+    if (P && P.menuItems) { const pi = P.menuItems(); if (pi.length) items.push({ sep: true }); pi.forEach(function (i) { items.push(i); }); }
     S.popover(anchor, { header: '<div class="q-pop"><div class="menu-name">Play on</div><div class="menu-sub">One device plays at a time</div></div>', items: items });
   }
 
