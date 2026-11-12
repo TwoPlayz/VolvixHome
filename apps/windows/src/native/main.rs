@@ -444,7 +444,7 @@ pub enum Message {
     Back,
     SearchChanged(String),
     LibTab(LibTab),
-    CoverLoaded(String, u32, Option<Vec<u8>>),
+    CoverLoaded(String, u32, Option<(u32, u32, Vec<u8>)>),
     ImageLoaded(String, Option<Vec<u8>>),
 
     PlayTracks(Vec<String>, usize, String),
@@ -776,6 +776,8 @@ pub struct App {
     covers: CoverCache,
     pub cover_images: HashMap<(String, u32), image::Handle>,
     cover_pending: HashSet<(String, u32)>,
+    /// the order covers were loaded in, so the oldest can be let go when there are a great many
+    cover_order: std::collections::VecDeque<(String, u32)>,
     pub images: HashMap<String, image::Handle>,
     image_pending: HashSet<String>,
 
@@ -943,6 +945,7 @@ impl App {
             dl_active: None,
             cover_images: HashMap::new(),
             cover_pending: HashSet::new(),
+            cover_order: std::collections::VecDeque::new(),
             images: HashMap::new(),
             image_pending: HashSet::new(),
             page: Page::Home,
@@ -1268,17 +1271,17 @@ impl App {
                 continue;
             }
             let version = album.cover_v;
-            // already on disk: show it now, no round trip
-            if let Some(bytes) = self.covers.cached(&id, size, version) {
-                self.cover_images.insert(key, image::Handle::from_bytes(bytes));
-                continue;
-            }
-            if self.offline {
-                continue;
-            }
+            // from disk when it is there, else from the server; then shrunk and given rounded corners (off the main thread)
             self.cover_pending.insert(key);
+            let offline = self.offline;
             let (c, cache, fetch_id) = (client.clone(), self.covers.clone(), id.clone());
-            tasks.push(Task::perform(blocking(move || cache.get(&c, &fetch_id, size, version).ok()), move |b| Message::CoverLoaded(id.clone(), size, b)));
+            tasks.push(Task::perform(
+                blocking(move || {
+                    let bytes = if offline { cache.cached(&fetch_id, size, version) } else { cache.get(&c, &fetch_id, size, version).ok() }?;
+                    pictures::cover_rgba(&bytes, 320)
+                }),
+                move |b| Message::CoverLoaded(id.clone(), size, b),
+            ));
         }
         // pictures of music found through Lidarr
         if self.page == Page::Search || matches!(self.page, Page::Artist(_) | Page::Discover(_)) {
@@ -2318,9 +2321,15 @@ impl App {
             }
             Message::CoverLoaded(id, size, bytes) => {
                 self.cover_pending.remove(&(id.clone(), size));
-                if let Some(b) = bytes {
-                    let custom = self.lib.album(&id).map(|a| a.custom_cover).unwrap_or(false);
-                    self.cover_images.insert((id, size), if custom { pictures::rounded_handle(&b).unwrap_or_else(|| image::Handle::from_bytes(b)) } else { image::Handle::from_bytes(b) });
+                if let Some((w, h, px)) = bytes {
+                    self.cover_order.push_back((id.clone(), size));
+                    self.cover_images.insert((id, size), image::Handle::from_rgba(w, h, px));
+                    // a very big library: let the oldest go (they are fetched again from disk when needed)
+                    while self.cover_order.len() > 900 {
+                        if let Some(k) = self.cover_order.pop_front() {
+                            self.cover_images.remove(&k);
+                        }
+                    }
                 }
             }
             Message::ImageLoaded(path, bytes) => {

@@ -19,6 +19,32 @@ pub fn round_handle(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
     Some(iced::widget::image::Handle::from_rgba(w, h, raw))
 }
 
+/// Album art ready to show: shrunk to at most `max` px (a few hundred KB each, not the full picture) with its corners
+/// rounded, so covers look like the website's. Done off the main thread; the answer is (width, height, RGBA bytes).
+pub fn cover_rgba(bytes: &[u8], max: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let img = ::image::load_from_memory(bytes).ok()?;
+    let k = (max as f32 / img.width().max(img.height()) as f32).min(1.0);
+    let (w, h) = (((img.width() as f32 * k) as u32).max(1), ((img.height() as f32 * k) as u32).max(1));
+    let mut px = if k < 1.0 { img.resize_exact(w, h, ::image::imageops::FilterType::Triangle).to_rgba8() } else { img.to_rgba8() };
+    let r = w.min(h) as f32 * 0.045;
+    let (hw, hh) = (w as f32 / 2.0, h as f32 / 2.0);
+    let raw = px.as_mut();
+    // only the corners need touching
+    let reach = r.ceil() as u32 + 1;
+    for y in (0..h).filter(|y| *y < reach || *y + reach >= h) {
+        for x in (0..w).filter(|x| *x < reach || *x + reach >= w) {
+            let (qx, qy) = (((x as f32 + 0.5) - hw).abs() - (hw - r), ((y as f32 + 0.5) - hh).abs() - (hh - r));
+            let d = (qx.max(0.0) * qx.max(0.0) + qy.max(0.0) * qy.max(0.0)).sqrt() + qx.max(qy).min(0.0) - r;
+            let cover = (0.5 - d).clamp(0.0, 1.0);
+            if cover < 1.0 {
+                let i = ((y * w + x) * 4 + 3) as usize;
+                raw[i] = (raw[i] as f32 * cover) as u8;
+            }
+        }
+    }
+    Some((w, h, px.into_raw()))
+}
+
 /// A chosen picture (a playlist's, or an album's that had no art) with its corners rounded, ready to show.
 pub fn rounded_handle(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
     let img = ::image::load_from_memory(bytes).ok()?;
