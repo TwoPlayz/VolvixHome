@@ -146,11 +146,14 @@ Spin.views = Spin.views || {};
           const items = [];
           if (isOwner && !pl.liked) {
             items.push({ label: 'Edit details', icon: 'settings', onClick: function () { S.pl.editDialog(pl.id); } });
-            if (!pl.shared) {
-              items.push({ label: 'Change picture', icon: 'disc', onClick: function () { S.pl.chooseCover(pl.id); } });
-              if (pl.cover) items.push({ label: 'Remove picture', icon: 'x', onClick: function () { S.pl.clearCover(pl.id); } });
-              items.push({ label: 'Customize cover', icon: 'settings', onClick: function () { S.pl.customizeCover(pl.id); } });
-            }
+          }
+          // a picture and a look for the cover: for a collaborative playlist they are yours alone (nobody else sees them)
+          if (!pl.liked && (isOwner || pl.shared)) {
+            items.push({ label: 'Change picture', icon: 'disc', onClick: function () { S.pl.chooseCover(pl.id); } });
+            if (S.pl.coverOf(pl)) items.push({ label: 'Remove picture', icon: 'x', onClick: function () { S.pl.clearCover(pl.id); } });
+            items.push({ label: 'Customize cover', icon: 'settings', onClick: function () { S.pl.customizeCover(pl.id); } });
+          }
+          if (isOwner && !pl.liked) {
             items.push({ label: 'Who can edit', icon: 'users', onClick: function () { S.pl.inviteDialog(pl.id); } });
           }
           if (!isOwner && pl.shared) {

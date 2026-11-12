@@ -83,13 +83,26 @@ window.Spin = window.Spin || {};
       commit(function () { Object.assign(pl, patch); });
     },
     /** Choose a picture for one of your own playlists: the middle square of the file, 512 px, kept on the server. */
+    /** The picture / look of a playlist as you see it: your own for a collaborative playlist (only you see it), the playlist's own otherwise. */
+    coverOf: function (pl) { return pl.shared ? ((S.store.state.sharedCovers || {})[pl.id] || 0) : (pl.cover || 0); },
+    lookOf: function (pl) { return (pl.shared ? (S.store.state.sharedLooks || {})[pl.id] : pl.look) || null; },
+    setCover: function (id, v) {
+      const pl = get(id);
+      if (!pl.shared) { S.pl.update(id, { cover: v }); return; }
+      commit(function (st) { st.sharedCovers = st.sharedCovers || {}; if (v) st.sharedCovers[id] = v; else delete st.sharedCovers[id]; });
+    },
+    setLook: function (id, look) {
+      const pl = get(id);
+      if (!pl.shared) { S.pl.update(id, { look: look }); return; }
+      commit(function (st) { st.sharedLooks = st.sharedLooks || {}; if (look) st.sharedLooks[id] = look; else delete st.sharedLooks[id]; });
+    },
     chooseCover: function (id) {
       S.pickPicture({
         title: 'Adjust the picture', out: 512, saveLabel: 'Use this picture',
         onSave: function (blob) {
           return fetch('/api/playlists/' + encodeURIComponent(id) + '/cover', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'image/jpeg' }, body: blob })
             .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Couldn\'t save the picture'); return j; }); })
-            .then(function (r) { S.pl.update(id, { cover: r.cover }); S.toast('Picture updated', 'check'); });
+            .then(function (r) { S.pl.setCover(id, r.cover); S.toast('Picture updated', 'check'); });
         }
       });
     },
@@ -97,15 +110,15 @@ window.Spin = window.Spin || {};
     customizeCover: function (id) {
       const pl = get(id);
       S.lookDialog({
-        name: pl.name, sub: '', look: pl.look,
-        note: pl.cover ? 'This playlist has a picture, which is shown instead. Remove the picture to see this look.' : '',
-        onSave: function (look) { S.pl.update(id, { look: look }); S.toast('Cover saved', 'check'); return Promise.resolve(); },
-        onReset: function () { S.pl.update(id, { look: null }); S.toast('Back to the automatic cover', 'check'); return Promise.resolve(); }
+        name: pl.name, sub: '', look: S.pl.lookOf(pl),
+        note: S.pl.coverOf(pl) ? 'This playlist has a picture, which is shown instead. Remove the picture to see this look.' : '',
+        onSave: function (look) { S.pl.setLook(id, look); S.toast('Cover saved', 'check'); return Promise.resolve(); },
+        onReset: function () { S.pl.setLook(id, null); S.toast('Back to the automatic cover', 'check'); return Promise.resolve(); }
       });
     },
     clearCover: function (id) {
       fetch('/api/playlists/' + encodeURIComponent(id) + '/cover', { method: 'DELETE', credentials: 'same-origin' })
-        .then(function () { S.pl.update(id, { cover: 0 }); S.toast('Picture removed', 'check'); });
+        .then(function () { S.pl.setCover(id, 0); S.toast('Picture removed', 'check'); });
     },
     remove: function (id) {
       if (id === LIKED_ID) return; // Liked Songs is built in

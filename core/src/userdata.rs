@@ -257,6 +257,30 @@ pub fn apply(d: &mut UserData, e: &Edit) {
                 list.push(json!(name));
             }
         }
+        Edit::PlaylistLook { id, look } if !d.playlists.iter().any(|p| p.id == *id) => {
+            // a collaborative playlist: the look is yours alone, kept in your data
+            let m = d.rest.entry("sharedLooks").or_insert_with(|| json!({}));
+            if let Some(m) = m.as_object_mut() {
+                match look {
+                    Some(l) => {
+                        m.insert(id.clone(), l.clone());
+                    }
+                    None => {
+                        m.remove(id);
+                    }
+                }
+            }
+        }
+        Edit::PlaylistCover { id, version } if !d.playlists.iter().any(|p| p.id == *id) => {
+            let m = d.rest.entry("sharedCovers").or_insert_with(|| json!({}));
+            if let Some(m) = m.as_object_mut() {
+                if *version == 0 {
+                    m.remove(id);
+                } else {
+                    m.insert(id.clone(), json!(version));
+                }
+            }
+        }
         Edit::PlaylistLook { id, look } => {
             if let Some(p) = d.playlists.iter_mut().find(|p| p.id == *id) {
                 match look {

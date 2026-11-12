@@ -16,6 +16,8 @@ window.Spin = window.Spin || {};
       stats: { tracks: {}, years: {} },  // your plays (see stats.js)
       followed: [],                    // other people's playlists you follow
       followedArtists: [],             // artist names you follow (Library → Artists)
+      sharedLooks: {},                 // your own look for collaborative playlists' covers (playlist id -> look): only you see it
+      sharedCovers: {},                // your own picture for collaborative playlists (playlist id -> picture version)
       recent: [],                      // album ids, most recent first
       settings: {
         gapless: true,
@@ -78,7 +80,7 @@ window.Spin = window.Spin || {};
   /* ---------- sync: pick up what another device (the Windows app, another browser) changed ---------- */
   // Your playlists, recently played, settings and theme are one copy on the server. Every few seconds, and when you come
   // back to the page, ask for it; if it changed somewhere else and nothing here is waiting to be saved, show it.
-  const syncSig = function (s) { return JSON.stringify([s.playlists, s.recent, s.followed, s.followedArtists, s.settings, s.theme]); };
+  const syncSig = function (s) { return JSON.stringify([s.playlists, s.recent, s.followed, s.followedArtists, s.settings, s.theme, s.sharedLooks, s.sharedCovers]); };
   function pull() {
     if (pushTimer || pushing || document.hidden) return;
     fetch('/api/me/data', { credentials: 'same-origin', cache: 'no-store' })

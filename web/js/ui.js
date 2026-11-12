@@ -306,13 +306,16 @@ window.Spin = window.Spin || {};
     if (playlist && playlist.liked) {
       return '<div class="cover cover--liked ' + (extraClass || '') + '" style="--tint:' + S.tintFor('liked') + '" aria-hidden="true">' + S.icon('heartFill', 40) + '</div>';
     }
-    // a picture chosen for it (kept on the server)
-    if (playlist && playlist.cover && !playlist.shared) {
-      const owner = playlist.owner === 'u_me' ? (S.data.me && S.data.me.serverId) : playlist.owner;
-      return '<div class="cover cover--pic ' + (extraClass || '') + '"><img class="cover-img" src="/api/playlist-cover/' + encodeURIComponent(owner) + '/' + encodeURIComponent(playlist.id) + '?v=' + playlist.cover + '" alt=""></div>';
+    // a picture chosen for it (kept on the server). For a collaborative playlist it is your own picture, which only you see.
+    const mine = S.store && S.store.state;
+    const cover = playlist && (playlist.shared ? ((mine && mine.sharedCovers) || {})[playlist.id] : playlist.cover);
+    if (cover) {
+      const owner = playlist.shared || playlist.owner === 'u_me' ? (S.data.me && S.data.me.serverId) : playlist.owner;
+      return '<div class="cover cover--pic ' + (extraClass || '') + '"><img class="cover-img" src="/api/playlist-cover/' + encodeURIComponent(owner) + '/' + encodeURIComponent(playlist.id) + '?v=' + cover + '" alt=""></div>';
     }
     // a look chosen for it (a background, colours and a font), when it has no picture
-    if (playlist && playlist.look && !playlist.shared) return S.lookTile(playlist.look, playlist.name, '', extraClass);
+    const look = playlist && (playlist.shared ? ((mine && mine.sharedLooks) || {})[playlist.id] : playlist.look);
+    if (look) return S.lookTile(look, playlist.name, '', extraClass);
     const albums = [];
     (playlist.tracks || []).forEach(function (entry) {
       const t = S.data.track(entry.id || entry);

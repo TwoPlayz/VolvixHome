@@ -79,7 +79,14 @@ fn shared(p: &SharedPlaylist, me: &str, kind: Option<Kind>) -> PlaylistView {
 /// Yours first (Liked Songs on top, then your own, then collaborative ones), then the household's.
 pub fn all(data: &UserData, shared_list: &[SharedPlaylist], household: &Household, me: &str) -> Vec<PlaylistView> {
     let mut out: Vec<PlaylistView> = data.playlists.iter().map(own).collect();
-    out.extend(shared_list.iter().map(|p| shared(p, me, None)));
+    // your own picture and look for a collaborative playlist are kept in your data (nobody else sees them)
+    let mine = |v: &str, id: &str| data.rest.get(v).and_then(|m| m.get(id)).cloned();
+    out.extend(shared_list.iter().map(|p| {
+        let mut v = shared(p, me, None);
+        v.cover = mine("sharedCovers", &p.id).and_then(|c| c.as_u64()).unwrap_or(0);
+        v.look = mine("sharedLooks", &p.id).as_ref().and_then(crate::model::Look::from_value);
+        v
+    }));
     for m in &household.members {
         for p in &m.playlists {
             if out.iter().any(|x| x.id == p.id) {

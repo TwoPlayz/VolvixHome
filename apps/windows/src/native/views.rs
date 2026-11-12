@@ -565,13 +565,14 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
             if let Some(p) = app.playlist(id) {
                 if p.can_manage() {
                     items.push(item("settings", "Edit details", Message::EditPlaylist(p.id.clone()), false));
+                }
+                // a picture and a look for the cover: yours alone on a collaborative playlist (nobody else sees them)
+                if p.can_manage() || p.is_shared() {
                     items.push(item("disc", "Change picture", Message::PickPlaylistPicture(p.id.clone()), false));
                     if p.cover > 0 {
                         items.push(item("x", "Remove picture", Message::RemovePlaylistPicture(p.id.clone()), false));
                     }
-                    if !p.is_shared() {
-                        items.push(item("settings", "Customize cover", Message::CoverOpenPlaylist(p.id.clone()), false));
-                    }
+                    items.push(item("settings", "Customize cover", Message::CoverOpenPlaylist(p.id.clone()), false));
                 }
                 if p.can_manage() {
                     items.push(item("users", "Who can edit", Message::CollabOpen(p.id.clone()), false));
