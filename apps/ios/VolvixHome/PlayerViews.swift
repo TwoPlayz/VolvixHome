@@ -75,6 +75,16 @@ struct NowPlayingView: View {
                                 Image(systemName: showLyrics ? "quote.bubble.fill" : "quote.bubble").font(.system(size: 18))
                                     .foregroundColor(showLyrics ? Theme.accent : Theme.text).frame(width: 44, height: 44)
                             }
+                            Menu {
+                                Button("Off") { player.setSleep(minutes: 0) }
+                                Button("15 minutes") { player.setSleep(minutes: 15) }
+                                Button("30 minutes") { player.setSleep(minutes: 30) }
+                                Button("1 hour") { player.setSleep(minutes: 60) }
+                                Button("End of this song") { player.setSleep(minutes: -1) }
+                            } label: {
+                                Image(systemName: (player.sleepAt != nil || player.sleepAfterSong) ? "moon.zzz.fill" : "moon.zzz").font(.system(size: 18))
+                                    .foregroundColor((player.sleepAt != nil || player.sleepAfterSong) ? Theme.accent : Theme.text).frame(width: 44, height: 44)
+                            }
                             AirPlayButton().frame(width: 36, height: 36).frame(width: 44, height: 44)
                             Button { showQueue = true } label: {
                                 Image(systemName: "list.bullet").font(.system(size: 18)).foregroundColor(Theme.text).frame(width: 44, height: 44)
@@ -181,9 +191,11 @@ struct QueueView: View {
                     .onDelete { offsets in
                         for o in offsets.sorted(by: >) { player.removeFromQueue(at: player.index + 1 + o) }
                     }
+                    .onMove { offsets, destination in player.moveUpcoming(from: offsets, to: destination) }
                 }
             }
             .listStyle(.insetGrouped)
+            .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
             .background(Theme.surface)
             .navigationTitle("Queue")

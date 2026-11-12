@@ -18,6 +18,9 @@ final class PlayerModel: ObservableObject {
     @Published var shuffle = false
     @Published var repeatMode: Repeat = .off
     @Published var problem: String?
+    /// when the sleep timer pauses the music (nil = off); and "stop when this song ends"
+    @Published private(set) var sleepAt: Date?
+    @Published private(set) var sleepAfterSong = false
 
     private let player = AVPlayer()
     private var timeObserver: Any?
@@ -231,7 +234,28 @@ final class PlayerModel: ObservableObject {
         }
     }
 
+    /// 0 = off, minutes, or -1 = when this song ends.
+    func setSleep(minutes: Int) {
+        sleepAt = nil
+        sleepAfterSong = false
+        if minutes > 0 { sleepAt = Date().addingTimeInterval(Double(minutes) * 60) }
+        if minutes < 0 { sleepAfterSong = true }
+    }
+
+    /// Move songs in the part of the queue that is still to come.
+    func moveUpcoming(from offsets: IndexSet, to destination: Int) {
+        var rest = upcoming
+        rest.move(fromOffsets: offsets, toOffset: destination)
+        queue = Array(queue[...max(index, 0)]) + rest
+    }
+
     private func finished() {
+        if sleepAfterSong {
+            sleepAfterSong = false
+            pause()
+            seek(to: 0)
+            return
+        }
         if repeatMode == .one {
             seek(to: 0)
             player.play()
@@ -246,6 +270,10 @@ final class PlayerModel: ObservableObject {
         if let item = player.currentItem {
             let d = item.duration.seconds
             if d.isFinite && d > 0 { duration = d }
+        }
+        if let at = sleepAt, Date() >= at {
+            sleepAt = nil
+            pause()
         }
         let playing = player.timeControlStatus == .playing
         if playing != isPlaying && player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
@@ -276,6 +304,12 @@ final class PlayerModel: ObservableObject {
 
     private func setUpRemoteCommands() {
         let c = MPRemoteCommandCenter.shared()
+        c.playCommand.isEnabled = true
+        c.pauseCommand.isEnabled = true
+        c.togglePlayPauseCommand.isEnabled = true
+        c.nextTrackCommand.isEnabled = true
+        c.previousTrackCommand.isEnabled = true
+        c.changePlaybackPositionCommand.isEnabled = true
         c.playCommand.addTarget { [weak self] _ in Task { @MainActor in self?.resume() }; return .success }
         c.pauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.pause() }; return .success }
         c.togglePlayPauseCommand.addTarget { [weak self] _ in Task { @MainActor in self?.toggle() }; return .success }
