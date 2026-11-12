@@ -12,11 +12,15 @@ services:
     image: ghcr.io/twoplayz/volvix-home:latest   # or build it yourself: comment this out and keep "build"
     build: .
     container_name: volvix-home
+    # To find TVs and speakers by itself (Cast), the server must be on your real network, not Docker's private one:
+    # uncomment "network_mode: host", delete the "ports:" lines below, and use http://localhost:8686 for Lidarr.
+    # (Linux hosts. Docker Desktop on Windows/Mac can't pass this through; add a TV by its address there.)
+    # network_mode: host
     ports:
       - "4747:4747"
     environment:
       - VH_RESCAN_MINUTES=15        # how often to look for new music (Lidarr's webhook makes it instant)
-      - VH_LIDARR_URL=http://lidarr:8686
+      - VH_LIDARR_URL=http://lidarr:8686   # with network_mode: host this becomes http://localhost:8686
       # - VH_LIDARR_API_KEY=...     # or paste it in the app: Settings → Lidarr
       # search is powered by MusicBrainz (musicbrainz.org); set VH_MUSICBRAINZ_URL only for a mirror
     volumes:
