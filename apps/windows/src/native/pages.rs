@@ -1383,7 +1383,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
     let field = |placeholder: &'a str, value: &'a str, n: u8| text_input(placeholder, value).on_input(move |s| Message::DialogText(n, s)).on_submit(Message::DialogOk).padding(10).size(15).style(ui::input);
     let err = |e: &'a Option<String>| -> Option<El<'a>> { e.as_ref().map(|e| container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box).into()) };
     match d {
-        Dialog::NewPlaylist { name, description, add, collaborative, public } => {
+        Dialog::NewPlaylist { name, description: _, add, collaborative, public } => {
             let title = if add.is_empty() { "New playlist".to_string() } else { format!("New playlist with {} song{}", add.len(), if add.len() == 1 { "" } else { "s" }) };
             column![
                 ui::title(title, 22),
@@ -1396,7 +1396,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             .spacing(14)
             .into()
         }
-        Dialog::EditPlaylist { name, description, public, .. } => column![
+        Dialog::EditPlaylist { name, description: _, public, .. } => column![
             ui::title("Edit details", 22),
             labelled("Name", field("", name, 0).into()),
             labelled("Description", desc_box(app)),

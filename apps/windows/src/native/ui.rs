@@ -70,22 +70,15 @@ pub mod icon {
     pub const HEART_FILL: char = '\u{EB52}';
     pub const DOWNLOAD: char = '\u{E896}';
     pub const DOWNLOADED: char = '\u{E73E}';
-    pub const DELETE: char = '\u{E74D}';
-    pub const EDIT: char = '\u{E70F}';
     pub const BELL: char = '\u{EA8F}';
     pub const PEOPLE: char = '\u{E716}';
-    pub const DEVICES: char = '\u{E772}';
     pub const SETTINGS: char = '\u{E713}';
-    pub const GLOBE: char = '\u{E774}';
     pub const PLAYLIST: char = '\u{E8FD}';
     pub const CLOSE: char = '\u{E711}';
     pub const PERSON: char = '\u{E77B}';
-    pub const HISTORY: char = '\u{E81C}';
     pub const LINK: char = '\u{E71B}';
     pub const MORE: char = '\u{E712}';
-    pub const PICTURE: char = '\u{E91B}';
     pub const BACK: char = '\u{E72B}';
-    pub const SIGN_OUT: char = '\u{E7E8}';
 }
 
 /// The website's icon by the name it has there (`S.icon(name, size)` in web/js/ui.js), in an explicit colour. On
@@ -377,11 +370,6 @@ pub fn avatar_pic<'a, M: 'a>(handle: Option<&image::Handle>, id: &str, name: &st
         Some(h) => image(h.clone()).width(size).height(size).into(),
         None => avatar_key(id, name, size),
     }
-}
-
-/// A round picture stand-in: the first letter of a name on one of the website's avatar colours.
-pub fn avatar<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
-    avatar_key(name, name, size)
 }
 
 /// Same colour and letters as the website: the colour comes from the person's id (or name), the letters from the first two words of the name.

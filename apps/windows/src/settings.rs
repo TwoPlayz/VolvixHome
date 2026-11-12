@@ -77,6 +77,7 @@ impl Settings {
         self.save();
     }
 
+    #[allow(dead_code)] // used by the native app only
     pub fn set_text(&mut self, key: &str, value: &str) {
         match key {
             "streamQuality" => self.stream_quality = value.to_string(),

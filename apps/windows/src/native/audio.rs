@@ -5,7 +5,7 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -155,6 +155,74 @@ fn open(client: &Client, track: &str, local: Option<PathBuf>) -> Opened {
     Ok((dec, total))
 }
 
+type Inner = Box<dyn Source<Item = f32> + Send>;
+
+/// A song's sound that can move from one output device to another without a break: the decoded audio
+/// lives behind a shared handle, so a new device's sink carries on from exactly where the old one was.
+struct Handoff {
+    src: Arc<Mutex<Inner>>,
+    channels: u16,
+    rate: u32,
+    ramp_total: usize,
+    ramp_left: usize,
+    /// set when this output is being left: the sound fades out over 25 ms and this source ends
+    leave: Arc<AtomicBool>,
+    leave_total: usize,
+    leave_left: Option<usize>,
+}
+
+impl Handoff {
+    fn new(src: Arc<Mutex<Inner>>, ramp_ms: u32) -> Handoff {
+        let (channels, rate) = {
+            let s = src.lock().unwrap();
+            (s.channels(), s.sample_rate())
+        };
+        let ramp_total = (rate as usize * channels as usize * ramp_ms as usize) / 1000;
+        let leave_total = (rate as usize * channels as usize * 25) / 1000;
+        Handoff { src, channels, rate, ramp_total, ramp_left: ramp_total, leave: Arc::new(AtomicBool::new(false)), leave_total, leave_left: None }
+    }
+}
+
+impl Iterator for Handoff {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        if self.leave.load(Ordering::Relaxed) {
+            let left = *self.leave_left.get_or_insert(self.leave_total);
+            if left == 0 {
+                return None; // faded out: the rest of the song plays on the new output
+            }
+            self.leave_left = Some(left - 1);
+            let v = self.src.lock().unwrap().next()?;
+            return Some(v * left as f32 / self.leave_total.max(1) as f32);
+        }
+        let v = self.src.lock().unwrap().next()?;
+        if self.ramp_left > 0 {
+            let k = 1.0 - self.ramp_left as f32 / self.ramp_total.max(1) as f32;
+            self.ramp_left -= 1;
+            return Some(v * k);
+        }
+        Some(v)
+    }
+}
+
+impl Source for Handoff {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+    fn sample_rate(&self) -> u32 {
+        self.rate
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.src.lock().unwrap().total_duration()
+    }
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.src.lock().unwrap().try_seek(pos)
+    }
+}
+
 /// The song that is fading out while the next one fades in.
 struct Fade {
     old: Sink,
@@ -191,9 +259,11 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
     // the next song, opened ahead of time (track, sound, length, its volume leveling)
     let mut next: Option<(String, Decoder<Media>, Option<Duration>, f32)> = None;
     let mut fading: Option<Fade> = None;
-    // what is loaded (to open it again on a new device) and where to carry on once it has been
-    let mut current: Option<(Client, String, Option<PathBuf>)> = None;
-    let mut resume_at: Option<Duration> = None;
+    // the sound of the song playing, shared so it can move to another output device; and how far in it was
+    // when it moved (a new sink counts from zero)
+    let mut cur_src: Option<Arc<Mutex<Inner>>> = None;
+    let mut cur_leave: Option<Arc<AtomicBool>> = None;
+    let mut pos_base = Duration::ZERO;
     // the Windows default output device: when it changes (headphones, a speaker, another DAC) the sound follows it
     let mut last_device = default_device_name();
     let mut device_check = Instant::now();
@@ -217,7 +287,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             }
             Ok(Cmd::Load { client, track, local, play, gen }) => {
                 latest_gen = gen;
-                current = Some((client.clone(), track.clone(), local.clone()));
+                pos_base = Duration::ZERO;
                 next = None;
                 if let Some(f) = fading.take() {
                     f.old.stop();
@@ -252,7 +322,11 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 match result.and_then(|(dec, total)| Sink::try_new(&handle).map(|s| (s, dec, total)).map_err(|e| e.to_string())) {
                     Ok((s, dec, total)) => {
                         s.set_volume(volume * gain);
-                        s.append(crate::eq::EqSource::new(dec.convert_samples::<f32>(), eq.clone()));
+                        let inner: Arc<Mutex<Inner>> = Arc::new(Mutex::new(Box::new(crate::eq::EqSource::new(dec.convert_samples::<f32>(), eq.clone()))));
+                        let h = Handoff::new(inner.clone(), 0);
+                        cur_leave = Some(h.leave.clone());
+                        s.append(h);
+                        cur_src = Some(inner);
                         if play {
                             s.play();
                         } else {
@@ -261,10 +335,6 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                         st.track = Some(track);
                         st.duration = total;
                         st.playing = play;
-                        if let Some(at) = resume_at.take() {
-                            let _ = s.try_seek(at);
-                            st.position = at;
-                        }
                         sink = Some(s);
                         was_busy = true;
                     }
@@ -295,6 +365,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             Ok(Cmd::Seek(to)) => {
                 if let Some(s) = &sink {
                     let _ = s.try_seek(to);
+                    pos_base = Duration::ZERO;
                     status.lock().unwrap().position = to;
                 }
             }
@@ -330,32 +401,49 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
-        // the output device changed: open the new one and carry on where the song was
+        // the output device changed: open the new one and move the same sound over to it (no reload, no restart)
         if device_check.elapsed() >= Duration::from_secs(1) {
             device_check = Instant::now();
             let now = default_device_name();
             if now.is_some() && now != last_device {
                 last_device = now;
-                let (was_playing, pos, finished) = {
-                    let st = status.lock().unwrap();
-                    (st.playing, st.position, st.finished)
-                };
-                if let Some(f) = fading.take() {
-                    f.old.stop();
-                }
-                let had_sink = sink.take().map(|s| s.stop()).is_some();
                 match OutputStream::try_default() {
-                    Ok((st2, h2)) => {
-                        _stream = st2;
-                        handle = h2;
+                    Ok((stream2, handle2)) => {
+                        let was_playing = status.lock().unwrap().playing;
+                        if let Some(f) = fading.take() {
+                            f.old.stop();
+                        }
                         next = None;
-                        was_busy = false;
-                        if had_sink && !finished {
-                            if let Some((client, track, local)) = current.clone() {
-                                resume_at = Some(pos);
-                                let _ = back.send(Cmd::Load { client, track, local, play: was_playing, gen: latest_gen });
+                        let old = sink.take();
+                        if let (Some(old), Some(src)) = (&old, &cur_src) {
+                            if let Ok(s2) = Sink::try_new(&handle2) {
+                                // the old output fades out alone first (two outputs reading one sound would split it)
+                                if was_playing {
+                                    if let Some(l) = &cur_leave {
+                                        l.store(true, Ordering::Relaxed);
+                                    }
+                                    let t = Instant::now();
+                                    while !old.empty() && t.elapsed() < Duration::from_millis(150) {
+                                        std::thread::sleep(Duration::from_millis(2));
+                                    }
+                                }
+                                pos_base += old.get_pos();
+                                s2.pause();
+                                s2.set_volume(volume * gain);
+                                let h = Handoff::new(src.clone(), 40); // fades in over 40 ms
+                                cur_leave = Some(h.leave.clone());
+                                s2.append(h);
+                                if was_playing {
+                                    s2.play();
+                                }
+                                sink = Some(s2);
                             }
                         }
+                        if let Some(old) = old {
+                            old.stop();
+                        }
+                        _stream = stream2;
+                        handle = handle2;
                     }
                     Err(e) => {
                         status.lock().unwrap().error = Some(format!("Can't use the new sound output ({e})."));
@@ -375,7 +463,12 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 if secs > 0.2 && total.as_secs_f32() - pos.as_secs_f32() <= secs {
                     if let (Some((track, dec, length, new_gain)), Ok(s2)) = (next.take(), Sink::try_new(&handle)) {
                         s2.set_volume(0.0);
-                        s2.append(crate::eq::EqSource::new(dec.convert_samples::<f32>(), eq.clone()));
+                        let inner: Arc<Mutex<Inner>> = Arc::new(Mutex::new(Box::new(crate::eq::EqSource::new(dec.convert_samples::<f32>(), eq.clone()))));
+                        let h = Handoff::new(inner.clone(), 0);
+                        cur_leave = Some(h.leave.clone());
+                        s2.append(h);
+                        cur_src = Some(inner);
+                        pos_base = Duration::ZERO;
                         s2.play();
                         if let Some(old) = sink.replace(s2) {
                             fading = Some(Fade { old, old_gain: gain, started: Instant::now(), secs });
@@ -412,7 +505,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
         // keep the status fresh, and notice when a song has played to the end
         if let Some(s) = &sink {
             let mut st = status.lock().unwrap();
-            st.position = s.get_pos();
+            st.position = pos_base + s.get_pos();
             if was_busy && s.empty() {
                 was_busy = false;
                 st.playing = false;
