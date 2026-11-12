@@ -47,7 +47,12 @@ pub fn cover_rgba(bytes: &[u8], max: u32, frac: f32) -> Option<(u32, u32, Vec<u8
 
 /// A chosen picture (a playlist's, or an album's that had no art) with its corners rounded, ready to show.
 pub fn rounded_handle(bytes: &[u8], max: u32, frac: f32) -> Option<iced::widget::image::Handle> {
-    let img = ::image::load_from_memory(bytes).ok()?;
+    let mut img = ::image::load_from_memory(bytes).ok()?;
+    // pictures are squares: the middle of a tall or wide one
+    let side = img.width().min(img.height());
+    if img.width() != img.height() {
+        img = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side);
+    }
     let (w, h) = (img.width().min(max), img.height().min(max));
     let mut px = if (w, h) == (img.width(), img.height()) { img.to_rgba8() } else { img.resize(w, h, ::image::imageops::FilterType::Triangle).to_rgba8() };
     let (w, h) = px.dimensions();

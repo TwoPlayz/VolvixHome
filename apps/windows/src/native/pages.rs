@@ -297,9 +297,15 @@ pub fn discover_page<'a>(app: &'a App, id: &str) -> El<'a> {
     if left > 0 && app.find.can_get {
         actions = actions.push(ui::btn_icon("download", format!("Get everything ({left})"), ui::Btn::Primary, false).on_press(Message::RequestMusic("artist".into(), id.to_string())));
     }
-    let mut c = column![ui::dim(if d.on_server.is_some() { "Artist" } else { "Not in your library yet" }, 13), ui::title(d.name.clone(), 40), ui::dim(format!("{} releases", d.albums.len()), 15), actions].spacing(8);
+    // their photo when there is one (a rounded square, like everywhere else), else their initials
+    let hero: El = match d.image.as_ref().and_then(|p| app.images.get(p)) {
+        Some(h) => image(h.clone()).width(152).height(152).content_fit(iced::ContentFit::Cover).into(),
+        None => ui::artist_hero(&d.name, &d.name, 152.0),
+    };
+    let info = column![ui::dim(if d.on_server.is_some() { "Artist" } else { "Not in your library yet" }, 13), ui::title(d.name.clone(), 40), ui::dim(format!("{} releases", d.albums.len()), 15), actions].spacing(8);
+    let mut c = column![row![hero, info].spacing(24).align_y(Alignment::End)].spacing(8);
     for (title, single) in [("Albums & EPs", false), ("Singles", true)] {
-        let rows: Vec<El> = d.albums.iter().filter(|a| (a.kind.as_deref() == Some("Single")) == single).map(|a| found_row(app, a, "albums", false)).collect();
+        let rows: Vec<El> = d.albums.iter().filter(|a| (a.kind.as_deref() == Some("Single")) == single).map(|a| found_row(app, a, "albums", true)).collect();
         if !rows.is_empty() {
             c = c.push(ui::gap(12)).push(ui::title(title, 22)).push(Column::with_children(rows).spacing(2));
         }
@@ -308,6 +314,73 @@ pub fn discover_page<'a>(app: &'a App, id: &str) -> El<'a> {
         c = c.push(ui::dim("MusicBrainz doesn't list any albums for this artist yet.", 14));
     }
     c.push(ui::dim("Lidarr gets whole releases, so a song comes with its album or single.", 12)).into()
+}
+
+/// One release from MusicBrainz that you may not have: its songs, and a Get button for the whole thing.
+pub fn discover_album_page<'a>(app: &'a App, id: &str) -> El<'a> {
+    let Some(v) = app.album_pages.get(id) else {
+        return column![ui::title("Album", 32), ui::dim("Looking it up on MusicBrainz…", 15)].spacing(10).into();
+    };
+    let title = v["title"].as_str().unwrap_or("").to_string();
+    let artist = v["artist"].as_str().unwrap_or("").to_string();
+    let art: El = match v["image"].as_str().and_then(|p| app.images.get(p)) {
+        Some(h) => image(h.clone()).width(200).height(200).content_fit(iced::ContentFit::Cover).into(),
+        None => ui::cover(None, &title, 200.0),
+    };
+    let tracks = v["tracks"].as_array().cloned().unwrap_or_default();
+    let meta: Vec<String> = [
+        v["year"].as_str().map(String::from),
+        (!tracks.is_empty()).then(|| format!("{} songs", tracks.len())),
+        v["secondary"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).filter(|s| !s.is_empty()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let in_library = match v["onServer"].as_str() {
+        Some(a) if app.lib.album(a).is_some() => Some(a.to_string()),
+        _ => None,
+    };
+    let asked = v["requested"].as_bool().unwrap_or(false) || app.find.asked.contains(id);
+    let action: El = if let Some(a) = in_library.clone() {
+        ui::btn_icon("check", "In your library: open it", ui::Btn::Primary, false).on_press(Message::Go(Page::Album(a))).into()
+    } else if asked {
+        ui::dim("Requested. It shows up when Lidarr is done.", 13).into()
+    } else if !app.find.can_get {
+        ui::dim("Ask an admin to get this", 13).into()
+    } else {
+        let busy = app.find.asking.contains(id);
+        ui::btn_icon("download", if busy { "Asking…" } else { "Get this album" }, ui::Btn::Primary, false).on_press_maybe((!busy).then(|| Message::RequestMusic("album".into(), id.to_string()))).into()
+    };
+    let who: El = match v["artistId"].as_str() {
+        Some(a) if in_library.is_none() => ui::btn_sm(artist.clone(), ui::Btn::Ghost).on_press(Message::Go(Page::Discover(a.to_string()))).into(),
+        _ => ui::dim(artist.clone(), 15).into(),
+    };
+    let info = column![
+        ui::dim(format!("{} · not in your library yet", v["type"].as_str().unwrap_or("Album")), 13),
+        ui::title(title.clone(), 40),
+        row![who, ui::dim(meta.join(" · "), 14)].spacing(8).align_y(Alignment::Center),
+        action
+    ]
+    .spacing(8);
+    let mut c = column![row![art, info].spacing(24).align_y(Alignment::End)].spacing(8);
+    let multi = tracks.iter().any(|t| t["disc"].as_u64().unwrap_or(1) > 1);
+    if tracks.is_empty() {
+        c = c.push(ui::gap(8)).push(ui::dim("MusicBrainz doesn't have the songs for this release yet. You can still get the album.", 14));
+    } else {
+        let rows: Vec<El> = tracks
+            .iter()
+            .map(|t| {
+                let no = format!("{}{}", if multi { format!("{}.", t["disc"].as_u64().unwrap_or(1)) } else { String::new() }, t["no"].as_str().map(String::from).or_else(|| t["no"].as_u64().map(|n| n.to_string())).unwrap_or_default());
+                let secs = t["lengthMs"].as_u64().map(|m| m / 1000);
+                let len = secs.map(|s| format!("{}:{:02}", s / 60, s % 60)).unwrap_or_default();
+                container(row![ui::dim(no, 13).width(40), text(clip(t["title"].as_str().unwrap_or(""), 70)).size(15).width(Length::Fill), ui::dim(len, 13)].spacing(10).align_y(Alignment::Center))
+                    .padding([8, 12])
+                    .into()
+            })
+            .collect();
+        c = c.push(ui::gap(8)).push(Column::with_children(rows).spacing(2));
+    }
+    c.push(ui::dim("Lidarr gets the whole release, so every song above comes together. Song list from MusicBrainz.", 12)).into()
 }
 
 /// Under a library artist's albums: what they have released that you don't have yet, with a way to get it.
@@ -321,7 +394,7 @@ pub fn artist_get_more<'a>(app: &'a App, name: &str) -> Option<El<'a>> {
     if missing.is_empty() {
         return None;
     }
-    let rows: Vec<El> = missing.iter().take(6).map(|a| found_row(app, a, "albums", false)).collect();
+    let rows: Vec<El> = missing.iter().take(6).map(|a| found_row(app, a, "albums", true)).collect();
     let head = row![
         column![ui::title("Get more", 22), ui::dim(format!("More by {name} that isn't in your library yet."), 13)].spacing(4).width(Length::Fill),
         button(text("See all releases").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))),
@@ -478,30 +551,35 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str, link: bool) -> El<'
             None => ui::dim("", 13).into(),
         }
     } else if kind == "songs" {
-        // Lidarr gets releases, not songs: offer the single (if any) and the album
-        let mut r = row![].spacing(6);
-        if let Some(id) = &s.single_id {
-            r = r.push(get("Get the single", "album", id.clone(), true));
+        // Lidarr gets releases, not songs: the button gets the song's single when there is one, else its album
+        match s.single_id.as_ref().or(s.album_id.as_ref()) {
+            Some(id) => get("Get", "album", id.clone(), true),
+            None => ui::dim("", 13).into(),
         }
-        if let Some(id) = &s.album_id {
-            r = r.push(get("Get the album", "album", id.clone(), s.single_id.is_none()));
-        }
-        r.into()
     } else {
         match &s.foreign_id {
             Some(id) => get("Get", "album", id.clone(), true),
             None => ui::dim("", 13).into(),
         }
     };
-    // the whole card opens the artist's page (their releases, with a way to get them); the buttons on it still do their own thing
+    // the whole card opens its page: an artist's releases, or the release (album, EP, single) a song or album is on;
+    // the buttons on it still do their own thing
     let go = if !link {
         None
     } else if is_artist {
-        s.foreign_id.clone()
+        s.foreign_id.clone().map(|id| Message::Go(Page::Discover(id)))
+    } else if let serde_json::Value::String(v) = &s.on_server {
+        app.lib.album(v).map(|_| Message::Go(Page::Album(v.clone())))
     } else {
-        s.artist_id.clone()
+        None
     }
-    .map(|id| Message::Go(Page::Discover(id)));
+    .or_else(|| {
+        if !link || is_artist {
+            return None;
+        }
+        let id = if kind == "songs" { s.album_id.clone().or_else(|| s.single_id.clone()) } else { s.foreign_id.clone() };
+        id.map(|id| Message::Go(Page::DiscoverAlbum(id)))
+    });
     button(row![art, column![text(clip(&s.label(), 60)).size(15), ui::dim(clip(&sub.join(" · "), 70), 12)].spacing(2).width(Length::Fill), action].spacing(14).align_y(Alignment::Center))
         .padding([8, 10])
         .width(Length::Fill)

@@ -55,7 +55,7 @@ Spin.views = Spin.views || {};
       const al = S.data.albumsBy(name);
       const shown = al.length ? al : S.data.appearsOn(name);
       return '<a class="list-row" href="' + S.artistUrl(name) + '">' +
-        '<span class="list-art round">' + S.cover(shown[0]) + '</span>' +
+        '<span class="list-art round">' + S.artistPic(name) + '</span>' +
         '<span class="list-text"><span class="t-name">' + S.esc(name) + '</span>' +
         '<span class="t-sub">' + (al.length ? al.length + ' album' + (al.length > 1 ? 's' : '') : 'Appears on ' + shown.length) + '</span></span>' +
         S.icon('chevronRight', 18) + '</a>';
@@ -75,13 +75,14 @@ Spin.views = Spin.views || {};
             return '<option value="' + s[0] + '"' + (ui.sort === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
           }).join('') + '</select></label></div></div>' : '') +
         '<div data-body>' + body() + '</div>';
+      S.hydrateArtistPics(root);
 
       root.onclick = function (e) {
         const tab = e.target.closest('[data-tab]');
         if (tab) { ui.tab = tab.dataset.tab; history.replaceState(null, '', '#/library/' + ui.tab); S.app.refresh(); return; }
         if (e.target.closest('[data-new-pl]')) { S.pl.createDialog(); return; }
         const scope = e.target.closest('[data-scope]');
-        if (scope) { ui.artists = scope.dataset.scope; S.$('[data-body]', root).innerHTML = body(); }
+        if (scope) { ui.artists = scope.dataset.scope; S.$('[data-body]', root).innerHTML = body(); S.hydrateArtistPics(root); }
       };
       root.onchange = function (e) {
         if (e.target.matches('[data-sort]')) { ui.sort = e.target.value; S.$('[data-body]', root).innerHTML = body(); }

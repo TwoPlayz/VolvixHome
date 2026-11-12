@@ -320,6 +320,12 @@ impl Client {
         res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
     }
 
+    /// One release (album, EP or single) from MusicBrainz: its songs, and whether it is in the library or asked for.
+    pub fn discover_album(&self, rgid: &str) -> Result<serde_json::Value> {
+        let res = self.request("GET", &format!("/api/discover/album/{}", enc(rgid))).timeout(Duration::from_secs(45)).call()?;
+        res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
+    }
+
     /// Your devices, live (server-sent events): the lines of `data: …` say who is online, which one plays, and when
   /// another device hands its music to this one. The connection stays open until it drops.
     pub fn device_events(&self, device: &str, name: &str) -> Result<Box<dyn std::io::Read + Send + Sync + 'static>> {

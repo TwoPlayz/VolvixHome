@@ -20,7 +20,7 @@ Spin.views = Spin.views || {};
   function artistCard(name) {
     const first = S.data.albumsBy(name)[0];
     return '<a class="card artist-card" href="' + S.artistUrl(name) + '">' +
-      '<div class="card-art round">' + S.cover(first) + '</div>' +
+      '<div class="card-art round">' + S.artistPic(name) + '</div>' +
       '<div class="card-title">' + S.esc(name) + '</div><div class="card-meta"><span>Artist</span></div></a>';
   }
 
@@ -64,6 +64,7 @@ Spin.views = Spin.views || {};
         (S.pl.all().length ? S.shelf('Your playlists', S.pl.all().map(S.playlistCard).join(''), { href: '#/library/playlists' }) : '') +
         (picks.length >= 3 ? S.shelf('Picked for today', picks.map(function (a) { return S.albumCard(a); }).join('')) : '') +
         S.shelf('Artists', topArtists.map(artistCard).join(''), { href: '#/library/artists' });
+      S.hydrateArtistPics(root);
     }
   };
 })(window.Spin);

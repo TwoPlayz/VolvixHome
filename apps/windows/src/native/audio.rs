@@ -287,6 +287,8 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
     // when it moved (a new sink counts from zero)
     let mut cur_src: Option<Arc<Mutex<Inner>>> = None;
     let mut cur_leave: Option<Arc<AtomicBool>> = None;
+    // what is loaded, to open it again when a song cannot be seeked in
+    let mut cur_media: Option<(Client, String, Option<PathBuf>)> = None;
     // watchdog: the output can stop taking sound without any error (a device glitch); if the position stops moving
     // while playing, open the output again
     let mut seen_pos = Duration::ZERO;
@@ -317,6 +319,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
             Ok(Cmd::Load { client, track, local, play, gen, start }) => {
                 latest_gen = gen;
                 pos_base = Duration::ZERO;
+                cur_media = Some((client.clone(), track.clone(), local.clone()));
                 next = None;
                 if let Some(f) = fading.take() {
                     f.old.stop();
@@ -397,10 +400,35 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 status.lock().unwrap().playing = false;
             }
             Ok(Cmd::Seek(to)) => {
-                if let Some(s) = &sink {
-                    let _ = s.try_seek(to);
-                    pos_base = Duration::ZERO;
-                    status.lock().unwrap().position = to;
+                if sink.is_some() {
+                    // VH_NOSEEK: a test switch that pretends the song cannot be seeked in
+                    let ok = std::env::var_os("VH_NOSEEK").is_none() && sink.as_ref().map(|s| s.try_seek(to).is_ok()).unwrap_or(false);
+                    if ok {
+                        pos_base = Duration::ZERO;
+                        status.lock().unwrap().position = to;
+                    } else if let Some((client, track, local)) = cur_media.clone() {
+                        // some songs can't be jumped around in: open it again and skip ahead, instead of snapping back
+                        if let Ok((dec, _)) = open(&client, &track, local) {
+                            if let Ok(s2) = Sink::try_new(&handle) {
+                                let was_playing = status.lock().unwrap().playing;
+                                s2.pause();
+                                s2.set_volume(volume * gain);
+                                let inner: Arc<Mutex<Inner>> = Arc::new(Mutex::new(Box::new(crate::eq::EqSource::new(dec.skip_duration(to).convert_samples::<f32>(), eq.clone()))));
+                                let h = Handoff::new(inner.clone(), 0);
+                                cur_leave = Some(h.leave.clone());
+                                s2.append(h);
+                                cur_src = Some(inner);
+                                if was_playing {
+                                    s2.play();
+                                }
+                                if let Some(old) = sink.replace(s2) {
+                                    old.stop();
+                                }
+                                pos_base = to;
+                                status.lock().unwrap().position = to;
+                            }
+                        }
+                    }
                 }
             }
             Ok(Cmd::Volume(v)) => {

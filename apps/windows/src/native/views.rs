@@ -69,13 +69,12 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                 ids.extend(lib.recently_added(12).iter().map(|a| a.id.clone()));
                 ids.extend(volvix_core::mixes::top_albums(lib, &app.data, 6).iter().map(|a| a.id.clone()));
                 ids.extend(volvix_core::mixes::random_albums(lib, &app.me_id(), volvix_core::userdata::now(), 6).iter().map(|a| a.id.clone()));
-                ids.extend(lib.top_artists(12).iter().filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone()));
                 ids.extend(app.playlists().iter().flat_map(|p| first_albums(&p.tracks)));
             }
             Page::Library => match app.lib_tab {
                 LibTab::Albums | LibTab::Songs => ids.extend(lib.albums().iter().map(|a| a.id.clone())),
                 LibTab::Browse => {}
-                LibTab::Artists => ids.extend(lib.artists().iter().filter_map(|n| lib.artist_cover_album(n)).map(|a| a.id.clone())),
+                LibTab::Artists => {}
                 LibTab::Playlists => ids.extend(app.playlists().iter().flat_map(|p| first_albums(&p.tracks))),
                 LibTab::Downloaded => {
                     for s in &app.saved {
@@ -119,7 +118,7 @@ pub fn wanted_covers(app: &App) -> Vec<(String, u32)> {
                 }
             }
             Page::Notifications | Page::Profile | Page::Members | Page::Settings => {}
-            Page::GetMusic | Page::Discover(_) => {}
+            Page::GetMusic | Page::Discover(_) | Page::DiscoverAlbum(_) => {}
             Page::Browse(..) => ids.extend(lib.albums().iter().map(|a| a.id.clone())),
             Page::Rewind => {
                 // the top songs' covers
@@ -243,8 +242,16 @@ pub fn album_grid<'a>(app: &'a App, albums: impl IntoIterator<Item = &'a Album>,
     Row::with_children(cards).spacing(4).wrap().into()
 }
 
+/// An artist's picture: their photo (a rounded square) when there is one, else their initials. Never an album cover.
+pub fn artist_pic<'a>(app: &'a App, name: &str, size: f32) -> El<'a> {
+    match app.artist_infos.get(name).and_then(|i| i.1.as_ref()) {
+        Some(h) => iced::widget::image(h.clone()).width(size).height(size).content_fit(iced::ContentFit::Cover).into(),
+        None => ui::artist_hero(name, name, size),
+    }
+}
+
 fn artist_card<'a>(app: &'a App, name: String) -> El<'a> {
-    card(cover_of(app, app.lib.artist_cover_album(&name), 164.0), name.clone(), "Artist".into(), Message::Go(Page::Artist(name)))
+    card(artist_pic(app, &name, 164.0), name.clone(), "Artist".into(), Message::Go(Page::Artist(name)))
 }
 
 pub fn playlist_card<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView) -> El<'a> {
@@ -868,6 +875,7 @@ fn page(app: &App) -> El<'_> {
         Page::Mix(id) => pages::mix_page(app, id),
         Page::GetMusic => pages::requests(app),
         Page::Discover(id) => pages::discover_page(app, id),
+        Page::DiscoverAlbum(id) => pages::discover_album_page(app, id),
         Page::Household => pages::household(app),
         Page::Notifications => pages::notifications(app),
         Page::Profile | Page::Members | Page::Settings => pages::account(app),
@@ -1118,7 +1126,7 @@ fn library(app: &App) -> El<'_> {
                         let count = lib.albums_by(n).len();
                         let sub = if count == 0 { "Appears on albums".to_string() } else { format!("{count} album{}", if count == 1 { "" } else { "s" }) };
                         button(
-                            row![cover_of(app, lib.artist_cover_album(n), 56.0), column![text(n.as_str()).size(15).color(ui::TEXT()), ui::dim(sub, 13)].spacing(2).width(Length::Fill), ui::wi("chevronRight", 18.0, ui::TEXT_2())]
+                            row![artist_pic(app, n, 56.0), column![text(n.as_str()).size(15).color(ui::TEXT()), ui::dim(sub, 13)].spacing(2).width(Length::Fill), ui::wi("chevronRight", 18.0, ui::TEXT_2())]
                                 .spacing(14)
                                 .align_y(Alignment::Center),
                         )

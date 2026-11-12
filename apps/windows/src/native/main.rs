@@ -210,6 +210,8 @@ pub enum Page {
     Browse(String, String),
     /// an artist from MusicBrainz (by id): their releases, with a way to get what is missing
     Discover(String),
+    /// one release from MusicBrainz (by id): its songs, with a way to get it
+    DiscoverAlbum(String),
 }
 
 /// An artist looked up on MusicBrainz, and what they have released.
@@ -219,6 +221,8 @@ pub struct Discovered {
     pub albums: Vec<FoundItem>,
     /// the same artist in your library, when you have them
     pub on_server: Option<String>,
+    /// their picture (a path on the server)
+    pub image: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -595,6 +599,7 @@ pub enum Message {
     ArtistInfoLoaded(String, Option<String>, Option<Vec<u8>>),
     ArtistMbid(String, Option<String>),
     DiscoverLoaded(String, Result<serde_json::Value, Error>),
+    DiscoverAlbumLoaded(String, Result<serde_json::Value, Error>),
     DescEdit(iced::widget::text_editor::Action),
     CancelRequest(String),
 
@@ -782,6 +787,8 @@ pub struct App {
     cover_order: std::collections::VecDeque<(String, u32)>,
     pub images: HashMap<String, image::Handle>,
     image_pending: HashSet<String>,
+    /// artist photos being fetched for the grids
+    artist_pending: HashSet<String>,
 
     pub page: Page,
     pub history: Vec<Page>,
@@ -862,6 +869,8 @@ pub struct App {
     pub artist_infos: HashMap<String, (Option<String>, Option<image::Handle>)>,
     /// MusicBrainz artists looked up (by id), and which id belongs to each library artist (lower-case name)
     pub discovered: HashMap<String, Discovered>,
+    /// releases looked up on MusicBrainz, by id
+    pub album_pages: HashMap<String, serde_json::Value>,
     pub artist_mbids: HashMap<String, Option<String>>,
     /// the multi-line description box of the New / Edit playlist dialogs
     pub desc_editor: iced::widget::text_editor::Content,
@@ -950,6 +959,7 @@ impl App {
             cover_order: std::collections::VecDeque::new(),
             images: HashMap::new(),
             image_pending: HashSet::new(),
+            artist_pending: HashSet::new(),
             page: Page::Home,
             history: vec![],
             forward: vec![],
@@ -1014,6 +1024,7 @@ impl App {
             avatars: HashMap::new(),
             artist_infos: HashMap::new(),
             discovered: HashMap::new(),
+            album_pages: HashMap::new(),
             artist_mbids: HashMap::new(),
             desc_editor: iced::widget::text_editor::Content::new(),
             avatar_pending: HashSet::new(),
@@ -1209,6 +1220,10 @@ impl App {
                     let i = id.clone();
                     tasks.push(Task::perform(blocking(move || c.discover_artist(&i)), move |r| Message::DiscoverLoaded(id.clone(), r)));
                 }
+                Page::DiscoverAlbum(id) if !self.album_pages.contains_key(&id) => {
+                    let i = id.clone();
+                    tasks.push(Task::perform(blocking(move || c.discover_album(&i)), move |r| Message::DiscoverAlbumLoaded(id.clone(), r)));
+                }
                 Page::Notifications => tasks.push(Task::perform(blocking(move || c.notifications()), Message::NotesLoaded)),
                 Page::GetMusic => {
                     let c2 = c.clone();
@@ -1288,10 +1303,42 @@ impl App {
                 move |b| Message::CoverLoaded(id.clone(), size, b),
             ));
         }
+        // photos of the artists on screen (a few at a time)
+        if self.me.as_ref().map(|m| m.artist_info).unwrap_or(false) && !self.offline && self.artist_pending.len() < 4 {
+            let names: Vec<String> = match (&self.page, self.lib_tab) {
+                (Page::Home, _) => self.lib.top_artists(12),
+                (Page::Library, LibTab::Artists) => self.lib.artists().iter().filter(|n| self.lib_all_artists || self.follows(n)).take(60).cloned().collect(),
+                _ => vec![],
+            };
+            for name in names {
+                if self.artist_pending.len() >= 4 {
+                    break;
+                }
+                if self.artist_infos.contains_key(&name) || !self.artist_pending.insert(name.clone()) {
+                    continue;
+                }
+                let c = client.clone();
+                let n = name.clone();
+                tasks.push(Task::perform(
+                    blocking(move || {
+                        let v = c.artist_info(&n).map_err(|e| e.to_string())?;
+                        let bio = v["bio"].as_str().map(String::from);
+                        let img = v["image"].as_str().and_then(|p| c.image_bytes(p).ok());
+                        Ok::<_, String>((bio, img))
+                    }),
+                    move |r| match r {
+                        Ok((bio, img)) => Message::ArtistInfoLoaded(name.clone(), bio, img),
+                        Err(_) => Message::ArtistInfoLoaded(name.clone(), None, None),
+                    },
+                ));
+            }
+        }
         // pictures of music found through Lidarr
-        if self.page == Page::Search || matches!(self.page, Page::Artist(_) | Page::Discover(_)) {
+        if self.page == Page::Search || matches!(self.page, Page::Artist(_) | Page::Discover(_) | Page::DiscoverAlbum(_)) {
             let mut paths: Vec<String> = self.find.parts.values().filter_map(|r| r.as_ref().ok()).flatten().filter_map(|x| x.image.clone()).collect();
             paths.extend(self.discovered.values().flat_map(|d| d.albums.iter()).filter_map(|x| x.image.clone()));
+            paths.extend(self.discovered.values().filter_map(|d| d.image.clone()));
+            paths.extend(self.album_pages.values().filter_map(|v| v["image"].as_str().map(String::from)));
             for p in paths {
                 if self.images.contains_key(&p) || !self.image_pending.insert(p.clone()) {
                     continue;
@@ -2869,15 +2916,25 @@ impl App {
                         name: v["name"].as_str().unwrap_or("").to_string(),
                         albums: serde_json::from_value(v["albums"].clone()).unwrap_or_default(),
                         on_server: v["onServer"].as_str().map(String::from),
+                        image: v["image"].as_str().map(String::from),
                     };
                     self.find.can_get = v["canRequest"].as_bool().unwrap_or(false);
                     self.discovered.insert(id, d);
                     return self.fetch_covers();
                 }
             }
+            Message::DiscoverAlbumLoaded(id, r) => {
+                if let Ok(v) = r {
+                    self.find.can_get = v["canRequest"].as_bool().unwrap_or(false);
+                    self.album_pages.insert(id, v);
+                    return self.fetch_covers();
+                }
+            }
             Message::ArtistInfoLoaded(name, bio, img) => {
                 let handle = img.and_then(|b| pictures::rounded_handle(&b, 420, 0.1));
+                self.artist_pending.remove(&name);
                 self.artist_infos.insert(name, (bio, handle));
+                return self.fetch_covers(); // the next few artists
             }
             Message::QueueLoaded(r) => {
                 if std::env::var("VH_DEMO").as_deref() == Ok("requests") {
@@ -3665,10 +3722,21 @@ impl App {
                     { "foreignId": "a4", "title": "Already Here", "year": "2018", "type": "Album", "onServer": "x" }
                 ]))
                 .unwrap_or_default();
-                self.discovered.insert("mb1".into(), Discovered { name: artist.clone(), albums, on_server: Some(artist.clone()) });
+                self.discovered.insert("mb1".into(), Discovered { name: artist.clone(), albums, on_server: Some(artist.clone()), image: None });
                 self.artist_mbids.insert(artist.to_lowercase(), Some("mb1".into()));
                 self.find.can_get = true;
-                tasks.push(self.go(Page::Artist(artist)));
+                match std::env::var("VH_DEMO_PAGE").as_deref() {
+                    Ok("album") => {
+                        self.album_pages.insert("a1".into(), json!({
+                            "foreignId": "a1", "title": "Harbor Songs", "artist": artist, "artistId": "mb1", "year": "2022", "type": "Album", "secondary": [],
+                            "tracks": [ { "disc": 1, "no": "1", "title": "Low Tide", "lengthMs": 201000 }, { "disc": 1, "no": "2", "title": "Night Ferry", "lengthMs": 187000 }, { "disc": 1, "no": "3", "title": "Harbor Lights", "lengthMs": 242000 } ],
+                            "onServer": null, "requested": false, "canRequest": true
+                        }));
+                        tasks.push(self.go(Page::DiscoverAlbum("a1".into())));
+                    }
+                    Ok("artist") => tasks.push(self.go(Page::Discover("mb1".into()))),
+                    _ => tasks.push(self.go(Page::Artist(artist))),
+                }
             }            "requests" => {
                 // pretend Lidarr is connected and downloading, to look at the Requests page
                 self.find.configured = true;

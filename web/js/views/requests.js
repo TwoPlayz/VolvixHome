@@ -52,10 +52,9 @@ Spin.views = Spin.views || {};
     else if (s.requested) action = '<span class="gm-state">' + S.icon('download', 14) + 'Requested</span>';
     else if (!canGet) action = noGet();
     else {
-      const btns = [];
-      if (s.singleId) btns.push('<button class="btn btn-primary btn-sm" data-get="album" data-id="' + S.esc(s.singleId) + '" data-label="' + S.esc(s.title) + ' (single)">' + S.icon('download', 14) + 'Get the single</button>');
-      if (s.albumId) btns.push('<button class="btn ' + (s.singleId ? 'btn-secondary' : 'btn-primary') + ' btn-sm" data-get="album" data-id="' + S.esc(s.albumId) + '" data-label="the album with ' + S.esc(s.title) + '">' + S.icon('download', 14) + 'Get the album</button>');
-      action = '<div class="gm-actions">' + btns.join('') + '</div>';
+      // Lidarr gets releases, not songs: the one button gets the song's single when there is one, else its album
+      const id = s.singleId || s.albumId;
+      action = id ? '<button class="btn btn-primary btn-sm" data-get="album" data-id="' + S.esc(id) + '" data-label="' + S.esc(s.title) + (s.singleId ? ' (single)' : ' (with its album)') + '">' + S.icon('download', 14) + 'Get</button>' : '';
     }
     const target = s.onServer ? '#/album/' + s.onServer : (s.albumId || s.singleId) ? '#/get/album/' + (s.albumId || s.singleId) : '';
     return '<div class="gm-card gm-song"><' + (target ? 'a class="gm-link" href="' + target + '"' : 'div class="gm-link"') + '>' + art(s.image, false, s.title) +
