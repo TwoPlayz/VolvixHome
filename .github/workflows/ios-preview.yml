@@ -1,0 +1,44 @@
+# Builds the native iPhone app on the ios-native branch and keeps the result as a pre-release ("ios-native-preview"),
+# so it can be installed and tried before it replaces the app on main.
+name: iOS preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios-native]
+    paths: ['apps/ios/**', '.github/workflows/ios-preview.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd apps/ios && xcodegen generate
+      - name: Build (unsigned)
+        run: |
+          cd apps/ios
+          set -o pipefail
+          xcodebuild -project VolvixHome.xcodeproj -scheme VolvixHome -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log
+      - name: Show compile errors
+        if: failure()
+        run: grep -E "error:" apps/ios/build.log | sort -u | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+      - name: Package .ipa
+        run: |
+          cd apps/ios/build/Build/Products/Release-iphoneos
+          mkdir Payload && cp -R VolvixHome.app Payload/
+          zip -qry "$GITHUB_WORKSPACE/VolvixHome-native-preview.ipa" Payload
+      - name: Publish preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ios-native-preview >/dev/null 2>&1 || gh release create ios-native-preview --prerelease --title "iPhone app (native, preview)" --notes "Work in progress: the native iPhone app. Updated on every build of the ios-native branch." --target "$GITHUB_SHA"
+          gh release upload ios-native-preview VolvixHome-native-preview.ipa --clobber
