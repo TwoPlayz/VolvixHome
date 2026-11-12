@@ -60,7 +60,7 @@ struct CoverView: View {
     }
 }
 
-/// A picture the server hands out by path (found music's covers), as a rounded square.
+/// A picture of found music (a full web address, or a path on the server) as a square, cropped to fill like an album cover.
 struct RemoteSquare: View {
     @EnvironmentObject var app: AppModel
     let path: String?
@@ -69,18 +69,23 @@ struct RemoteSquare: View {
     @State private var image: UIImage?
 
     var body: some View {
-        ZStack {
-            if let image = image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                ZStack {
-                    Theme.tint(title.isEmpty ? "x" : title)
-                    Text(String(title.prefix(1)).uppercased()).font(.system(size: 20, weight: .bold)).foregroundColor(Color.white.opacity(0.9))
+        GeometryReader { g in
+            let side = min(g.size.width, g.size.height)
+            ZStack {
+                if let image = image {
+                    Image(uiImage: image).resizable().scaledToFill().frame(width: side, height: side).clipped()
+                } else {
+                    ZStack {
+                        Theme.tint(title.isEmpty ? "x" : title)
+                        Text(String(title.prefix(1)).uppercased()).font(.system(size: max(14, side * 0.4), weight: .bold)).foregroundColor(Color.white.opacity(0.9))
+                    }
+                    .frame(width: side, height: side)
                 }
             }
+            .frame(width: side, height: side)
+            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         }
         .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         .task(id: path) {
             image = nil
             guard let p = path, let api = app.api, let url = api.imageURL(p) else { return }
