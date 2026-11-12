@@ -1594,7 +1594,8 @@ select.input {
   .sidebar { display: none; }
   .topbar .avatar-btn { display: inline-block; }
   .main { border-radius: 0; }
-  .topbar { padding: 10px 16px; }
+  /* the bar stays put and solid: it covers the status-bar strip too, so nothing scrolls above or behind it */
+  .topbar { padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .nav-arrow { display: none; }
   .mobile-brand { display: block; }
   .view { padding: 4px 16px 32px; }
