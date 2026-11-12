@@ -57,8 +57,8 @@ impl Seek for Media {
 type Opened = Result<(Decoder<Media>, Option<Duration>), String>;
 
 enum Cmd {
-    Load { client: Client, track: String, local: Option<PathBuf>, play: bool, gen: u64 },
-    Loaded { gen: u64, track: String, result: Opened, play: bool },
+    Load { client: Client, track: String, local: Option<PathBuf>, play: bool, gen: u64, start: Duration },
+    Loaded { gen: u64, track: String, result: Opened, play: bool, start: Duration },
     /// open the next song ahead of time, so it can fade in while this one fades out
     Preload { client: Client, track: String, local: Option<PathBuf>, gain: f32, gen: u64 },
     Preloaded { gen: u64, track: String, result: Opened, gain: f32 },
@@ -117,13 +117,14 @@ impl Player {
 
     /// Open a song and (if `play`) start it. `local` = a downloaded copy to play instead of streaming.
     /// A newer load cancels an older one still opening.
-    pub fn load(&self, client: &Client, track: &str, local: Option<PathBuf>, play: bool) {
+    /// Open a song and carry on from `start` (moving what plays from another device).
+    pub fn load_at(&self, client: &Client, track: &str, local: Option<PathBuf>, play: bool, start: Duration) {
         let gen = {
             let mut g = self.gen.lock().unwrap();
             *g += 1;
             *g
         };
-        let _ = self.tx.send(Cmd::Load { client: client.clone(), track: track.to_string(), local, play, gen });
+        let _ = self.tx.send(Cmd::Load { client: client.clone(), track: track.to_string(), local, play, gen, start });
     }
     pub fn play(&self) {
         let _ = self.tx.send(Cmd::Play);
@@ -313,7 +314,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                     }
                 }
             }
-            Ok(Cmd::Load { client, track, local, play, gen }) => {
+            Ok(Cmd::Load { client, track, local, play, gen, start }) => {
                 latest_gen = gen;
                 pos_base = Duration::ZERO;
                 next = None;
@@ -338,10 +339,10 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 let back = back.clone();
                 std::thread::spawn(move || {
                     let result = open(&client, &track, local);
-                    let _ = back.send(Cmd::Loaded { gen, track, result, play });
+                    let _ = back.send(Cmd::Loaded { gen, track, result, play, start });
                 });
             }
-            Ok(Cmd::Loaded { gen, track, result, play }) => {
+            Ok(Cmd::Loaded { gen, track, result, play, start }) => {
                 if gen != latest_gen {
                     continue; // another song was chosen meanwhile
                 }
@@ -363,6 +364,11 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                         st.track = Some(track);
                         st.duration = total;
                         st.playing = play;
+                        if start > Duration::ZERO {
+                            let _ = s.try_seek(start);
+                            pos_base = Duration::ZERO;
+                            st.position = start;
+                        }
                         sink = Some(s);
                         was_busy = true;
                     }

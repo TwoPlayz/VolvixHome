@@ -55,6 +55,57 @@ pub const RUN_NAME: &str = "Volvix Home Native";
 
 /// %LOCALAPPDATA%\Volvix Home Native: settings, sign-in, covers and downloads. Separate from
 /// today's app while both exist.
+/// This computer's id among your devices (kept between runs).
+fn device_id(dir: &std::path::Path) -> String {
+    let file = dir.join("device-id");
+    if let Ok(t) = std::fs::read_to_string(&file) {
+        let t = t.trim();
+        if !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return t.to_string();
+        }
+    }
+    let id = format!("w{:x}{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as u64 ^ (std::process::id() as u64) << 20).unwrap_or(7), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    let _ = std::fs::create_dir_all(dir);
+    let _ = std::fs::write(&file, &id);
+    id
+}
+
+/// Keep a line open to the server's device events, reconnecting when it drops, until `gen` moves on.
+fn spawn_device_events(client: Client, id: String, out: Arc<std::sync::Mutex<Vec<serde_json::Value>>>, gen: Arc<std::sync::atomic::AtomicU64>, my: u64) {
+    use std::io::BufRead;
+    use std::sync::atomic::Ordering;
+    std::thread::Builder::new()
+        .name("devices".into())
+        .spawn(move || {
+            while gen.load(Ordering::SeqCst) == my {
+                let attempt = client.device_events(&id, "Windows PC · app");
+                if let Ok(r) = attempt {
+                    let mut br = std::io::BufReader::new(r);
+                    let mut line = String::new();
+                    loop {
+                        line.clear();
+                        let got = br.read_line(&mut line);
+                        match got {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                if gen.load(Ordering::SeqCst) != my {
+                                    return;
+                                }
+                                if let Some(d) = line.trim().strip_prefix("data:") {
+                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(d.trim()) {
+                                        out.lock().unwrap().push(v);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(3));
+            }
+        })
+        .ok();
+}
+
 pub fn app_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -518,6 +569,9 @@ pub enum Message {
     SetCacheSongs(bool),
     SetCacheLimit(String),
     ClearCache,
+    DeviceTransfer(String),
+    DeviceDone(Result<(), Error>),
+    DeviceHere,
     CacheFetched(String, Result<(), Error>),
     SetDataSaver(bool),
     /// a text box on the Profile or Members tab: 0 your name, 1 current password, 2 new password, 3 member name, 4 member password
@@ -626,6 +680,15 @@ pub struct App {
     next_cache_at: Instant,
     /// (songs, bytes) in the cache, for Settings
     pub cache_stats: (usize, u64),
+    /// your other devices (this computer, the website, a phone…): who is online and which one plays
+    pub dev_id: String,
+    pub connect_devices: Vec<(String, String, bool)>,
+    pub dev_active: Option<String>,
+    dev_events: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    dev_gen: Arc<std::sync::atomic::AtomicU64>,
+    dev_started: bool,
+    /// where the song that was just handed over starts
+    pending_start: Duration,
     pub downloaded: HashSet<String>,
     pub saved: Vec<Saved>,
     dl_queue: VecDeque<String>,
@@ -749,6 +812,13 @@ impl App {
         let song_cache = volvix_core::cache::SongCache::new(dir.join("cache"));
         let mut app = App {
             cache_stats: song_cache.stats(),
+            dev_id: device_id(&dir),
+            connect_devices: vec![],
+            dev_active: None,
+            dev_events: Arc::new(std::sync::Mutex::new(vec![])),
+            dev_gen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            dev_started: false,
+            pending_start: Duration::ZERO,
             song_cache,
             caching: HashSet::new(),
             next_cache_at: Instant::now() + Duration::from_secs(2),
@@ -1250,14 +1320,18 @@ impl App {
         }
         self.preload_for = None;
         self.player.set_gain(self.gain_for(&id));
-        self.player.load(&self.stream_client(&c), &id, local, play);
+        let start = std::mem::take(&mut self.pending_start);
+        self.player.load_at(&self.stream_client(&c), &id, local, play, start);
         self.status.track = Some(id.clone());
-        self.status.position = Duration::ZERO;
+        self.status.position = start;
         self.status.duration = None;
         self.status.playing = play;
         self.status.finished = false;
         self.lyric_line = None;
         let mut tasks = vec![self.fetch_covers(), self.load_lyrics()];
+        if play {
+            tasks.push(self.announce_playing());
+        }
         // remember the album as recently played (shared with the website's Home)
         if let Some(album) = self.lib.track(&id).map(|t| t.album_id.clone()) {
             if self.data.recent.first() != Some(&album) && !self.setting_bool("privateSession", false) {
@@ -1414,6 +1488,84 @@ impl App {
             }
         }
         Task::batch(tasks)
+    }
+
+    /// What another device needs to carry on: the queue, the song, the spot (the website's `snapshot`).
+    fn device_state(&self) -> serde_json::Value {
+        let items = self.queue.items();
+        let index = self.queue.position().unwrap_or(0);
+        let from = index.saturating_sub(50);
+        let to = (index + 450).min(items.len());
+        json!({
+            "queue": items[from..to],
+            "index": index - from,
+            "pos": self.status.position.as_secs_f64(),
+            "playing": self.status.playing,
+            "context": serde_json::Value::Null,
+            "shuffle": self.queue.shuffle(),
+            "repeat": match self.queue.repeat() { volvix_core::Repeat::Off => "off", volvix_core::Repeat::All => "all", volvix_core::Repeat::One => "one" },
+        })
+    }
+
+    /// This computer is the one playing now: the website and your other devices pause.
+    fn announce_playing(&self) -> Task<Message> {
+        let Some(c) = self.client.clone().filter(|_| !self.offline) else { return Task::none() };
+        let me = self.dev_id.clone();
+        Task::perform(blocking(move || c.device_active(&me)), |_| Message::Tick)
+    }
+
+    /// Open the live line to the server that lists your devices, and act on what it says.
+    fn devices_tick(&mut self) -> Vec<Task<Message>> {
+        use std::sync::atomic::Ordering;
+        let mut tasks = vec![];
+        // the connection lives while signed in; a passing "offline" blip must not drop it (it reconnects by itself)
+        let signed_in = self.client.is_some() && self.screen == Screen::Main;
+        if signed_in && !self.dev_started {
+            self.dev_started = true;
+            let my = self.dev_gen.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_device_events(self.client.clone().unwrap(), self.dev_id.clone(), self.dev_events.clone(), self.dev_gen.clone(), my);
+        } else if !signed_in && self.dev_started {
+            self.dev_started = false;
+            self.dev_gen.fetch_add(1, Ordering::SeqCst);
+            self.connect_devices.clear();
+            self.dev_active = None;
+        }
+        let events: Vec<serde_json::Value> = std::mem::take(&mut *self.dev_events.lock().unwrap());
+        for e in events {
+            match e["type"].as_str() {
+                Some("devices") => {
+                    let before = self.dev_active.clone();
+                    self.connect_devices = e["devices"].as_array().map(|l| l.iter().map(|d| (d["id"].as_str().unwrap_or("").to_string(), d["name"].as_str().unwrap_or("").to_string(), d["active"].as_bool().unwrap_or(false))).collect()).unwrap_or_default();
+                    self.dev_active = e["active"].as_str().map(String::from);
+                    // another device took over: this one goes quiet
+                    if let Some(a) = self.dev_active.clone().filter(|a| *a != self.dev_id && Some(a) != before.as_ref()) {
+                        if self.status.playing {
+                            self.player.pause();
+                            self.status.playing = false;
+                            let name = self.connect_devices.iter().find(|d| d.0 == a).map(|d| d.1.clone()).unwrap_or_else(|| "another device".into());
+                            self.say(format!("Playing on {name}"));
+                        }
+                    }
+                }
+                Some("transfer") if e["to"].as_str() == Some(self.dev_id.as_str()) && self.cast.is_none() && self.party.is_none() => {
+                    let s = &e["state"];
+                    let ids: Vec<String> = s["queue"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+                    let want = s["index"].as_u64().unwrap_or(0) as usize;
+                    let cur = ids.get(want).cloned();
+                    let ids: Vec<String> = ids.into_iter().filter(|id| self.lib.track(id).is_some()).collect();
+                    if let Some(i) = cur.and_then(|c| ids.iter().position(|x| *x == c)) {
+                        self.queue.play(ids, i, "Moved from another device");
+                        self.queue.set_repeat(match s["repeat"].as_str() { Some("all") => volvix_core::Repeat::All, Some("one") => volvix_core::Repeat::One, _ => volvix_core::Repeat::Off });
+                        self.pending_start = Duration::from_secs_f64(s["pos"].as_f64().unwrap_or(0.0).max(0.0));
+                        let play = s["playing"].as_bool().unwrap_or(true);
+                        tasks.push(self.start_current(play));
+                        self.say(if play { "Playing here" } else { "Press play to continue here" });
+                    }
+                }
+                _ => {}
+            }
+        }
+        tasks
     }
 
     /// A copy of the song on this computer: a download, or one cached as it was queued.
@@ -2051,6 +2203,7 @@ impl App {
                     }
                     self.player.play();
                     self.status.playing = true;
+                    return self.announce_playing();
                 }
             }
             /* ---------- the cast button: TVs, speakers and listening parties ---------- */
@@ -2960,6 +3113,27 @@ impl App {
                 self.settings.set_text("downloadQuality", &q);
                 self.say("New downloads use this quality");
             }
+            Message::DeviceHere => self.say("Press play here to move it back"),
+            Message::DeviceDone(r) => {
+                if let Err(e) = r {
+                    self.say(e.to_string());
+                }
+            }
+            Message::DeviceTransfer(to) => {
+                let Some(c) = self.client.clone() else { return Task::none() };
+                if self.queue.current().is_none() {
+                    self.say("Start a song first, then move it");
+                    return Task::none();
+                }
+                let name = self.connect_devices.iter().find(|d| d.0 == to).map(|d| d.1.clone()).unwrap_or_else(|| "that device".into());
+                let state = self.device_state();
+                let me = self.dev_id.clone();
+                self.player.pause();
+                self.status.playing = false;
+                self.dialog = None;
+                self.say(format!("Playing on {name}"));
+                return Task::perform(blocking(move || c.device_transfer(&me, &to, state)), Message::DeviceDone);
+            }
             Message::SetCacheSongs(v) => {
                 self.settings.set("cacheSongs", v);
                 if v {
@@ -3380,6 +3554,7 @@ impl App {
                 }
             }
         }
+        tasks.extend(self.devices_tick());
         // keep the song cache topped up with what plays soon
         if Instant::now() >= self.next_cache_at {
             self.next_cache_at = Instant::now() + Duration::from_secs(3);

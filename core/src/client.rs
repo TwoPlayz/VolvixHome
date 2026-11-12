@@ -320,6 +320,25 @@ impl Client {
         res.into_json().map_err(|e| Error::BadAnswer(e.to_string()))
     }
 
+    /// Your devices, live (server-sent events): the lines of `data: …` say who is online, which one plays, and when
+  /// another device hands its music to this one. The connection stays open until it drops.
+    pub fn device_events(&self, device: &str, name: &str) -> Result<Box<dyn std::io::Read + Send + Sync + 'static>> {
+        let res = self.request("GET", &format!("/api/devices/events?device={}&name={}", enc(device), enc(name))).timeout(Duration::from_secs(86_400)).call()?;
+        Ok(res.into_reader())
+    }
+
+    /// This device is the one playing now (the others pause).
+    pub fn device_active(&self, device: &str) -> Result<()> {
+        self.request("POST", "/api/devices/active").send_json(serde_json::json!({ "device": device }))?;
+        Ok(())
+    }
+
+    /// Hand the music (queue, song, spot) to another of your devices.
+    pub fn device_transfer(&self, device: &str, to: &str, state: serde_json::Value) -> Result<()> {
+        self.request("POST", "/api/devices/transfer").send_json(serde_json::json!({ "device": device, "to": to, "state": state }))?;
+        Ok(())
+    }
+
     /// A server-relative picture (e.g. a found album's "/api/discover/image/…").
     pub fn image_bytes(&self, path: &str) -> Result<Vec<u8>> {
         let res = self.request("GET", path).call()?;

@@ -1745,7 +1745,13 @@ fn play_on(app: &App) -> El<'_> {
     let mut c = column![container(column![text("Play on").size(14).font(ui::FONT_BOLD), ui::dim("One device plays at a time", 12)].spacing(2)).padding([8, 12]), line()].spacing(4);
     let mut list = Column::new().spacing(2);
     let casting = app.cast.as_ref();
-    list = list.push(item("devices", "This computer".into(), None, casting.is_none(), casting.map(|_| Message::CastStop), false));
+    let here_active = app.dev_active.as_deref().map(|a| a == app.dev_id).unwrap_or(true);
+    let this = if casting.is_some() { Some(Message::CastStop) } else if !here_active { Some(Message::DeviceHere) } else { None };
+    list = list.push(item("devices", "This computer".into(), None, casting.is_none() && here_active, this, false));
+    // your other devices where Volvix Home is open (the website, a phone): move what plays over to one
+    for (id, name, active) in app.connect_devices.iter().filter(|d| d.0 != app.dev_id) {
+        list = list.push(item("devices", format!("{name}{}", if *active { " · playing" } else { "" }), None, *active, Some(Message::DeviceTransfer(id.clone())), false));
+    }
     list = list.push(line());
     match casting {
         Some(l) => {
