@@ -154,14 +154,14 @@ enum AudioFX {
             prepare: tapPrepare,
             unprepare: tapUnprepare,
             process: tapProcess)
-        var tap: Unmanaged<MTAudioProcessingTap>?
+        var tap: MTAudioProcessingTap?
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
         guard status == noErr, let t = tap else {
             Unmanaged<EQProcessor>.fromOpaque(callbacks.clientInfo!).release()
             return nil
         }
         let params = AVMutableAudioMixInputParameters(track: track)
-        params.audioTapProcessor = t.takeRetainedValue()
+        params.audioTapProcessor = t
         let mix = AVMutableAudioMix()
         mix.inputParameters = [params]
         item.audioMix = mix
