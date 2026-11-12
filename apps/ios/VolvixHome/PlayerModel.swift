@@ -4,6 +4,13 @@ import MediaPlayer
 import UIKit
 import Combine
 
+/// The song's position and length. Only the views that show them watch it.
+@MainActor
+final class PlayClock: ObservableObject {
+    @Published var position: Double = 0
+    @Published var duration: Double = 0
+}
+
 /// The music player: a queue, play/pause/seek, and the lock screen and headphone buttons.
 /// Plays through the system's own audio engine, so it keeps going in the background.
 @MainActor
@@ -13,8 +20,16 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var queue: [String] = []     // track ids
     @Published private(set) var index: Int = -1
     @Published private(set) var isPlaying = false
-    @Published private(set) var position: Double = 0
-    @Published private(set) var duration: Double = 0
+    /// where the song is: kept apart so only the progress bar and lyrics redraw twice a second, not every list
+    let clock = PlayClock()
+    var position: Double {
+        get { clock.position }
+        set { if clock.position != newValue { clock.position = newValue } }
+    }
+    var duration: Double {
+        get { clock.duration }
+        set { if clock.duration != newValue { clock.duration = newValue } }
+    }
     @Published private(set) var loading = false
     @Published var shuffle = false
     @Published var repeatMode: Repeat = .off

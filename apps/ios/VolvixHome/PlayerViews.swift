@@ -28,15 +28,10 @@ struct MiniPlayer: View {
                     }
                 }
                 .padding(8)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Theme.text.opacity(0.14))
-                        Capsule().fill(Theme.text).frame(width: geo.size.width * CGFloat(player.duration > 0 ? min(1, player.position / player.duration) : 0))
-                    }
-                }
-                .frame(height: 2)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 4)
+                MiniProgress(clock: player.clock)
+                    .frame(height: 2)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
             }
             .background(Theme.surface3)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -44,6 +39,44 @@ struct MiniPlayer: View {
             .padding(.bottom, 6)
             .contentShape(Rectangle())
             .onTapGesture { showFull = true }
+        }
+    }
+}
+
+struct MiniProgress: View {
+    @ObservedObject var clock: PlayClock
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.text.opacity(0.14))
+                Capsule().fill(Theme.text).frame(width: geo.size.width * CGFloat(clock.duration > 0 ? min(1, clock.position / clock.duration) : 0))
+            }
+        }
+    }
+}
+
+/// The song's progress: drag to move to another spot.
+struct ScrubBar: View {
+    let player: PlayerModel
+    @ObservedObject var clock: PlayClock
+    @State private var scrubbing = false
+    @State private var scrubTo: Double = 0
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Slider(value: Binding(get: { scrubbing ? scrubTo : clock.position }, set: { scrubTo = $0 }),
+                   in: 0...max(1, clock.duration),
+                   onEditingChanged: { editing in
+                       if editing { scrubbing = true; scrubTo = clock.position }
+                       else { player.seek(to: scrubTo); scrubbing = false }
+                   })
+                .tint(Theme.text)
+            HStack {
+                Text(formatTime(scrubbing ? scrubTo : clock.position)).font(.system(size: 12)).foregroundColor(Theme.text2)
+                Spacer()
+                Text(formatTime(clock.duration)).font(.system(size: 12)).foregroundColor(Theme.text2)
+            }
         }
     }
 }
@@ -129,7 +162,7 @@ struct NowPlayingView: View {
                     }
                     Spacer(minLength: 0)
                     if showLyrics {
-                        LyricsView(trackID: t.id)
+                        LyricsView(trackID: t.id, clock: player.clock)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         CoverView(albumID: t.albumId, corner: 12)
@@ -154,21 +187,8 @@ struct NowPlayingView: View {
                     }
                     .padding(.horizontal, 24)
 
-                    VStack(spacing: 4) {
-                        Slider(value: Binding(get: { scrubbing ? scrubTo : player.position }, set: { scrubTo = $0 }),
-                               in: 0...max(1, player.duration),
-                               onEditingChanged: { editing in
-                                   if editing { scrubbing = true; scrubTo = player.position }
-                                   else { player.seek(to: scrubTo); scrubbing = false }
-                               })
-                            .tint(Theme.text)
-                        HStack {
-                            Text(formatTime(scrubbing ? scrubTo : player.position)).font(.system(size: 12)).foregroundColor(Theme.text2)
-                            Spacer()
-                            Text(formatTime(player.duration)).font(.system(size: 12)).foregroundColor(Theme.text2)
-                        }
-                    }
-                    .padding(.horizontal, 24)
+                    ScrubBar(player: player, clock: player.clock)
+                        .padding(.horizontal, 24)
 
                     if let p = player.problem { ProblemBox(text: p).padding(.horizontal, 24) }
 

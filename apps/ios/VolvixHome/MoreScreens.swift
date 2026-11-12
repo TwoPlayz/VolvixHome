@@ -323,12 +323,13 @@ struct LyricsView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
     let trackID: String
+    @ObservedObject var clock: PlayClock
     @State private var lyrics: LyricsData?
     @State private var loaded = false
 
     private var current: Int? {
         guard let l = lyrics, !l.synced.isEmpty else { return nil }
-        let ms = Int(player.position * 1000) + 250
+        let ms = Int(clock.position * 1000) + 250
         var found: Int? = nil
         for (i, line) in l.synced.enumerated() {
             if line.ms <= ms { found = i } else { break }
@@ -377,7 +378,7 @@ struct LyricsView: View {
     /// A line of lyrics; if the song has word timing, the words already sung are lit.
     private func lineText(_ line: LyricLine, _ i: Int) -> Text {
         if i == current, !line.words.isEmpty {
-            let ms = Int(player.position * 1000) + 250
+            let ms = Int(clock.position * 1000) + 250
             var t = Text("")
             for w in line.words { t = t + Text(w.text).foregroundColor(ms >= w.ms ? Theme.text : Theme.text3) }
             return t

@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import SwiftUI
 
 /// A small place on the phone for what the app keeps: the library copy, your data, and downloaded songs.
@@ -33,6 +34,22 @@ final class DownloadStore: ObservableObject {
 
     private weak var app: AppModel?
     private var running = false
+    private let monitor = NWPathMonitor()
+    /// on mobile data (or another connection that costs): downloads wait for Wi-Fi unless the setting says otherwise
+    private var costly = false
+
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let costly = path.isExpensive || path.usesInterfaceType(.cellular)
+            Task { @MainActor in
+                guard let me = self else { return }
+                let was = me.costly
+                me.costly = costly
+                if was && !costly && !me.pending.isEmpty { me.problem = nil; me.start() }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "volvix.network"))
+    }
 
     private var folder: URL {
         let u = Persist.dir.appendingPathComponent("Downloads", isDirectory: true)
@@ -103,6 +120,12 @@ final class DownloadStore: ObservableObject {
 
     private func run() async {
         while let id = pending.first {
+            if costly && app?.fx.downloadMobile != true {
+                problem = "Waiting for Wi-Fi. Turn on \"Download on mobile data\" in Settings to download now."
+                working = nil
+                running = false
+                return
+            }
             working = id
             await fetch(id)
             pending.removeAll { $0 == id }
@@ -112,7 +135,10 @@ final class DownloadStore: ObservableObject {
     }
 
     private func fetch(_ id: String) async {
-        guard let api = app?.api, let url = api.streamURL(id) else { return }
+        guard let api = app?.api else { return }
+        var q = app?.fx.downloadQuality ?? "stream"
+        if q == "stream" { q = app?.quality ?? "original" }
+        guard let url = api.streamURL(id, quality: q) else { return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 120
         if let h = api.authHeader { req.setValue(h, forHTTPHeaderField: "Authorization") }

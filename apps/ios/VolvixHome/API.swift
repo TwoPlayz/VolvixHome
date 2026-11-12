@@ -112,9 +112,10 @@ final class API {
 
     // MARK: addresses
 
-    func streamURL(_ trackID: String) -> URL? {
+    func streamURL(_ trackID: String, quality override: String? = nil) -> URL? {
         var p = "/api/stream/" + encode(trackID)
-        if quality == "high" || quality == "normal" || quality == "low" { p += "?q=" + quality }
+        let q = override ?? quality
+        if q == "high" || q == "normal" || q == "low" { p += "?q=" + q }
         return url(p)
     }
 
