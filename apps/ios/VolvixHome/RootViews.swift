@@ -152,14 +152,22 @@ struct MainTabs: View {
     @EnvironmentObject var casting: CastHub
     @EnvironmentObject var party: PartyHub
     @State private var showFull = false
+    @State private var selected = 0
+    @State private var paths: [NavigationPath] = Array(repeating: NavigationPath(), count: 5)
 
     var body: some View {
-        TabView {
-            tab(HomeView()).tabItem { Label("Home", systemImage: "house.fill") }
-            tab(SearchView()).tabItem { Label("Search", systemImage: "magnifyingglass") }
-            tab(LibraryView()).tabItem { Label("Library", systemImage: "books.vertical.fill") }
-            tab(HouseholdView()).tabItem { Label("Household", systemImage: "person.2.fill") }
-            tab(RequestsView()).tabItem { Label("Requests", systemImage: "arrow.down.circle") }
+        TabView(selection: $selected) {
+            tab(HomeView(), 0).tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
+            tab(SearchView(), 1).tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(1)
+            tab(LibraryView(), 2).tabItem { Label("Library", systemImage: "books.vertical.fill") }.tag(2)
+            tab(HouseholdView(), 3).tabItem { Label("Household", systemImage: "person.2.fill") }.tag(3)
+            tab(RequestsView(), 4).tabItem { Label("Requests", systemImage: "arrow.down.circle") }.tag(4)
+        }
+        .onChange(of: app.openRoute) { route in
+            guard let r = route else { return }
+            showFull = false
+            paths[selected].append(r)
+            app.openRoute = nil
         }
         .tint(Theme.accent)
         .fullScreenCover(isPresented: $showFull) {
@@ -190,8 +198,8 @@ struct MainTabs: View {
         .task { await app.pollLoop() }
     }
 
-    private func tab<Content: View>(_ content: Content) -> some View {
-        NavigationStack {
+    private func tab<Content: View>(_ content: Content, _ i: Int) -> some View {
+        NavigationStack(path: $paths[i]) {
             content.routeDestinations()
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayer(showFull: $showFull) }

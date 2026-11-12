@@ -91,6 +91,7 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showParty = false
     @State private var showCredits = false
+    @State private var showTrackMenu = false
     @State private var addingTV = false
     @State private var tvAddress = ""
     @State private var scrubbing = false
@@ -177,8 +178,9 @@ struct NowPlayingView: View {
                             Text(t.artist).font(.system(size: 16)).foregroundColor(Theme.text2).lineLimit(1)
                         }
                         .contentShape(Rectangle())
-                        .onTapGesture { showCredits = true }
+                        .onTapGesture { showTrackMenu = true }
                         Spacer()
+                        AddToPlaylistButton(ids: [t.id])
                         Button { app.toggleLike(t.id) } label: {
                             Image(systemName: app.isLiked(t.id) ? "heart.fill" : "heart")
                                 .font(.system(size: 22)).foregroundColor(app.isLiked(t.id) ? Theme.accent : Theme.text)
@@ -225,6 +227,14 @@ struct NowPlayingView: View {
             }
         }
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(app).environmentObject(player) }
+        .confirmationDialog("", isPresented: $showTrackMenu, titleVisibility: .hidden) {
+            if let id = player.currentID, let t = app.track(id) {
+                Button("Go to album") { app.openRoute = .album(t.albumId); dismiss() }
+                Button("Go to artist") { app.openRoute = .artist(t.artist); dismiss() }
+                Button("Credits") { showCredits = true }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .sheet(isPresented: $showParty) { PartySheet().environmentObject(app).environmentObject(player).environmentObject(party) }
         .sheet(isPresented: $showCredits) {
             if let id = player.currentID { CreditsSheet(trackID: id).environmentObject(app).environmentObject(player) }

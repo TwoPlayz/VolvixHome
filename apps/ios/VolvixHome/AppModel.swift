@@ -33,6 +33,8 @@ final class AppModel: ObservableObject {
     @Published var invites: [PlaylistInvite] = []
     @Published var householdLists: [PlaylistInfo] = []
     @Published var followedIDs: [String] = []
+    /// a page to open now, from somewhere that can't push it itself (the full player)
+    @Published var openRoute: Route?
     @Published var artistInfos: [String: ArtistInfoData] = [:]
     @Published var quality: String = UserDefaults.standard.string(forKey: "volvix.quality") ?? "original"
     /// "system", "dark" or "light"
