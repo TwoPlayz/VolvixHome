@@ -339,6 +339,18 @@ impl Client {
         Ok(())
     }
 
+    /// The device that is playing says what it is playing, so your other devices can show it and control it.
+    pub fn device_report(&self, device: &str, state: serde_json::Value) -> Result<()> {
+        self.request("POST", "/api/devices/state").send_json(serde_json::json!({ "device": device, "state": state }))?;
+        Ok(())
+    }
+
+    /// Control another of your devices: play, pause, next, previous, seek, playAt.
+    pub fn device_command(&self, device: &str, to: &str, cmd: serde_json::Value) -> Result<()> {
+        self.request("POST", "/api/devices/command").send_json(serde_json::json!({ "device": device, "to": to, "cmd": cmd }))?;
+        Ok(())
+    }
+
     /// Hand the music (queue, song, spot) to another of your devices.
     pub fn device_transfer(&self, device: &str, to: &str, state: serde_json::Value) -> Result<()> {
         self.request("POST", "/api/devices/transfer").send_json(serde_json::json!({ "device": device, "to": to, "state": state }))?;

@@ -775,6 +775,9 @@ pub struct App {
     dev_events: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     dev_gen: Arc<std::sync::atomic::AtomicU64>,
     dev_started: bool,
+    /// what this computer last told the server it is playing (and when), so changes are sent and the rest is a heartbeat
+    dev_now_key: String,
+    dev_now_at: Instant,
     /// where the song that was just handed over starts
     pending_start: Duration,
     pub downloaded: HashSet<String>,
@@ -916,6 +919,8 @@ impl App {
             dev_events: Arc::new(std::sync::Mutex::new(vec![])),
             dev_gen: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             dev_started: false,
+            dev_now_key: String::new(),
+            dev_now_at: Instant::now(),
             pending_start: Duration::ZERO,
             song_cache,
             caching: HashSet::new(),
@@ -1703,7 +1708,52 @@ impl App {
                         self.say(if play { "Playing here" } else { "Press play to continue here" });
                     }
                 }
+                // another of your devices (the website, a phone) asked this one to play, pause, skip, seek…
+                Some("command") if e["to"].as_str() == Some(self.dev_id.as_str()) && self.party.is_none() => {
+                    let cmd = e["cmd"].clone();
+                    match cmd["op"].as_str() {
+                        Some("play") if !self.status.playing => tasks.push(self.update(Message::TogglePlay)),
+                        Some("pause") if self.status.playing => tasks.push(self.update(Message::TogglePlay)),
+                        Some("toggle") => tasks.push(self.update(Message::TogglePlay)),
+                        Some("next") => tasks.push(self.update(Message::Next)),
+                        Some("prev") => tasks.push(self.update(Message::Previous)),
+                        Some("seek") => tasks.push(self.update(Message::SeekTo(cmd["pos"].as_f64().unwrap_or(0.0).max(0.0) as f32))),
+                        Some("playAt") => {
+                            let items: Vec<String> = self.queue.items().to_vec();
+                            let i = cmd["index"].as_u64().unwrap_or(0) as usize;
+                            if i < items.len() {
+                                tasks.push(self.update(Message::PlayTracks(items, i, "Remote control".to_string())));
+                            }
+                        }
+                        _ => {}
+                    }
+                    self.dev_now_key.clear(); // tell the others what changed, soon
+                }
                 _ => {}
+            }
+        }
+        // this computer is the one playing: tell the others what it plays (when it changes, and every few seconds)
+        if signed_in && !self.offline && self.cast.is_none() && self.party.is_none() && self.dev_active.as_deref() == Some(self.dev_id.as_str()) {
+            if let (Some(track), Some(c)) = (self.status.track.clone(), self.client.clone()) {
+                let items = self.queue.items();
+                let index = self.queue.position().unwrap_or(0);
+                let key = format!("{track}|{index}|{}|{}", self.status.playing, items.len());
+                if key != self.dev_now_key || self.dev_now_at.elapsed() >= Duration::from_secs(5) {
+                    self.dev_now_key = key;
+                    self.dev_now_at = Instant::now();
+                    let from = index.saturating_sub(50);
+                    let to = (index + 450).min(items.len());
+                    let state = json!({
+                        "queue": items[from..to],
+                        "index": index - from,
+                        "posMs": self.status.position.as_millis() as u64,
+                        "playing": self.status.playing,
+                    });
+                    let me = self.dev_id.clone();
+                    std::thread::spawn(move || {
+                        let _ = c.device_report(&me, state);
+                    });
+                }
             }
         }
         tasks
