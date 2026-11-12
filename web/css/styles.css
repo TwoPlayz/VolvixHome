@@ -2539,7 +2539,7 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .row-like { opacity: 0; }
 .row-like.on, .track:hover .row-like, .track:focus-within .row-like { opacity: 1; }
 .np-like { width: 40px; height: 40px; }
-@media (max-width: 760px) { .row-like { opacity: 1; } .player-like { display: none; } }
+@media (max-width: 760px) { .row-like { opacity: 1; } }
 .cover--liked { display: grid; place-items: center; padding: 0; color: #fff; background: linear-gradient(135deg, #5b3cc4 0%, #c23a7a 55%, #e5484d 100%); }
 .cover--liked .icon { width: 42%; height: 42%; }
 .cover--liked.thumb .icon, .thumb .cover--liked .icon { width: 50%; height: 50%; }
@@ -2755,6 +2755,11 @@ html.player-empty .queue-panel { bottom: var(--gap); }
     background: var(--surface-3); box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
   }
   html:not(.player-empty) .view { padding-bottom: 92px; }
+  /* the whole mini player opens Now Playing, so the song in it is not a card of its own; the heart sits beside play */
+  .player-now, .player-now:hover, .player-now:active { padding: 0; border-radius: 0; background: none; }
+  .player-track { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .player-like { flex: none; width: 34px; height: 34px; display: grid; place-items: center; }
+  .player-like[hidden] { display: none; }
 }
 
 /* the tab bar's height, including the iPhone home-bar area under it (app.js sets the measured height) */

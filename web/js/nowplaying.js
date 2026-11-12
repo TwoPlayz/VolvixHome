@@ -152,7 +152,7 @@ window.Spin = window.Spin || {};
   document.addEventListener('click', function (e) {
     if (!phone.matches) return;
     const bar = e.target.closest('.player');
-    if (!bar || e.target.closest('[data-player="toggle"]')) return;
+    if (!bar || e.target.closest('[data-player="toggle"], .player-like, [data-p="like"]')) return;
     if (e.target.closest('.player-meta a[href]')) return; // a normal link: let it go to the album / artist
     e.preventDefault();
     e.stopPropagation();
