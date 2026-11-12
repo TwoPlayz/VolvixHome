@@ -173,10 +173,19 @@ struct TopBar: View {
                 }
             }
             .buttonStyle(.plain)
-            NavigationLink(value: Route.account) {
+            Menu {
+                Section(app.user.map { $0.name + ($0.admin ? " · Admin" : "") } ?? "Account") {
+                    Button { app.openRoute = .profile } label: { Label("Profile", systemImage: "person.crop.circle") }
+                    if app.can("members") { Button { app.openRoute = .members } label: { Label("Members", systemImage: "person.3") }  }
+                    Button { app.openRoute = .settings } label: { Label("Settings", systemImage: "gearshape") }
+                    Button { app.openRoute = .playback } label: { Label("Playback", systemImage: "slider.horizontal.3") }
+                    if app.can("share") || app.can("members") { Button { app.openRoute = .shares } label: { Label("Share links", systemImage: "link") } }
+                    Button { app.openRoute = .rewind(app.rewindYears.last ?? Calendar.current.component(.year, from: Date())) } label: { Label("Rewind", systemImage: "gobackward") }
+                }
+                Button(role: .destructive) { Task { await app.signOut() } } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
+            } label: {
                 AvatarView(id: app.user?.id ?? "", name: app.user?.name ?? "me", size: 32)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)

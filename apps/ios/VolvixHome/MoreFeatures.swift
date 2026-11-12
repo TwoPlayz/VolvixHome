@@ -158,7 +158,9 @@ struct SearchView: View {
     var body: some View {
         let typed = !query.trimmingCharacters(in: .whitespaces).isEmpty
         VStack(spacing: 0) {
-            TopBar()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    VStack(spacing: 0) {
             Text("Search").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
             HStack(spacing: 10) {
@@ -189,8 +191,8 @@ struct SearchView: View {
             }
             .padding(.vertical, 10)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                    }
+
                     if !typed {
                         if app.albums.isEmpty {
                             Text("Music added to the server shows up here.").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.top, 30).frame(maxWidth: .infinity)
@@ -288,6 +290,7 @@ struct SearchView: View {
                 .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)

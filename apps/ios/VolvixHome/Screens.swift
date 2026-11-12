@@ -28,7 +28,6 @@ struct HomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar()
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     Text(greeting).font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text).padding(.horizontal, 16)
@@ -114,6 +113,7 @@ struct HomeView: View {
                 .padding(.bottom, 24)
             }
             .refreshable { await app.refresh() }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
@@ -189,7 +189,8 @@ struct LibraryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar()
+            ScrollView {
+                VStack(spacing: 0) {
             Text("Your Library").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
             ScrollView(.horizontal, showsIndicators: false) {
@@ -216,7 +217,6 @@ struct LibraryView: View {
                 }
                 .padding(.horizontal, 16).padding(.bottom, 4)
             }
-            ScrollView {
                 switch tab {
                 case .albums: albums
                 case .artists: artists
@@ -225,8 +225,10 @@ struct LibraryView: View {
                 case .browse: BrowseSections()
                 case .downloaded: saved
                 }
+                }
             }
             .refreshable { await app.refresh() }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)

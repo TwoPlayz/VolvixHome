@@ -7,7 +7,6 @@ struct HouseholdView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Household").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
@@ -57,6 +56,7 @@ struct HouseholdView: View {
                 .padding(16)
             }
             .refreshable { await app.pollOnce() }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
@@ -235,7 +235,6 @@ struct RequestsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Requests").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
@@ -292,6 +291,7 @@ struct RequestsView: View {
                 .padding(16)
             }
             .refreshable { await reload() }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
         .background(Theme.surface)
         .navigationBarHidden(true)

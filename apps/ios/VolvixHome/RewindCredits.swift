@@ -80,9 +80,16 @@ struct RewindView: View {
         let r = summary()
         ScrollView {
             if r.plays == 0 {
+                let thisYear = Calendar.current.component(.year, from: Date())
                 VStack(spacing: 8) {
-                    Text("No plays in \(String(year))").font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
-                    Text("Nothing was recorded that year.").font(.system(size: 14)).foregroundColor(Theme.text2)
+                    if year >= thisYear {
+                        Text("Your \(String(year)) Rewind opens on January 1, \(String(year + 1))").font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text).multilineTextAlignment(.center)
+                        let n = app.stats.years[year]?.plays.count ?? 0
+                        Text(n > 0 ? "It's building as you listen: \(n) songs so far." : "Play some music and it starts building.").font(.system(size: 14)).foregroundColor(Theme.text2)
+                    } else {
+                        Text("No plays in \(String(year))").font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
+                        Text("Nothing was recorded that year.").font(.system(size: 14)).foregroundColor(Theme.text2)
+                    }
                 }
                 .padding(40)
             } else {
