@@ -394,4 +394,15 @@ pub fn set_app_identity() {
     unsafe {
         let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("app.volvix.home"));
     }
+    // Windows names an app in the volume mixer and the media overlay from what is registered for its id; without this it says
+    // "Unknown app". Registering the name and icon needs no installer and no admin rights.
+    if let Ok(exe) = std::env::current_exe() {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        if let Ok((key, _)) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(r"Software\Classes\AppUserModelId\app.volvix.home") {
+            let _ = key.set_value("DisplayName", &"Volvix Home");
+            let _ = key.set_value("IconUri", &exe.display().to_string());
+            let _ = key.set_value("IconBackgroundColor", &"FFE5484D");
+        }
+    }
 }
