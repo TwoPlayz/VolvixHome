@@ -430,7 +430,7 @@ struct PlaylistView: View {
             }
         } label: {
             Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
-                .frame(width: 44, height: 44).background(Theme.surface3).clipShape(Circle())
+                .frame(width: 44, height: 44).glass(Circle())
         }
     }
 

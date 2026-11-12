@@ -10,8 +10,11 @@ struct ServerError: LocalizedError {
 
 /// Talks to your Volvix Home server (the same API the website and the Windows app use).
 final class API {
-    let base: String
+    var base: String
     var token: String?
+    /// the server answered "use https instead": told to whoever keeps the saved address
+    var onMoved: ((String) -> Void)?
+    private let keeper = RedirectKeeper()
     /// "original", or "high" / "normal" / "low" when the server can convert songs (needs ffmpeg there)
     var quality: String = "original"
     private let session: URLSession
@@ -24,7 +27,12 @@ final class API {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        self.session = URLSession(configuration: cfg)
+        self.session = URLSession(configuration: cfg, delegate: keeper, delegateQueue: nil)
+        keeper.moved = { [weak self] newBase in
+            guard let self = self else { return }
+            self.base = newBase
+            self.onMoved?(newBase)
+        }
     }
 
     var authHeader: String? {
@@ -128,6 +136,28 @@ final class API {
 
     func encode(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s
+    }
+}
+
+/// A redirect (http to https at a domain) must keep the request as it was: sent on as a GET, a sign-in would be answered "405".
+final class RedirectKeeper: NSObject, URLSessionTaskDelegate {
+    var moved: ((String) -> Void)?
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        var next = request
+        if let old = task.originalRequest {
+            next.httpMethod = old.httpMethod
+            next.httpBody = old.httpBody
+            for (k, v) in old.allHTTPHeaderFields ?? [:] where next.value(forHTTPHeaderField: k) == nil { next.setValue(v, forHTTPHeaderField: k) }
+            // same machine, now over https: remember the better address
+            if let a = old.url, let b = next.url, a.host == b.host, a.scheme == "http", b.scheme == "https" {
+                var c = URLComponents(url: b, resolvingAgainstBaseURL: false)
+                c?.path = ""
+                c?.query = nil
+                if let s = c?.string { moved?(s) }
+            }
+        }
+        completionHandler(next)
     }
 }
 

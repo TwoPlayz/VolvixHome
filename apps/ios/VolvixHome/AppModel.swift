@@ -65,6 +65,17 @@ final class AppModel: ObservableObject {
             api?.quality = quality
             phase = (token ?? "").isEmpty ? .signIn : .loading
         }
+        hookMoved()
+    }
+
+    /// If the server sends us from http to https, keep using https from now on.
+    private func hookMoved() {
+        api?.onMoved = { [weak self] newBase in
+            Task { @MainActor in
+                self?.serverURL = newBase
+                UserDefaults.standard.set(newBase, forKey: "volvix.home.server")
+            }
+        }
     }
 
     /// Called once when the app opens: with a saved sign-in, load the library.
@@ -80,6 +91,7 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.removeObject(forKey: tokenKey)
         api = API(base: serverURL, token: nil)
         api?.quality = quality
+        hookMoved()
         message = nil
         phase = .signIn
     }

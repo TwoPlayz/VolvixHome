@@ -181,7 +181,7 @@ struct SearchView: View {
                     ForEach(types, id: \.0) { t in
                         Button { type = t.0 } label: {
                             Text(t.1).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 16).padding(.vertical, 8)
-                                .background(type == t.0 ? Theme.text : Theme.surface3).foregroundColor(type == t.0 ? Theme.surface : Theme.text).clipShape(Capsule())
+                                .foregroundColor(type == t.0 ? Theme.surface : Theme.text).glass(Capsule(), tint: type == t.0 ? Theme.text : nil)
                         }
                     }
                 }

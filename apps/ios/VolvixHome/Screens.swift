@@ -294,9 +294,8 @@ struct LibraryView: View {
         Button(action: action) {
             Text(title).font(.system(size: 14, weight: .semibold))
                 .padding(.horizontal, 16).padding(.vertical, 8)
-                .background(on ? Theme.text : Theme.surface3)
                 .foregroundColor(on ? Theme.surface : Theme.text)
-                .clipShape(Capsule())
+                .glass(Capsule(), tint: on ? Theme.text : nil)
         }
     }
 

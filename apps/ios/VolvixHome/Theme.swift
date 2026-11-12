@@ -41,6 +41,22 @@ enum Theme {
     }
 }
 
+extension View {
+    /// Liquid glass on iOS 26 and later; a frosted material on older versions.
+    @ViewBuilder
+    func glass<S: Shape>(_ shape: S, tint: Color? = nil) -> some View {
+        if #available(iOS 26.0, *) {
+            if let tint = tint {
+                self.glassEffect(.regular.tint(tint).interactive(), in: shape)
+            } else {
+                self.glassEffect(.regular.interactive(), in: shape)
+            }
+        } else {
+            self.background(tint ?? Color.clear, in: shape).background(.ultraThinMaterial, in: shape)
+        }
+    }
+}
+
 func formatTime(_ seconds: Double) -> String {
     if !seconds.isFinite || seconds < 0 { return "0:00" }
     let s = Int(seconds.rounded(.down))

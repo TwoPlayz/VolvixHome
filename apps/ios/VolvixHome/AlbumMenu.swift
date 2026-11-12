@@ -6,8 +6,14 @@ struct AddToPlaylistButton: View {
     @EnvironmentObject var app: AppModel
     let ids: [String]
     var label = "plus"
+    var plain = false
     @State private var naming = false
     @State private var name = ""
+
+    private var inAny: Bool {
+        guard ids.count == 1, let id = ids.first else { return false }
+        return app.editablePlaylists.contains { $0.trackIDs.contains(id) }
+    }
 
     var body: some View {
         Menu {
@@ -16,8 +22,12 @@ struct AddToPlaylistButton: View {
             }
             Button { naming = true } label: { Label("New playlist…", systemImage: "plus") }
         } label: {
-            Image(systemName: label).font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
-                .frame(width: 44, height: 44).background(Theme.surface3).clipShape(Circle())
+            if plain {
+                Image(systemName: inAny ? "checkmark" : label).font(.system(size: 20)).foregroundColor(inAny ? Theme.accent : Theme.text).frame(width: 40, height: 44)
+            } else {
+                Image(systemName: label).font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
+                    .frame(width: 44, height: 44).glass(Circle())
+            }
         }
         .alert("New playlist", isPresented: $naming) {
             TextField("Name", text: $name)
@@ -55,7 +65,7 @@ struct AlbumMenuButton: View {
             }
         } label: {
             Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
-                .frame(width: 44, height: 44).background(Theme.surface3).clipShape(Circle())
+                .frame(width: 44, height: 44).glass(Circle())
         }
         .sheet(isPresented: $sharing) { ShareLinkSheet(kind: "album", name: album.title, trackIDs: ids).environmentObject(app) }
         .sheet(isPresented: $info) { AlbumInfoSheet(album: album).environmentObject(app) }

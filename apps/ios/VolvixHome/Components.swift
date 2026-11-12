@@ -309,9 +309,8 @@ struct PillButton: View {
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 11)
-            .background(primary ? Theme.accent : Theme.surface3)
-            .foregroundColor(.white)
-            .clipShape(Capsule())
+            .foregroundColor(primary ? .white : Theme.text)
+            .glass(Capsule(), tint: primary ? Theme.accent : nil)
         }
     }
 }
