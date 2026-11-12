@@ -1,6 +1,6 @@
 ﻿[package]
 name = "volvix-home"
-version = "1.4.2"
+version = "1.4.3"
 edition = "2021"
 description = "Volvix Home: a self-hosted music server for your household. Streams your own library (e.g. the folder Lidarr fills)."
 publish = false
