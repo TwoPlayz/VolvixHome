@@ -28,21 +28,14 @@ window.Spin = window.Spin || {};
   const settings = function () { return S.store.state.settings || {}; };
   const dbToGain = function (db) { return Math.pow(10, db / 20); };
 
-  // In the iPhone app the Web Audio chain (equalizer, crossfade, leveling) can make iOS go quiet when the app is in the
-  // background, so there it is only built when the equalizer is switched on.
-  const iosApp = function () { return S.native === 'ios'; };
-  const eqOn = function () { const s = settings(); return !!(s.eq && s.eq.on); };
-
   function needed() {
     const s = settings();
-    if (iosApp()) return eqOn();
     return !!(s.eq && s.eq.on) || Number(s.crossfade) > 0 || (s.leveling && s.leveling !== 'off');
   }
 
   /** Build the audio chain (once). Returns false if this browser can't. */
   function ensure() {
     if (nodes) return true;
-    if (iosApp() && !eqOn()) return false;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC || !S.player || !S.player.audio) return false;
     try {
