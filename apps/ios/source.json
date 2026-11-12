@@ -18,6 +18,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "1.3.3",
+          "buildVersion": "24",
+          "date": "2026-11-12",
+          "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v1.3.3/VolvixHome.ipa",
+          "size": 119297,
+          "localizedDescription": "Volvix Home 1.3.3",
+          "minOSVersion": "15.0"
+        },
+        {
           "version": "1.3.2",
           "buildVersion": "23",
           "date": "2026-11-12",
@@ -171,11 +180,11 @@
           "minOSVersion": "15.0"
         }
       ],
-      "version": "1.3.2",
+      "version": "1.3.3",
       "versionDate": "2026-11-12",
-      "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v1.3.2/VolvixHome.ipa",
-      "size": 117514,
-      "versionDescription": "Volvix Home 1.3.2"
+      "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v1.3.3/VolvixHome.ipa",
+      "size": 119297,
+      "versionDescription": "Volvix Home 1.3.3"
     }
   ],
   "news": []
