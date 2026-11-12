@@ -577,6 +577,15 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                 items.push(item("user", "Go to artist", Message::Go(Page::Artist(a.artist.clone())), false));
             }
         }
+        crate::MenuKind::Quality { title, detail } => {
+            let note = column![
+                text(title.as_str()).size(14).font(ui::FONT_BOLD).color(ui::TEXT()),
+                ui::dim(detail.clone(), 12),
+                ui::dim("Playing the original file from your server, untouched.", 12),
+            ]
+            .spacing(4);
+            items.push(container(note).padding([8, 12]).into());
+        }
         crate::MenuKind::Playlist(id) => {
             if let Some(p) = app.playlist(id) {
                 if p.can_manage() {
@@ -607,7 +616,7 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
         }
     }
     let (win_w, win_h) = crate::WINDOW_SIZE.lock().map(|w| *w).unwrap_or((1200.0, 800.0));
-    let (w, h) = (232.0, items.len() as f32 * 38.0 + 16.0);
+    let (w, h) = if matches!(m.kind, crate::MenuKind::Quality { .. }) { (260.0, 100.0) } else { (232.0, items.len() as f32 * 38.0 + 16.0) };
     let left = (m.at.0 + 14.0 - w).clamp(8.0, (win_w - w - 8.0).max(8.0));
     let top = if m.at.1 + 14.0 + h > win_h - 8.0 { (m.at.1 - h - 8.0).max(8.0) } else { m.at.1 + 14.0 };
     let card = container(Column::with_children(items).spacing(0)).width(w).padding(6).style(ui::dialog);
@@ -1596,23 +1605,36 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     // where the sound goes: this device, a TV or speaker, or a listening party (lit while either is on)
     let playing_elsewhere = app.cast.is_some() || app.party.is_some();
     // the sound quality of what plays (a click opens the album's details), next to the cast button
-    let quality_text = track
+    // what the song is: the mark, a short tip, and (on a click) a small note like the website's; nothing to choose
+    let (quality_title, quality_detail, quality_level, quality_hires) = track
         .and_then(|t| app.lib.album_of(t))
         .map(|a| {
             let q = &a.quality;
             if q.lossless {
                 let hi = q.bits.unwrap_or(16) >= 24 || q.khz.unwrap_or(44.1) > 48.0;
-                format!("Quality: {}", if hi { "Hi-Res Lossless" } else { "Lossless" })
+                let detail = [q.bits.map(|b| format!("{b}-bit")), q.khz.map(|k| format!("{k} kHz")), Some(q.codec.clone()).filter(|c| !c.is_empty())].into_iter().flatten().collect::<Vec<_>>().join(" / ");
+                (if hi { "Hi-Res Lossless" } else { "Lossless" }.to_string(), detail, 4u8, hi)
             } else {
                 let k = q.kbps.unwrap_or(0);
-                format!("Quality: {}{}", if k >= 256 { "High Quality" } else if k >= 128 { "Normal" } else { "Low" }, if k > 0 { format!(" ({k} kbps)") } else { String::new() })
+                (
+                    if k >= 256 { "High Quality" } else if k >= 128 { "Normal" } else { "Low" }.to_string(),
+                    format!("{}{}", if q.codec.is_empty() { "Audio" } else { q.codec.as_str() }, if k > 0 { format!(" {k} kbps") } else { String::new() }),
+                    if k >= 256 { 3u8 } else if k >= 128 { 2 } else { 1 },
+                    false,
+                )
             }
         })
-        .unwrap_or_else(|| "Audio quality".to_string());
-    let quality_album = track.and_then(|t| app.lib.album_of(t)).map(|a| a.id.clone());
+        .unwrap_or_else(|| ("Lossless".to_string(), String::new(), 4u8, false));
+    let quality_text = format!("Quality: {quality_title}");
     let right = row![
         horizontal_space(),
-        ui::tip(button(container(ui::quality_icon(17.0, ui::TEXT_2())).center_x(16).center_y(16)).padding(8).style(ui::icon_btn(false)).on_press_maybe(quality_album.map(Message::ShowAlbumInfo)), &quality_text),
+        ui::tip(
+            button(container(ui::quality_icon(17.0, if quality_hires { ui::ACCENT() } else { ui::TEXT_2() }, quality_level)).center_x(16).center_y(16))
+                .padding(8)
+                .style(ui::icon_btn(quality_hires))
+                .on_press_maybe(track.map(|_| Message::PopMenuOpen(crate::MenuKind::Quality { title: quality_title.clone(), detail: quality_detail.clone() }))),
+            &quality_text,
+        ),
         ui::tip(button(container(ui::cast_icon(17.0, if playing_elsewhere { ui::ACCENT() } else { ui::TEXT_2() })).center_x(16).center_y(16)).padding(8).style(ui::icon_btn(playing_elsewhere)).on_press(Message::PlayOn), "Play on"),
         ui::tip(button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }), "Queue"),
         ui::tip(button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute), if app.volume <= 0.001 { "Unmute" } else { "Mute" }),

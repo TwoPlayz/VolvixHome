@@ -3024,7 +3024,7 @@ a.gm-link:focus-visible { outline: none; }
   .ctrl-play .icon { width: 16px; height: 16px; }
   .player-center { gap: 4px; }
   .player-right { gap: 2px; }
-  .player-right .q-btn, .player-right .party-btn, .player-more { display: none !important; } /* not in the app's player bar */
+  .player-right .party-btn, .player-more { display: none !important; } /* not in the app's player bar (the quality mark stays, next to Output) */
   /* the bar stays when nothing's playing ("Nothing playing"), like the app */
   html.player-empty .player { display: grid; }
   html.player-empty .app { grid-template-rows: minmax(0, 1fr) var(--player-h); padding-bottom: 0; }

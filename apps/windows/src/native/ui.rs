@@ -205,9 +205,17 @@ pub fn icon_btn(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
 
 /// The website's cast icon (a screen and a speaker), drawn the same way.
 /// The sound-quality mark of the player bar: five bars, like a waveform.
-pub fn quality_icon<'a, M: 'a>(size: f32, color: Color) -> Element<'a, M> {
-    const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M4 10v4M8 6v12M12 3v18M16 8v8M20 11v2"/></svg>"#;
-    iced::widget::svg(iced::widget::svg::Handle::from_memory(SVG.as_bytes())).width(size).height(size).style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(color) }).into()
+/// `level`: 1 low, 2 normal, 3 high, 4 lossless (the fuller the wave, the better), as on the website.
+pub fn quality_icon<'a, M: 'a>(size: f32, color: Color, level: u8) -> Element<'a, M> {
+    let shape = [0.35f32, 0.7, 1.0, 0.55, 0.85, 0.4];
+    let amp = [0.0f32, 7.0, 11.0, 15.0, 19.0][level.clamp(1, 4) as usize];
+    let mut bars = String::new();
+    for (i, s) in shape.iter().enumerate() {
+        let h = (s * amp).max(2.5);
+        bars.push_str(&format!(r#"<rect x="{:.1}" y="{:.2}" width="2.2" height="{:.2}" rx="1.1" fill="white"/>"#, 2.6 + i as f32 * 3.4, 12.0 - h / 2.0, h));
+    }
+    let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">{bars}</svg>"#);
+    iced::widget::svg(iced::widget::svg::Handle::from_memory(svg.into_bytes())).width(size).height(size).style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(color) }).into()
 }
 
 pub fn cast_icon<'a, M: 'a>(size: f32, color: Color) -> Element<'a, M> {

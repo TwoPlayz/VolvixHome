@@ -19,8 +19,9 @@ struct Album: Codable, Identifiable, Hashable {
     var copyright: String?
     /// the art is a picture someone chose (not the album's own), so it can be changed or removed
     var customCover: Bool
+    var quality: AlbumQuality
 
-    enum CodingKeys: String, CodingKey { case id, title, artist, year, genre, trackIds, cover, coverV, added, label, copyright, customCover }
+    enum CodingKeys: String, CodingKey { case id, title, artist, year, genre, trackIds, cover, coverV, added, label, copyright, customCover, quality }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -36,6 +37,7 @@ struct Album: Codable, Identifiable, Hashable {
         label = try? c.decode(String.self, forKey: .label)
         copyright = try? c.decode(String.self, forKey: .copyright)
         customCover = (try? c.decode(Bool.self, forKey: .customCover)) ?? false
+        quality = (try? c.decode(AlbumQuality.self, forKey: .quality)) ?? AlbumQuality()
     }
 }
 
@@ -65,6 +67,47 @@ struct Track: Codable, Identifiable, Hashable {
         explicit = (try? c.decode(Bool.self, forKey: .explicit)) ?? false
         credits = (try? c.decode([Credit].self, forKey: .credits)) ?? []
         replayGain = try? c.decode(ReplayGain.self, forKey: .replayGain)
+    }
+}
+
+/// What the files of an album are: lossless (with bit depth and sample rate) or a lossy format with its bit rate.
+struct AlbumQuality: Codable, Hashable {
+    var lossless = false
+    var bits: Int?
+    var khz: Double?
+    var codec = ""
+    var kbps: Int?
+
+    init() {}
+
+    enum CodingKeys: String, CodingKey { case lossless, bits, khz, codec, kbps }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lossless = (try? c.decode(Bool.self, forKey: .lossless)) ?? false
+        bits = try? c.decode(Int.self, forKey: .bits)
+        khz = try? c.decode(Double.self, forKey: .khz)
+        codec = (try? c.decode(String.self, forKey: .codec)) ?? ""
+        kbps = try? c.decode(Int.self, forKey: .kbps)
+    }
+
+    var hires: Bool { lossless && ((bits ?? 16) >= 24 || (khz ?? 44.1) > 48) }
+    /// 1 low, 2 normal, 3 high, 4 lossless
+    var level: Int {
+        if lossless { return 4 }
+        let k = kbps ?? 0
+        return k >= 256 ? 3 : (k >= 128 ? 2 : 1)
+    }
+    var label: String {
+        if lossless { return hires ? "Hi-Res Lossless" : "Lossless" }
+        let k = kbps ?? 0
+        return k >= 256 ? "High Quality" : (k >= 128 ? "Normal" : "Low")
+    }
+    var detail: String {
+        if lossless {
+            return [bits.map { "\($0)-bit" }, khz.map { "\($0) kHz" }, codec.isEmpty ? nil : codec].compactMap { $0 }.joined(separator: " / ")
+        }
+        return (codec.isEmpty ? "Audio" : codec) + ((kbps ?? 0) > 0 ? " \(kbps ?? 0) kbps" : "")
     }
 }
 

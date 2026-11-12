@@ -53,7 +53,22 @@ window.Spin = window.Spin || {};
         case 'prev': command({ op: 'prev' }); return true;
         case 'seek': command({ op: 'seek', pos: args[0] }); return true;
         case 'playAt': command({ op: 'playAt', index: args[0] }); return true;
-        case 'play': stopRemote(); return false; // you started something here: it plays here
+        case 'play': {
+          // the device that is playing keeps the music: the song you picked plays there. Only when it is paused does the
+          // device you picked on take over.
+          if (D.now && D.now.playing) {
+            const ids = args[0] || [];
+            const index = args[1] === -1 ? 0 : (args[1] || 0);
+            command({ op: 'setQueue', queue: ids.slice(0, 500), index: index });
+            const o = other(D.active);
+            S.toast('Playing on ' + (o ? o.name : 'the other device'), 'devices');
+            return true;
+          }
+          stopRemote();
+          return false;
+        }
+        case 'addNext': if (D.now && D.now.playing) { command({ op: 'addNext', ids: args[0] }); return true; } S.toast('Not available while you control another device'); return true;
+        case 'addToQueue': if (D.now && D.now.playing) { command({ op: 'add', ids: args[0] }); return true; } S.toast('Not available while you control another device'); return true;
         default: S.toast('Not available while you control another device'); return true;
       }
     },
@@ -98,6 +113,12 @@ window.Spin = window.Spin || {};
     else if (c.op === 'prev') S.player.prev();
     else if (c.op === 'seek') S.player.seekTo(Number(c.pos) || 0);
     else if (c.op === 'playAt') S.player.play(st.queue.slice(), Number(c.index) || 0, st.context);
+    else if (c.op === 'setQueue') {
+      const ids = (c.queue || []).filter(function (id) { return !!S.data.track(id); });
+      if (ids.length) S.player.play(ids, Math.min(Number(c.index) || 0, ids.length - 1), null);
+    }
+    else if (c.op === 'add') S.player.addToQueue((c.ids || []).filter(function (id) { return !!S.data.track(id); }));
+    else if (c.op === 'addNext') S.player.addNext((c.ids || []).filter(function (id) { return !!S.data.track(id); }));
     setTimeout(function () { report(true); }, 250);
   }
 

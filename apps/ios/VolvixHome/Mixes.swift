@@ -114,9 +114,9 @@ enum MixEngine {
                              topInt(recent, 40).filter(playable).filter { (recent[$0] ?? 0) >= 2 }, "repeat"))
             var everything: [String: Int] = [:]
             for (id, n) in plays where app.track(id) != nil { everything[id] = n }
-            list.append(make("top", "Your top songs", "All-time favourites on this server", topInt(everything, 50).filter(playable), "heart.fill"))
+            list.append(make("top", "Your top songs", "All-time favourites on this server", topInt(everything, 50).filter(playable), "heart"))
             let forgotten = plays.keys.filter { (plays[$0] ?? 0) >= 3 && now - (last[$0] ?? 0) > 60 * day && app.track($0) != nil && playable($0) }.sorted()
-            list.append(make("rediscover", "Rediscover", "Songs you used to play a lot and haven't for a while", Array(shuffled(forgotten).prefix(40)), "clock.arrow.circlepath"))
+            list.append(make("rediscover", "Rediscover", "Songs you used to play a lot and haven't for a while", Array(shuffled(forgotten).prefix(40)), "history"))
 
             for ar in top(artist, 3) {
                 let own = all.filter { info($0)?.0.artist.lowercased() == ar }
@@ -128,7 +128,7 @@ enum MixEngine {
                 }
                 let name = own.first.flatMap { info($0)?.0.artist } ?? ar
                 let ids = pick(Array(shuffled(own).prefix(14)) + shuffled(like), 30, 4)
-                list.append(make("more-" + String(fnvHash(ar), radix: 36), name + " & more", "Mixed with similar music from your library", ids, "person.fill"))
+                list.append(make("more-" + String(fnvHash(ar), radix: 36), name + " & more", "Mixed with similar music from your library", ids, "user"))
             }
 
             let addedCut = now - 90 * day
@@ -142,9 +142,9 @@ enum MixEngine {
             // a little chance in the ranking so it isn't the same top 40 every day
             var jitter: [String: Double] = [:]
             for id in unplayed { jitter[id] = score(id) + rand.next() * 0.6 }
-            list.append(make("discover", "Discover", "Songs you haven't played yet that fit your taste", pick(unplayed.sorted { (jitter[$0] ?? 0) > (jitter[$1] ?? 0) }, 40, 3), "magnifyingglass"))
+            list.append(make("discover", "Discover", "Songs you haven't played yet that fit your taste", pick(unplayed.sorted { (jitter[$0] ?? 0) > (jitter[$1] ?? 0) }, 40, 3), "search"))
         } else {
-            list.append(make("start", "Start here", "A mix of what's on the server. Play a few songs and this gets personal.", pick(shuffled(all), 30, 3), "music.note"))
+            list.append(make("start", "Start here", "A mix of what's on the server. Play a few songs and this gets personal.", pick(shuffled(all), 30, 3), "music"))
         }
         return list.compactMap { $0 }
     }
@@ -169,39 +169,50 @@ enum MixEngine {
     }
 }
 
-/// A card for a mix, as on the website's phone view: a collage of the albums its songs come from, a dark fade along the
-/// bottom, and the mix's name (with its icon) printed on it in heavy white type.
+/// A card for a mix, as on the website and the Windows app: red fading into the mix's own colour, its icon and its name in the
+/// middle.
 struct MixCard: View {
     @EnvironmentObject var app: AppModel
     let mix: Mix
     var width: CGFloat = 150
 
     var body: some View {
-        let size = max(13, min(22, width * 0.11))
         NavigationLink(value: Route.mix(mix.id)) {
             VStack(alignment: .leading, spacing: 6) {
-                ZStack(alignment: .bottomLeading) {
-                    Collage(ids: mix.ids)
-                    LinearGradient(stops: [.init(color: Color.black.opacity(0.78), location: 0), .init(color: Color.black.opacity(0.35), location: 0.55), .init(color: .clear, location: 1)],
-                                   startPoint: .bottom, endPoint: .top)
-                        .frame(height: width * 0.62)
-                    HStack(alignment: .bottom, spacing: 5) {
-                        Image(systemName: mix.icon).font(.system(size: size * 0.9, weight: .bold)).opacity(0.9)
-                        Text(mix.title).font(.system(size: size, weight: .heavy)).tracking(-0.02 * size).lineLimit(2).multilineTextAlignment(.leading)
-                            .shadow(color: .black.opacity(0.4), radius: 3, y: 1)
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, width * 0.09)
-                    .padding(.bottom, width * 0.08)
-                }
-                .frame(width: width, height: width)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                MixTile(mix: mix, icon: 30, font: 16)
+                    .frame(width: width, height: width)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 Text(mix.title).font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
                 Text(mix.sub).font(.system(size: 12)).foregroundColor(Theme.text2).lineLimit(2).multilineTextAlignment(.leading)
             }
             .frame(width: width, alignment: .leading)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The colours the website gives each mix (picked by its id).
+func mixTint(_ seed: String) -> Color {
+    let tints: [UInt32] = [0x3A2A4F, 0x1F3B4D, 0x4A2C2C, 0x244034, 0x453A22, 0x2B2F4A]
+    var h: UInt32 = 5381
+    for b in seed.utf8 { h = (h &* 33) ^ UInt32(b) }
+    return Color(hex: tints[Int(h % UInt32(tints.count))])
+}
+
+struct MixTile: View {
+    let mix: Mix
+    var icon: CGFloat = 30
+    var font: CGFloat = 16
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Theme.accent, mixTint(mix.id)], startPoint: .bottomLeading, endPoint: .topTrailing)
+            VStack(spacing: 10) {
+                SVGIcon(name: mix.icon, size: icon, color: .white, lineWidth: 1.8)
+                Text(mix.title).font(.system(size: font, weight: .semibold)).foregroundColor(.white).multilineTextAlignment(.center).lineLimit(3)
+            }
+            .padding(12)
+        }
     }
 }
 
@@ -231,7 +242,7 @@ struct Collage: View {
             Group {
                 switch a.count {
                 case 0:
-                    ZStack { Theme.tint("mix"); Image(systemName: "music.note").font(.system(size: s * 0.3)).foregroundColor(.white.opacity(0.7)) }
+                    ZStack { Theme.tint("mix"); Image(systemName: "music").font(.system(size: s * 0.3)).foregroundColor(.white.opacity(0.7)) }
                 case 1:
                     tile(a[0], s, s)
                 case 2:
@@ -270,11 +281,11 @@ struct MixView: View {
                 let tracks = m.ids.compactMap { app.track($0) }
                 VStack(spacing: 14) {
                     ZStack {
-                        LinearGradient(colors: [Color(hex: 0x5E548E), Color(hex: 0xE5484D)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        Image(systemName: m.icon).font(.system(size: 64, weight: .semibold)).foregroundColor(.white)
+                        LinearGradient(colors: [Theme.accent, mixTint(m.id)], startPoint: .bottomLeading, endPoint: .topTrailing)
+                        SVGIcon(name: m.icon, size: 64, color: .white, lineWidth: 1.8)
                     }
                     .frame(width: 220, height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .padding(.top, 8)
                     VStack(spacing: 4) {
                         Text("Made for you").font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text2)

@@ -104,7 +104,16 @@ final class PlayerModel: ObservableObject {
     func play(_ ids: [String], startAt: Int = 0, shuffled: Bool = false, from: String? = nil) {
         guard !ids.isEmpty else { return }
         if inParty { partyPlay(ids, startAt, shuffled); return }
-        if inRemote { hub?.leaveRemote() }
+        if inRemote {
+            // the device that is playing keeps the music: the song you picked plays there. A paused one is taken over.
+            if remoteState?.playing == true {
+                let first = shuffled ? Int.random(in: 0..<ids.count) : max(0, min(startAt, ids.count - 1))
+                hub?.command("setQueue", ["queue": Array(ids.prefix(500)), "index": min(first, 499)])
+                hub?.notice = "Playing on " + (remoteName ?? "the other device")
+                return
+            }
+            hub?.leaveRemote()
+        }
         contextName = from
         var list = ids
         var start = max(0, min(startAt, ids.count - 1))
@@ -135,28 +144,28 @@ final class PlayerModel: ObservableObject {
     }
 
     func playNext(_ id: String) {
-        if inRemote { hub?.notice = "Not available while you control another device"; return }
+        if inRemote { remoteQueueOp("addNext", [id]); return }
         if inParty { party?.fire("addNext", ["ids": [id]]); party?.notice = "Playing next in the party"; return }
         if queue.isEmpty { play([id]); return }
         queue.insert(id, at: min(index + 1, queue.count))
     }
 
     func playNext(ids: [String]) {
-        if inRemote { hub?.notice = "Not available while you control another device"; return }
+        if inRemote { remoteQueueOp("addNext", ids); return }
         if inParty { party?.fire("addNext", ["ids": ids]); party?.notice = "Playing next in the party"; return }
         if queue.isEmpty { play(ids); return }
         queue.insert(contentsOf: ids, at: min(index + 1, queue.count))
     }
 
     func addToQueue(ids: [String]) {
-        if inRemote { hub?.notice = "Not available while you control another device"; return }
+        if inRemote { remoteQueueOp("add", ids); return }
         if inParty { party?.fire("add", ["ids": ids]); party?.notice = "Added to the party queue"; return }
         if queue.isEmpty { play(ids); return }
         queue.append(contentsOf: ids)
     }
 
     func addToQueue(_ id: String) {
-        if inRemote { hub?.notice = "Not available while you control another device"; return }
+        if inRemote { remoteQueueOp("add", [id]); return }
         if inParty { party?.fire("add", ["ids": [id]]); party?.notice = "Added to the party queue"; return }
         if queue.isEmpty { play([id]); return }
         queue.append(id)
@@ -676,6 +685,16 @@ final class PlayerModel: ObservableObject {
         publishNowPlaying()
     }
 
+    /// Add songs to the queue of the device that is playing (nothing to do on a paused one).
+    private func remoteQueueOp(_ op: String, _ ids: [String]) {
+        if remoteState?.playing == true {
+            hub?.command(op, ["ids": ids])
+            hub?.notice = op == "add" ? "Added to the queue on \(remoteName ?? "the other device")" : "Playing next on \(remoteName ?? "the other device")"
+        } else {
+            hub?.notice = "Not available while you control another device"
+        }
+    }
+
     /// Another phone, the website or the Windows app asked this device (the one playing) to do something.
     func handleCommand(_ c: [String: Any]) {
         guard !inRemote, !inParty else { return }
@@ -686,6 +705,11 @@ final class PlayerModel: ObservableObject {
         case "prev": previous()
         case "seek": seek(to: decimal(c["pos"]))
         case "playAt": jump(to: wholeNumber(c["index"]))
+        case "setQueue":
+            let ids = ((c["queue"] as? [String]) ?? []).filter { app?.track($0) != nil }
+            if !ids.isEmpty { play(ids, startAt: min(wholeNumber(c["index"]), ids.count - 1)) }
+        case "add": addToQueue(ids: ((c["ids"] as? [String]) ?? []).filter { app?.track($0) != nil })
+        case "addNext": playNext(ids: ((c["ids"] as? [String]) ?? []).filter { app?.track($0) != nil })
         default: break
         }
         Task {

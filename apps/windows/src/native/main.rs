@@ -309,6 +309,8 @@ pub enum MenuKind {
     Playlist(String),
     /// an album's ⋯ (its id)
     Album(String),
+    /// the sound-quality mark of the player bar: what the song that plays is (a note, nothing to choose)
+    Quality { title: String, detail: String },
 }
 
 #[derive(Debug, Clone)]
@@ -1796,6 +1798,21 @@ impl App {
                         Some("next") => tasks.push(self.update(Message::Next)),
                         Some("prev") => tasks.push(self.update(Message::Previous)),
                         Some("seek") => tasks.push(self.update(Message::SeekTo(cmd["pos"].as_f64().unwrap_or(0.0).max(0.0) as f32))),
+                        Some("setQueue") => {
+                            let ids: Vec<String> = cmd["queue"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).filter(|id| self.lib.track(id).is_some()).collect()).unwrap_or_default();
+                            let i = cmd["index"].as_u64().unwrap_or(0) as usize;
+                            if !ids.is_empty() {
+                                let i = i.min(ids.len() - 1);
+                                tasks.push(self.update(Message::PlayTracks(ids, i, "Remote control".to_string())));
+                            }
+                        }
+                        Some("add") | Some("addNext") => {
+                            let ids: Vec<String> = cmd["ids"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).filter(|id| self.lib.track(id).is_some()).collect()).unwrap_or_default();
+                            if !ids.is_empty() {
+                                let m = if cmd["op"].as_str() == Some("add") { Message::QueueMany(ids) } else { Message::PlayNextMany(ids) };
+                                tasks.push(self.update(m));
+                            }
+                        }
                         Some("playAt") => {
                             let items: Vec<String> = self.queue.items().to_vec();
                             let i = cmd["index"].as_u64().unwrap_or(0) as usize;
@@ -2011,6 +2028,16 @@ impl App {
                 Message::Previous => Some(json!({ "op": "prev" })),
                 Message::SeekTo(v) => Some(json!({ "op": "seek", "pos": *v as f64 })),
                 Message::JumpQueue(i) => Some(json!({ "op": "playAt", "index": *i })),
+                // the device that is playing keeps the music: what you pick plays there (a paused one is taken over below)
+                Message::PlayTracks(ids, i, _) if r.playing => Some(json!({ "op": "setQueue", "queue": ids.iter().take(500).collect::<Vec<_>>(), "index": (*i).min(499) })),
+                Message::PlayAlbum(album, i) if r.playing => {
+                    let ids: Vec<String> = self.lib.album_tracks(album).iter().map(|t| t.id.clone()).collect();
+                    Some(json!({ "op": "setQueue", "queue": ids.iter().take(500).collect::<Vec<_>>(), "index": (*i).min(499) }))
+                }
+                Message::QueueMany(ids) if r.playing => Some(json!({ "op": "add", "ids": ids })),
+                Message::AddToQueue(id) if r.playing => Some(json!({ "op": "add", "ids": [id] })),
+                Message::PlayNextMany(ids) if r.playing => Some(json!({ "op": "addNext", "ids": ids })),
+                Message::PlayNext(id) if r.playing => Some(json!({ "op": "addNext", "ids": [id] })),
                 _ => None,
             };
             if let Some(cmd) = cmd {

@@ -95,7 +95,13 @@ struct NowPlayingView: View {
     @State private var tvAddress = ""
     @State private var showQueue = false
     @State private var showLyrics = false
+    @State private var showQuality = false
     @StateObject private var airplay = AirPlayControl()
+
+    /// What the song that plays is (shown by the quality mark; it only tells you, there is nothing to choose here)
+    private var quality: AlbumQuality? {
+        player.currentID.flatMap { app.track($0) }.flatMap { app.album($0.albumId)?.quality }
+    }
     @State private var dragY: CGFloat = 0
 
     /// Drag the header or the cover down to close the player, like the website.
@@ -217,17 +223,10 @@ struct NowPlayingView: View {
 
                     // tools along the bottom, as on the website: sound quality, output device, party, queue
                     HStack(spacing: 0) {
-                        Menu {
-                            Section("Streaming quality") {
-                                Picker("Quality", selection: Binding(get: { app.quality }, set: { app.setQuality($0) })) {
-                                    Text("Original").tag("original")
-                                    Text("High").tag("high")
-                                    Text("Normal").tag("normal")
-                                    Text("Data saver").tag("low")
-                                }
-                            }
-                            if app.me?.transcoding != true { Text("Converting songs needs ffmpeg on the server") }
-                        } label: { tool("waveform") }.frame(maxWidth: .infinity)
+                        Button { showQuality = true } label: {
+                            QualityIcon(level: quality?.level ?? 4, size: 22, color: (quality?.hires ?? false) ? Theme.accent : Theme.text2).frame(width: 48, height: 44)
+                        }
+                        .frame(maxWidth: .infinity)
                         Menu {
                             Section("Play on") {
                                 Button { devices.takeOver() } label: { Label(devices.deviceName + " (this device)", systemImage: devices.playingHere ? "checkmark" : "iphone") }
@@ -270,6 +269,11 @@ struct NowPlayingView: View {
             }
         }
         .offset(y: dragY)
+        .alert(quality?.label ?? "Quality", isPresented: $showQuality) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text((quality?.detail ?? "") + "\n" + (app.me?.transcoding == true && app.quality != "original" ? "Streaming at \(app.quality) quality (set in Account → Playback)." : "Playing the original file from your server, untouched."))
+        }
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(app).environmentObject(player) }
         .sheet(isPresented: $showParty) { PartySheet().environmentObject(app).environmentObject(player).environmentObject(party) }
         .sheet(isPresented: $showCredits) {
