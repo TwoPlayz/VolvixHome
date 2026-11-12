@@ -28,6 +28,9 @@ final class PlayerModel: ObservableObject {
     private var statusObserver: NSKeyValueObservation?
     private weak var app: AppModel?
     private weak var downloads: DownloadStore?
+    /// the live line to your other devices (set by DeviceHub)
+    weak var hub: DeviceHub?
+    private var pendingSeek: Double?
     private var lastReported: String?
     private var artworkFor: String?
     private var artwork: MPMediaItemArtwork?
@@ -81,6 +84,7 @@ final class PlayerModel: ObservableObject {
         queue = list
         index = start
         problem = nil
+        hub?.announce()
         load(autoplay: true)
         if let id = currentID, let t = app?.track(id) { app?.playedAlbum(t.albumId) }
     }
@@ -106,6 +110,33 @@ final class PlayerModel: ObservableObject {
         queue.remove(at: i)
     }
 
+    /// What another device needs to carry on: the queue around now, the song, the spot.
+    func snapshot() -> [String: Any] {
+        let from = max(0, index - 50)
+        let to = min(queue.count, index + 450)
+        let slice = Array(queue[from..<to])
+        return [
+            "queue": slice,
+            "index": index - from,
+            "pos": position,
+            "playing": isPlaying,
+            "context": NSNull(),
+            "shuffle": shuffle,
+            "repeat": repeatMode == .all ? "all" : (repeatMode == .one ? "one" : "off"),
+        ]
+    }
+
+    /// Carry on with a queue handed over from another device.
+    func restore(_ ids: [String], index i: Int, position: Double, playing: Bool, repeatMode mode: Repeat) {
+        guard !ids.isEmpty, i >= 0, i < ids.count else { return }
+        queue = ids
+        index = i
+        repeatMode = mode
+        problem = nil
+        pendingSeek = position > 0 ? position : nil
+        load(autoplay: playing)
+    }
+
     // MARK: controls
 
     func toggle() {
@@ -115,6 +146,7 @@ final class PlayerModel: ObservableObject {
 
     func resume() {
         guard hasCurrent else { return }
+        hub?.announce()
         player.play()
         isPlaying = true
         publishNowPlaying()
@@ -230,6 +262,10 @@ final class PlayerModel: ObservableObject {
         } else if ready {
             loading = false
             if secs.isFinite && secs > 0 { duration = secs }
+            if let p = pendingSeek {
+                pendingSeek = nil
+                seek(to: p)
+            }
             publishNowPlaying()
         }
     }

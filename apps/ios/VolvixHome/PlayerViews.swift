@@ -52,6 +52,7 @@ struct MiniPlayer: View {
 struct NowPlayingView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
+    @EnvironmentObject var devices: DeviceHub
     @Environment(\.dismiss) private var dismiss
     @State private var scrubbing = false
     @State private var scrubTo: Double = 0
@@ -84,6 +85,19 @@ struct NowPlayingView: View {
                             } label: {
                                 Image(systemName: (player.sleepAt != nil || player.sleepAfterSong) ? "moon.zzz.fill" : "moon.zzz").font(.system(size: 18))
                                     .foregroundColor((player.sleepAt != nil || player.sleepAfterSong) ? Theme.accent : Theme.text).frame(width: 44, height: 44)
+                            }
+                            Menu {
+                                Section("Play on") {
+                                    Button { } label: { Label(devices.deviceName + " (this device)", systemImage: devices.playingHere ? "checkmark" : "iphone") }
+                                    ForEach(devices.others) { d in
+                                        Button { devices.transfer(to: d.id) } label: {
+                                            Label(d.name + (d.active ? " · playing" : ""), systemImage: d.active ? "checkmark" : "laptopcomputer.and.iphone")
+                                        }
+                                    }
+                                    if devices.others.isEmpty { Text("No other devices open right now") }
+                                }
+                            } label: {
+                                Image(systemName: "laptopcomputer.and.iphone").font(.system(size: 18)).foregroundColor(Theme.text).frame(width: 44, height: 44)
                             }
                             AirPlayButton().frame(width: 36, height: 36).frame(width: 44, height: 44)
                             Button { showQueue = true } label: {
@@ -168,6 +182,14 @@ struct NowPlayingView: View {
         }
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(app).environmentObject(player) }
         .environmentObject(app)
+        .overlay(alignment: .top) {
+            if let n = devices.notice {
+                Text(n).font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8).background(Theme.surface3).clipShape(Capsule())
+                    .padding(.top, 8)
+                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil }
+            }
+        }
     }
 }
 

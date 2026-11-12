@@ -120,6 +120,7 @@ struct MainTabs: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
     @EnvironmentObject var downloads: DownloadStore
+    @EnvironmentObject var devices: DeviceHub
     @State private var showFull = false
 
     var body: some View {
@@ -132,7 +133,7 @@ struct MainTabs: View {
         }
         .tint(Theme.accent)
         .fullScreenCover(isPresented: $showFull) {
-            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads)
+            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads).environmentObject(devices)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if app.offline {
@@ -144,6 +145,15 @@ struct MainTabs: View {
         .onAppear {
             downloads.attach(app)
             player.attach(app, downloads: downloads)
+            devices.attach(app, player: player)
+        }
+        .overlay(alignment: .top) {
+            if !showFull, let n = devices.notice {
+                Text(n).font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8).background(Theme.surface3).clipShape(Capsule())
+                    .padding(.top, 8)
+                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil }
+            }
         }
         .task { await app.pollLoop() }
     }
