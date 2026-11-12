@@ -53,7 +53,10 @@ struct NowPlayingView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var player: PlayerModel
     @EnvironmentObject var devices: DeviceHub
+    @EnvironmentObject var casting: CastHub
     @Environment(\.dismiss) private var dismiss
+    @State private var addingTV = false
+    @State private var tvAddress = ""
     @State private var scrubbing = false
     @State private var scrubTo: Double = 0
     @State private var showQueue = false
@@ -95,6 +98,18 @@ struct NowPlayingView: View {
                                         }
                                     }
                                     if devices.others.isEmpty { Text("No other devices open right now") }
+                                }
+                                Section("TVs and speakers") {
+                                    if let a = casting.active {
+                                        Button { } label: { Label("Casting to \(a.name)", systemImage: "checkmark") }
+                                        Button(role: .destructive) { casting.stop() } label: { Label("Stop casting", systemImage: "xmark") }
+                                    } else {
+                                        ForEach(casting.devices) { d in
+                                            Button { casting.start(d) } label: { Label(d.name + (d.model.isEmpty ? "" : " · " + d.model), systemImage: "tv") }
+                                        }
+                                        if casting.devices.isEmpty { Text("No TVs or speakers found yet") }
+                                        Button { addingTV = true } label: { Label(casting.devices.isEmpty ? "Can't find it? Add by address…" : "Not listed? Add by address…", systemImage: "plus") }
+                                    }
                                 }
                             } label: {
                                 Image(systemName: "laptopcomputer.and.iphone").font(.system(size: 18)).foregroundColor(Theme.text).frame(width: 44, height: 44)
@@ -181,13 +196,20 @@ struct NowPlayingView: View {
             }
         }
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(app).environmentObject(player) }
+        .alert("Add a TV or speaker", isPresented: $addingTV) {
+            TextField("192.168.1.40", text: $tvAddress)
+            Button("Add") { let a = tvAddress; tvAddress = ""; Task { await casting.add(host: a) } }
+            Button("Cancel", role: .cancel) { tvAddress = "" }
+        } message: {
+            Text("Its address on your network. The Google Home app shows it under the device's settings.")
+        }
         .environmentObject(app)
         .overlay(alignment: .top) {
-            if let n = devices.notice {
+            if let n = devices.notice ?? casting.notice {
                 Text(n).font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 14).padding(.vertical, 8).background(Theme.surface3).clipShape(Capsule())
                     .padding(.top, 8)
-                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil }
+                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil; casting.notice = nil }
             }
         }
     }

@@ -30,6 +30,9 @@ final class PlayerModel: ObservableObject {
     private weak var downloads: DownloadStore?
     /// the live line to your other devices (set by DeviceHub)
     weak var hub: DeviceHub?
+    /// TVs and speakers: while casting this phone stays silent and keeps the clock
+    weak var cast: CastHub?
+    private var suppressCast = false
     private var pendingSeek: Double?
     private var lastReported: String?
     private var artworkFor: String?
@@ -146,7 +149,8 @@ final class PlayerModel: ObservableObject {
 
     func resume() {
         guard hasCurrent else { return }
-        hub?.announce()
+        if cast?.isCasting != true { hub?.announce() }
+        if cast?.isCasting == true && !suppressCast { cast?.control("play") }
         player.play()
         isPlaying = true
         publishNowPlaying()
@@ -154,6 +158,7 @@ final class PlayerModel: ObservableObject {
     }
 
     func pause() {
+        if cast?.isCasting == true && !suppressCast { cast?.control("pause") }
         player.pause()
         isPlaying = false
         publishNowPlaying()
@@ -184,7 +189,23 @@ final class PlayerModel: ObservableObject {
         }
     }
 
+    /// Keep playing but make no sound here (the TV has it).
+    func setSilent(_ silent: Bool) {
+        player.isMuted = silent
+    }
+
+    /// The TV changed (its remote, the Google Home app): follow it without telling it back.
+    func castFollow(playing: Bool?, position pos: Double?) {
+        suppressCast = true
+        defer { suppressCast = false }
+        if let p = playing {
+            if p { resume() } else { pause() }
+        }
+        if let s = pos { seek(to: s) }
+    }
+
     func seek(to seconds: Double) {
+        if cast?.isCasting == true && !suppressCast { cast?.control("seek", value: max(0, seconds)) }
         let t = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
         player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
         position = max(0, seconds)
@@ -246,6 +267,10 @@ final class PlayerModel: ObservableObject {
         if autoplay {
             player.play()
             isPlaying = true
+        }
+        // casting: the TV plays this song too (this phone is the silent clock)
+        if cast?.isCasting == true && !suppressCast {
+            cast?.load(trackID: id, at: pendingSeek ?? 0, autoplay: autoplay)
         }
         artworkFor = nil
         publishNowPlaying()

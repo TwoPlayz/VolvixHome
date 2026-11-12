@@ -121,6 +121,7 @@ struct MainTabs: View {
     @EnvironmentObject var player: PlayerModel
     @EnvironmentObject var downloads: DownloadStore
     @EnvironmentObject var devices: DeviceHub
+    @EnvironmentObject var casting: CastHub
     @State private var showFull = false
 
     var body: some View {
@@ -133,7 +134,7 @@ struct MainTabs: View {
         }
         .tint(Theme.accent)
         .fullScreenCover(isPresented: $showFull) {
-            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads).environmentObject(devices)
+            NowPlayingView().environmentObject(app).environmentObject(player).environmentObject(downloads).environmentObject(devices).environmentObject(casting)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if app.offline {
@@ -146,13 +147,14 @@ struct MainTabs: View {
             downloads.attach(app)
             player.attach(app, downloads: downloads)
             devices.attach(app, player: player)
+            casting.attach(app, player: player)
         }
         .overlay(alignment: .top) {
-            if !showFull, let n = devices.notice {
+            if !showFull, let n = devices.notice ?? casting.notice {
                 Text(n).font(.system(size: 13, weight: .semibold)).foregroundColor(.white)
                     .padding(.horizontal, 14).padding(.vertical, 8).background(Theme.surface3).clipShape(Capsule())
                     .padding(.top, 8)
-                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil }
+                    .task { try? await Task.sleep(nanoseconds: 2_500_000_000); devices.notice = nil; casting.notice = nil }
             }
         }
         .task { await app.pollLoop() }
