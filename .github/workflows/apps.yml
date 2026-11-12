@@ -14,10 +14,10 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         run: cargo build --release --features native --manifest-path apps/windows/Cargo.toml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Volvix-Home-Windows
           path: |
@@ -27,7 +27,7 @@ jobs:
   ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Generate Xcode project
         run: |
           brew install xcodegen
@@ -44,7 +44,7 @@ jobs:
           cd apps/ios/build/Build/Products/Release-iphoneos
           mkdir Payload && cp -R VolvixHome.app Payload/
           zip -qry "$GITHUB_WORKSPACE/VolvixHome.ipa" Payload
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Volvix-Home-iOS
           path: VolvixHome.ipa
