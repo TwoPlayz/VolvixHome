@@ -317,9 +317,10 @@ struct ProfileView: View {
     }
 }
 
+/// A photo being adjusted (the same photo keeps the same identity, so the sheet stays put).
 struct PhotoBox: Identifiable {
-    let id = UUID()
     let image: UIImage
+    var id: ObjectIdentifier { ObjectIdentifier(image) }
 }
 
 // MARK: - Settings

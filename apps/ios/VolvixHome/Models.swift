@@ -17,8 +17,10 @@ struct Album: Codable, Identifiable, Hashable {
     var added: Int
     var label: String?
     var copyright: String?
+    /// the art is a picture someone chose (not the album's own), so it can be changed or removed
+    var customCover: Bool
 
-    enum CodingKeys: String, CodingKey { case id, title, artist, year, genre, trackIds, cover, coverV, added, label, copyright }
+    enum CodingKeys: String, CodingKey { case id, title, artist, year, genre, trackIds, cover, coverV, added, label, copyright, customCover }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -33,6 +35,7 @@ struct Album: Codable, Identifiable, Hashable {
         added = (try? c.decode(Int.self, forKey: .added)) ?? 0
         label = try? c.decode(String.self, forKey: .label)
         copyright = try? c.decode(String.self, forKey: .copyright)
+        customCover = (try? c.decode(Bool.self, forKey: .customCover)) ?? false
     }
 }
 

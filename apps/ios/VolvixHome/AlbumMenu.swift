@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 /// Add songs to one of your playlists (yours, or one you share), or start a new one with them.
 struct AddToPlaylistButton: View {
@@ -34,12 +35,21 @@ struct AlbumMenuButton: View {
     let ids: [String]
     @State private var sharing = false
     @State private var info = false
+    @State private var pickingPhoto = false
+    @State private var picked: PhotosPickerItem?
+    @State private var photo: UIImage?
 
     var body: some View {
         Menu {
             Button { player.playNext(ids: ids) } label: { Label("Play next", systemImage: "text.insert") }
             Button { player.addToQueue(ids: ids) } label: { Label("Add to queue", systemImage: "text.append") }
             Button { info = true } label: { Label("Credits & info", systemImage: "book") }
+            if !album.cover || album.customCover {
+                Button { pickingPhoto = true } label: { Label("Change picture", systemImage: "photo") }
+            }
+            if album.customCover {
+                Button { removePicture() } label: { Label("Remove picture", systemImage: "xmark") }
+            }
             if app.can("share") && !ids.isEmpty {
                 Button { sharing = true } label: { Label("Share link…", systemImage: "link") }
             }
@@ -49,6 +59,30 @@ struct AlbumMenuButton: View {
         }
         .sheet(isPresented: $sharing) { ShareLinkSheet(kind: "album", name: album.title, trackIDs: ids).environmentObject(app) }
         .sheet(isPresented: $info) { AlbumInfoSheet(album: album).environmentObject(app) }
+        .photosPicker(isPresented: $pickingPhoto, selection: $picked, matching: .images)
+        .onChange(of: picked) { item in
+            guard let item = item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) { photo = img }
+                picked = nil
+            }
+        }
+        .sheet(item: Binding(get: { photo.map { PhotoBox(image: $0) } }, set: { if $0 == nil { photo = nil } })) { box in
+            PictureCropper(image: box.image, out: 800, title: "Adjust the picture", round: false) { jpeg in
+                do {
+                    _ = try await app.api?.putImage("/api/album/" + (app.api?.encode(album.id) ?? album.id) + "/picture", jpeg: jpeg)
+                    await app.refresh()
+                    return nil
+                } catch { return error.localizedDescription }
+            }
+        }
+    }
+
+    private func removePicture() {
+        Task {
+            _ = try? await app.call("DELETE", "/api/album/" + (app.api?.encode(album.id) ?? album.id) + "/picture")
+            await app.refresh()
+        }
     }
 }
 
