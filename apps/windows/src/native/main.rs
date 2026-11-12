@@ -552,6 +552,7 @@ pub enum Message {
     ToggleMute,
     JumpQueue(usize),
     RemoveFromQueue(usize),
+    ClearQueue,
     ToggleNowPlaying,
     NpTab(NpTab),
     LyricsLoaded(String, Result<LyricsAnswer, Error>),
@@ -778,6 +779,11 @@ pub struct App {
     /// what this computer last told the server it is playing (and when), so changes are sent and the rest is a heartbeat
     dev_now_key: String,
     dev_now_at: Instant,
+    /// another device is playing: this one shows it (no sound) and sends it what you press
+    remote: Option<RemoteNow>,
+    dev_now: Option<serde_json::Value>,
+    /// right after starting something here, the old player's last report must not pull this one back
+    remote_block: Instant,
     /// where the song that was just handed over starts
     pending_start: Duration,
     pub downloaded: HashSet<String>,
@@ -921,6 +927,9 @@ impl App {
             dev_started: false,
             dev_now_key: String::new(),
             dev_now_at: Instant::now(),
+            remote: None,
+            dev_now: None,
+            remote_block: Instant::now(),
             pending_start: Duration::ZERO,
             song_cache,
             caching: HashSet::new(),
@@ -1439,6 +1448,8 @@ impl App {
     }
 
     fn start_current(&mut self, play: bool) -> Task<Message> {
+        self.remote = None;
+        self.remote_block = Instant::now() + Duration::from_millis(2500);
         let (Some(c), Some(mut id)) = (self.client.clone(), self.queue.current().map(String::from)) else { return Task::none() };
         // "Only play downloads": skip ahead to a song that is saved on this computer
         if self.setting_bool("offlineOnly", false) && !self.downloads.has(&id) {
@@ -1660,6 +1671,67 @@ impl App {
         Task::perform(blocking(move || c.device_active(&me)), |_| Message::Tick)
     }
 
+    /// Show what the device that is playing plays (its queue, song, spot), or stop showing it.
+    fn sync_remote(&mut self) {
+        if Instant::now() < self.remote_block {
+            return;
+        }
+        if self.party.is_some() || self.cast.is_some() {
+            self.remote = None;
+            return;
+        }
+        let active = self.dev_active.clone();
+        let now = self.dev_now.clone();
+        match (active, now) {
+            (Some(a), Some(n)) if a != self.dev_id && n["queue"].as_array().map(|q| !q.is_empty()).unwrap_or(false) => {
+                let ids: Vec<String> = n["queue"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+                let want = ids.get(n["index"].as_u64().unwrap_or(0) as usize).cloned();
+                let known: Vec<String> = ids.into_iter().filter(|id| self.lib.track(id).is_some()).collect();
+                let at = want.and_then(|w| known.iter().position(|x| *x == w));
+                let name = self.connect_devices.iter().find(|d| d.0 == a).map(|d| d.1.clone()).unwrap_or_else(|| "another device".into());
+                let server = n["serverNow"].as_f64().unwrap_or(0.0);
+                let r = RemoteNow {
+                    device: a,
+                    name: name.clone(),
+                    playing: n["playing"].as_bool().unwrap_or(false),
+                    pos_ms: n["posMs"].as_f64().unwrap_or(0.0),
+                    updated_at: n["updatedAt"].as_f64().unwrap_or(0.0),
+                    offset_ms: if server > 0.0 { server - now_ms() } else { 0.0 },
+                };
+                if self.remote.is_none() {
+                    self.player.pause(); // no sound here: the other device has it
+                }
+                if let Some(i) = at {
+                    if self.queue.items() != known.as_slice() || self.queue.position() != Some(i) {
+                        self.queue.mirror(known, i, &format!("Playing on {name}"));
+                    }
+                }
+                self.remote = Some(r);
+            }
+            _ => {
+                if self.remote.take().is_some() {
+                    self.status.playing = false;
+                }
+            }
+        }
+    }
+
+    /// The song, whether it plays and where it is, as the other device says (its clock, kept up to date here).
+    fn mirror_status(&mut self, r: &RemoteNow) {
+        let mut pos = (if r.playing { r.pos_ms + (now_ms() + r.offset_ms - r.updated_at) } else { r.pos_ms }).max(0.0);
+        let track = self.queue.current().map(String::from);
+        let dur = track.as_deref().and_then(|id| self.lib.track(id)).map(|t| t.duration as f64).unwrap_or(0.0);
+        if dur > 0.0 {
+            pos = pos.min(dur * 1000.0);
+        }
+        self.status.track = track;
+        self.status.playing = r.playing;
+        self.status.loading = false;
+        self.status.finished = false;
+        self.status.position = Duration::from_millis(pos as u64);
+        self.status.duration = (dur > 0.0).then(|| Duration::from_secs_f64(dur));
+    }
+
     /// Open the live line to the server that lists your devices, and act on what it says.
     fn devices_tick(&mut self) -> Vec<Task<Message>> {
         use std::sync::atomic::Ordering;
@@ -1677,12 +1749,14 @@ impl App {
             self.dev_active = None;
         }
         let events: Vec<serde_json::Value> = std::mem::take(&mut *self.dev_events.lock().unwrap());
+        let had_events = !events.is_empty();
         for e in events {
             match e["type"].as_str() {
                 Some("devices") => {
                     let before = self.dev_active.clone();
                     self.connect_devices = e["devices"].as_array().map(|l| l.iter().map(|d| (d["id"].as_str().unwrap_or("").to_string(), d["name"].as_str().unwrap_or("").to_string(), d["active"].as_bool().unwrap_or(false))).collect()).unwrap_or_default();
                     self.dev_active = e["active"].as_str().map(String::from);
+                    self.dev_now = e["now"].as_object().map(|_| e["now"].clone());
                     // another device took over: this one goes quiet
                     if let Some(a) = self.dev_active.clone().filter(|a| *a != self.dev_id && Some(a) != before.as_ref()) {
                         if self.status.playing {
@@ -1708,6 +1782,10 @@ impl App {
                         self.say(if play { "Playing here" } else { "Press play to continue here" });
                     }
                 }
+                // the device that is playing says what it plays
+                Some("now") if e["device"].as_str() == self.dev_active.as_deref() && self.dev_active.as_deref() != Some(self.dev_id.as_str()) => {
+                    self.dev_now = Some(e["state"].clone());
+                }
                 // another of your devices (the website, a phone) asked this one to play, pause, skip, seek…
                 Some("command") if e["to"].as_str() == Some(self.dev_id.as_str()) && self.party.is_none() => {
                     let cmd = e["cmd"].clone();
@@ -1732,8 +1810,11 @@ impl App {
                 _ => {}
             }
         }
+        if had_events {
+            self.sync_remote();
+        }
         // this computer is the one playing: tell the others what it plays (when it changes, and every few seconds)
-        if signed_in && !self.offline && self.cast.is_none() && self.party.is_none() && self.dev_active.as_deref() == Some(self.dev_id.as_str()) {
+        if signed_in && !self.offline && self.cast.is_none() && self.party.is_none() && self.remote.is_none() && (self.dev_active.as_deref() == Some(self.dev_id.as_str()) || self.status.playing) {
             if let (Some(track), Some(c)) = (self.status.track.clone(), self.client.clone()) {
                 let items = self.queue.items();
                 let index = self.queue.position().unwrap_or(0);
@@ -1922,6 +2003,30 @@ impl App {
     /* ---------- the main switchboard ---------- */
 
     fn handle(&mut self, msg: Message) -> Task<Message> {
+        // while another device is playing, the controls drive that device
+        if let Some(r) = self.remote.clone() {
+            let cmd = match &msg {
+                Message::TogglePlay => Some(json!({ "op": if r.playing { "pause" } else { "play" } })),
+                Message::Next => Some(json!({ "op": "next" })),
+                Message::Previous => Some(json!({ "op": "prev" })),
+                Message::SeekTo(v) => Some(json!({ "op": "seek", "pos": *v as f64 })),
+                Message::JumpQueue(i) => Some(json!({ "op": "playAt", "index": *i })),
+                _ => None,
+            };
+            if let Some(cmd) = cmd {
+                if let Some(c) = self.client.clone() {
+                    let (me, to) = (self.dev_id.clone(), r.device.clone());
+                    std::thread::spawn(move || {
+                        let _ = c.device_command(&me, &to, cmd);
+                    });
+                }
+                return Task::none();
+            }
+            if matches!(msg, Message::RemoveFromQueue(_) | Message::ClearQueue | Message::ToggleShuffle) {
+                self.say("Not available while you control another device");
+                return Task::none();
+            }
+        }
         match msg {
             /* ---------- connect and sign in ---------- */
             Message::AddressChanged(s) => self.address = s,
@@ -2674,6 +2779,13 @@ impl App {
                 }
             }
             Message::RemoveFromQueue(i) => self.queue.remove(i),
+            Message::ClearQueue => {
+                if self.party.is_some() {
+                    self.say("Not available in a party");
+                } else {
+                    self.queue.clear_upcoming();
+                }
+            }
             Message::ToggleNowPlaying => {
                 self.now_playing = !self.now_playing;
                 self.lyric_line = None;
@@ -3421,7 +3533,22 @@ impl App {
                 self.settings.set_text("downloadQuality", &q);
                 self.say("New downloads use this quality");
             }
-            Message::DeviceHere => self.say("Press play here to move it back"),
+            Message::DeviceHere => {
+                if let Some(r) = self.remote.take() {
+                    // take the music over from the device that is playing: same queue, song and spot
+                    let now_ms = now_ms() + r.offset_ms;
+                    let pos = (if r.playing { r.pos_ms + (now_ms - r.updated_at) } else { r.pos_ms }).max(0.0);
+                    self.pending_start = Duration::from_millis(pos as u64);
+                    self.dialog = None;
+                    let mut tasks = vec![self.start_current(r.playing)];
+                    if !r.playing {
+                        tasks.push(self.announce_playing());
+                    }
+                    self.say("Playing here");
+                    return Task::batch(tasks);
+                }
+                self.say("Press play here to move it back")
+            }
             Message::DeviceDone(r) => {
                 if let Err(e) = r {
                     self.say(e.to_string());
@@ -3857,6 +3984,9 @@ impl App {
         let advanced = st.advanced != self.last_advanced;
         self.last_advanced = st.advanced;
         self.status = st;
+        if let Some(r) = self.remote.clone() {
+            self.mirror_status(&r);
+        }
         if advanced {
             tasks.push(self.on_crossfaded());
         }
@@ -3868,7 +3998,7 @@ impl App {
         self.last_tick = Instant::now();
 
         // count plays (not in a private session)
-        if self.status.playing && !self.setting_bool("privateSession", false) {
+        if self.status.playing && self.remote.is_none() && !self.setting_bool("privateSession", false) {
             if let Some(t) = self.status.track.as_deref().and_then(|id| self.lib.track(id)) {
                 let (id, dur) = (t.id.clone(), t.duration);
                 let edits = self.counter.tick(&id, dur, dt);
@@ -3953,7 +4083,7 @@ impl App {
         // tell the household what's playing: on change, and every 15 s while playing
         if let Some(c) = self.client.clone().filter(|_| !self.offline && self.screen == Screen::Main) {
             let share = self.setting_bool("shareActivity", true) && !self.setting_bool("privateSession", false);
-            let now = if share { (self.status.track.clone(), self.status.playing) } else { (None, false) };
+            let now = if share && self.remote.is_none() { (self.status.track.clone(), self.status.playing) } else { (None, false) };
             if now != self.presence || (now.1 && self.presence_at.elapsed() > Duration::from_secs(15)) {
                 self.presence = now.clone();
                 self.presence_at = Instant::now();
@@ -4238,4 +4368,20 @@ fn main() -> iced::Result {
             ..Default::default()
         })
         .run_with(move || App::new(cell.borrow_mut().take().expect("started once"), start_hidden))
+}
+
+/// What the device that is playing said it is playing (its queue is mirrored into this app's queue).
+#[derive(Clone)]
+struct RemoteNow {
+    device: String,
+    name: String,
+    playing: bool,
+    pos_ms: f64,
+    updated_at: f64,
+    /// the server's clock minus this computer's, in ms
+    offset_ms: f64,
+}
+
+fn now_ms() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as f64).unwrap_or(0.0)
 }

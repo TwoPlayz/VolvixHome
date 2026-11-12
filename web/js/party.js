@@ -104,7 +104,13 @@ window.Spin = window.Spin || {};
     playAt: function (i) { send('playAt', { index: i }); },
     move: function (from, to) { send('move', { from: from, to: to }); },
     remove: function (i) { send('remove', { index: i }); },
-    reshuffle: function () { S.toast('The party queue is shared, so it can\'t be reshuffled'); }
+    reshuffle: function () { S.toast('The party queue is shared, so it can\'t be reshuffled'); },
+    clearQueue: function () {
+      const s = P.state; if (!s) return;
+      // everyone's queue: take the songs after the current one out, last first
+      let chain = Promise.resolve();
+      for (let i = s.queue.length - 1; i > s.index; i--) (function (n) { chain = chain.then(function () { return send('remove', { index: n }); }); })(i);
+    }
   };
   P.interceptor = {
     handle: function (name, args) { const h = handlers[name]; if (!h) return false; h.apply(null, args); return true; },

@@ -23,7 +23,7 @@ window.Spin = window.Spin || {};
   }
 
   const me = id();
-  const D = S.devices = { me: me, list: [], active: null, now: null, remote: false, es: null };
+  const D = S.devices = { me: me, list: [], active: null, now: null, remote: false, block: 0, es: null };
   const post = function (path, body) {
     return fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(function () {});
   };
@@ -31,7 +31,8 @@ window.Spin = window.Spin || {};
   /* ---------- the playing device reports what it plays ---------- */
   let lastKey = '', lastSent = 0;
   function report(force) {
-    if (D.active !== me || D.remote || inParty()) return;
+    // the one that is playing reports; a device that is playing but not yet listed as active does too (the server then lists it)
+    if (D.remote || inParty() || (D.active !== me && !S.player.state.playing)) return;
     const t = S.player.current();
     if (!t) return;
     const s = S.player.snapshot();
@@ -65,7 +66,7 @@ window.Spin = window.Spin || {};
     S.player.releaseRemote();
   }
   function syncRemote() {
-    if (inParty()) return;
+    if (inParty() || Date.now() < D.block) return;
     const n = D.now;
     if (D.active && D.active !== me && n && n.queue && n.queue.length) {
       const o = other(D.active);
@@ -82,6 +83,7 @@ window.Spin = window.Spin || {};
     if (!D.remote || !n) return;
     const elapsed = n.playing ? Date.now() + ((n.serverNow || Date.now()) - Date.now()) - n.updatedAt : 0;
     stopRemote();
+    D.block = Date.now() + 2500;
     S.player.adopt({ queue: n.queue, index: n.index, pos: Math.max(0, (n.posMs + elapsed) / 1000), playing: !!n.playing, shuffle: false, repeat: 'off' });
     post('/api/devices/active', { device: me });
   };
@@ -134,6 +136,7 @@ window.Spin = window.Spin || {};
   // I just started playing: I'm the one that plays now
   S.player.audio.addEventListener('play', function () {
     if (inParty() || S.player.isRemote()) return;
+    D.block = Date.now() + 2500; // right after starting here, the old player's last report must not pull this one back
     fetch('/api/devices/active', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device: me }) }).catch(function () {});
   });
 

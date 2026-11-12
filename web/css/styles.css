@@ -2628,6 +2628,7 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .chip-src { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--hover); color: var(--text-2); font-size: 11px; font-weight: 600; margin-right: 4px; }
 .credit-roles { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
 .np-head-spacer { width: 40px; }
+.q-clear-row { display: flex; justify-content: center; padding: 12px 0 4px; }
 
 .credit-row dd a, .credits-artist a { color: var(--text); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
 .credit-row dd a:hover, .credits-artist a:hover { text-decoration-color: currentColor; }

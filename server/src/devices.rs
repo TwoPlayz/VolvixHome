@@ -90,7 +90,14 @@ impl Devices {
     pub fn report(&self, uid: &str, dev: &str, mut state: Value) -> bool {
         let mut all = self.inner.lock().unwrap();
         let Some(m) = all.get_mut(uid) else { return false };
-        if m.active.as_deref() != Some(dev) { return false; }
+        if m.active.as_deref() != Some(dev) {
+            // a device that is playing right now is the one playing, even if its "I'm playing" message got lost
+            let playing = state["playing"].as_bool().unwrap_or(false);
+            if !(playing && m.devices.contains_key(dev)) { return false; }
+            m.active = Some(dev.to_string());
+            m.now = None;
+            let _ = m.tx.send(snapshot(m));
+        }
         let t = crate::party::now_ms();
         state["updatedAt"] = json!(t);
         state["serverNow"] = json!(t);
@@ -151,6 +158,8 @@ mod tests {
         let (mut rx_a, _) = d.connect("u1", "pc", "PC");
         let (_rx_b, _) = d.connect("u1", "phone", "Phone");
         assert!(!d.report("u1", "pc", json!({ "index": 1 })), "only the active device reports");
+        assert!(d.report("u1", "phone", json!({ "index": 0, "playing": true })), "a device that is playing takes over");
+        assert!(d.snapshot_has_now("u1"));
         assert!(d.set_active("u1", "pc"));
         assert!(d.report("u1", "pc", json!({ "index": 1, "playing": true })));
         let (_rx_c, snap) = d.connect("u1", "tablet", "Tablet");

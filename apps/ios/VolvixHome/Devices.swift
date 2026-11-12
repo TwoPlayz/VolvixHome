@@ -31,6 +31,8 @@ final class DeviceHub: ObservableObject {
     /// another device is playing: this one shows it silently and sends it what you tap
     @Published private(set) var remote: RemoteNow?
     private var nowState: [String: Any]?
+    /// right after starting here, the old player's last report must not pull this phone back into mirroring it
+    private var remoteBlock = Date.distantPast
     private var lastKey = ""
     private var lastSent = Date.distantPast
 
@@ -150,7 +152,7 @@ final class DeviceHub: ObservableObject {
 
     /// Show what the playing device plays (or stop, when nothing else is playing).
     private func syncRemote() {
-        guard let player = player else { return }
+        guard let player = player, Date() >= remoteBlock else { return }
         if player.partyOn { return }
         if let a = activeID, a != deviceID, let n = nowState, let q = n["queue"] as? [String], !q.isEmpty {
             let name = devices.first(where: { $0.id == a })?.name ?? "another device"
@@ -176,7 +178,8 @@ final class DeviceHub: ObservableObject {
 
     /// The playing device tells the others what it is playing.
     func report(force: Bool = false) {
-        guard let api = app?.api, let p = player, activeID == deviceID, remote == nil, p.hasCurrent, !p.partyOn, app?.offline != true else { return }
+        // the one playing reports; a phone that is playing but not yet listed as the active one does too (the server then lists it)
+        guard let api = app?.api, let p = player, activeID == deviceID || p.isPlaying, remote == nil, p.hasCurrent, !p.partyOn, app?.offline != true else { return }
         let key = "\(p.currentID ?? "")|\(p.index)|\(p.isPlaying)|\(p.queue.count)"
         if !force && key == lastKey && Date().timeIntervalSince(lastSent) < 5 { return }
         lastKey = key
@@ -213,6 +216,7 @@ final class DeviceHub: ObservableObject {
     /// This device is the one playing now: the others pause.
     func announce() {
         guard let api = app?.api, app?.offline != true else { return }
+        remoteBlock = Date().addingTimeInterval(2.5)
         let me = deviceID
         Task {
             if let r = try? api.request("/api/devices/active", method: "POST", json: ["device": me]) { _ = try? await api.send(r) }

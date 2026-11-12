@@ -96,6 +96,20 @@ struct NowPlayingView: View {
     @State private var showQueue = false
     @State private var showLyrics = false
     @StateObject private var airplay = AirPlayControl()
+    @State private var dragY: CGFloat = 0
+
+    /// Drag the header or the cover down to close the player, like the website.
+    private var swipeDown: some Gesture {
+        DragGesture()
+            .onChanged { v in if v.translation.height > 0 { dragY = v.translation.height } }
+            .onEnded { v in
+                if v.translation.height > 140 || v.predictedEndTranslation.height > 420 {
+                    dismiss()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { dragY = 0 }
+                }
+            }
+    }
 
     private func go(_ r: Route) {
         app.openRoute = r
@@ -126,6 +140,8 @@ struct NowPlayingView: View {
                         Spacer()
                         Color.clear.frame(width: 44, height: 44)
                     }
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(swipeDown)
 
                     // the cover (or the lyrics)
                     Group {
@@ -138,6 +154,8 @@ struct NowPlayingView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(swipeDown, including: showLyrics ? .none : .all)
 
                     // title, artist, like / add / more
                     HStack(alignment: .center, spacing: 4) {
@@ -251,6 +269,7 @@ struct NowPlayingView: View {
                 }
             }
         }
+        .offset(y: dragY)
         .sheet(isPresented: $showQueue) { QueueView().environmentObject(app).environmentObject(player) }
         .sheet(isPresented: $showParty) { PartySheet().environmentObject(app).environmentObject(player).environmentObject(party) }
         .sheet(isPresented: $showCredits) {
@@ -291,9 +310,6 @@ struct QueueView: View {
                     ForEach(Array(player.upcoming.enumerated()), id: \.offset) { i, id in
                         if let t = app.track(id) { row(t, index: player.index + 1 + i) }
                     }
-                    .onDelete { offsets in
-                        for o in offsets.sorted(by: >) { player.removeFromQueue(at: player.index + 1 + o) }
-                    }
                     .onMove { offsets, destination in player.moveUpcoming(from: offsets, to: destination) }
                 }
             }
@@ -303,7 +319,12 @@ struct QueueView: View {
             .background(Theme.surface)
             .navigationTitle(player.partyOn ? "Party queue" : "Queue")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                if !player.upcoming.isEmpty {
+                    ToolbarItem(placement: .cancellationAction) { Button("Clear") { player.clearUpcoming() } }
+                }
+            }
         }
     }
 
@@ -315,6 +336,12 @@ struct QueueView: View {
                 Text(t.artist).font(.system(size: 12)).foregroundColor(Theme.text2).lineLimit(1)
             }
             Spacer()
+            if let i = index {
+                Button { player.removeFromQueue(at: i) } label: {
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.text2).frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture { if let i = index { player.jump(to: i) } }

@@ -1433,7 +1433,12 @@ fn now_playing(app: &App) -> El<'_> {
     .max_width(360);
 
     let tab = |label: &'static str, tb: NpTab| button(text(label).size(14).wrapping(text::Wrapping::None)).padding([7, 16]).style(ui::chip(app.np_tab == tb)).on_press(Message::NpTab(tb));
-    let tabs = row![tab("Up next", NpTab::Queue), tab("Lyrics", NpTab::Lyrics), tab("Credits", NpTab::Credits)].spacing(8);
+    let clear: El = if app.np_tab == NpTab::Queue && !app.queue.upcoming().is_empty() {
+        button(text("Clear queue").size(13)).padding([6, 12]).style(ui::chip(false)).on_press(Message::ClearQueue).into()
+    } else {
+        Space::new(0, 0).into()
+    };
+    let tabs = row![tab("Up next", NpTab::Queue), tab("Lyrics", NpTab::Lyrics), tab("Credits", NpTab::Credits), Space::new(Length::Fill, 1), clear].spacing(8).align_y(Alignment::Center);
     let right: El = match app.np_tab {
         NpTab::Queue => scrollable(queue_rows(app, t))
             .id(crate::queue_scroller())

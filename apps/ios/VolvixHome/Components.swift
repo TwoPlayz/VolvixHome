@@ -167,8 +167,11 @@ struct TopBar: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+        .glass(Capsule())
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 }
 

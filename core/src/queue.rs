@@ -267,6 +267,27 @@ impl Queue {
         }
     }
 
+    /// Show another device's queue as it is (no shuffling): the song at `index` is the current one.
+    pub fn mirror(&mut self, ids: Vec<String>, index: usize, source: &str) {
+        self.source = source.to_string();
+        self.user_q = 0;
+        self.original = ids.clone();
+        self.order = ids;
+        self.pos = if self.order.is_empty() { None } else { Some(index.min(self.order.len() - 1)) };
+    }
+
+    /// Take everything after the current song out of the queue.
+    pub fn clear_upcoming(&mut self) {
+        match self.pos {
+            Some(p) => {
+                self.order.truncate(p + 1);
+                self.original = self.order.clone();
+                self.user_q = 0;
+            }
+            None => self.clear(),
+        }
+    }
+
     pub fn clear(&mut self) {
         *self = Queue { shuffle: self.shuffle, repeat: self.repeat, ..Default::default() };
     }

@@ -177,6 +177,19 @@ final class PlayerModel: ObservableObject {
         queue.remove(at: i)
     }
 
+    /// Take everything after the current song out of the queue.
+    func clearUpcoming() {
+        if inRemote { hub?.notice = "Not available while you control another device"; return }
+        if inParty {
+            guard let p = party, queue.count > index + 1 else { return }
+            let last = queue.count - 1, from = index
+            Task { for i in stride(from: last, to: from, by: -1) { await p.send("remove", ["index": i]) } }
+            return
+        }
+        guard index >= 0, index + 1 < queue.count else { return }
+        queue = Array(queue[...index])
+    }
+
     /// What another device needs to carry on: the queue around now, the song, the spot.
     func snapshot() -> [String: Any] {
         let from = max(0, index - 50)

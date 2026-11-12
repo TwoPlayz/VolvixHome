@@ -632,10 +632,11 @@ window.Spin = window.Spin || {};
     const upcoming = [], mineRows = [];
     for (let i = st.index + 1; i < st.queue.length; i++) (i <= st.index + st.userQ ? mineRows : upcoming).push(row(st.queue[i], i));
 
+    const clear = upcoming.length + mineRows.length ? '<div class="q-clear-row"><button class="btn btn-ghost btn-sm" data-q-clear>Clear queue</button></div>' : '';
     return (t ? '<div class="q-label">Now playing</div>' + row(st.queue[st.index], st.index) : '<p class="q-empty">Nothing playing.</p>') +
       (mineRows.length ? '<div class="q-label">Next in queue</div>' + mineRows.join('') : '') +
       (upcoming.length ? '<div class="q-label">Next' + (st.context && st.context.name ? ' from ' + S.esc(st.context.name) : '') + '</div>' + upcoming.join('') : '') +
-      (t && !upcoming.length && !mineRows.length ? '<p class="q-empty">' + (st.repeat === 'all' ? 'Repeat is on: the queue starts over.' : 'Nothing else queued.') + '</p>' : '');
+      (t && !upcoming.length && !mineRows.length ? '<p class="q-empty">' + (st.repeat === 'all' ? 'Repeat is on: the queue starts over.' : 'Nothing else queued.') + '</p>' : '') + clear;
   }
 
   /* ---------- input ---------- */
@@ -643,6 +644,7 @@ window.Spin = window.Spin || {};
     const rm = e.target.closest('[data-q-remove]');
     if (rm) { removeAt(parseInt(rm.dataset.qRemove, 10)); return; }
     if (e.target.closest('[data-q-reshuffle]')) { reshuffle(); return; }
+    if (e.target.closest('[data-q-clear]')) { clearQueue(); return; }
     const qi = e.target.closest('[data-queue-index]');
     if (qi) { playAt(parseInt(qi.dataset.queueIndex, 10)); return; }
 
@@ -685,6 +687,15 @@ window.Spin = window.Spin || {};
     st.queue.splice(i, 1);
     renderQueue(); saveResume(true);
     const first = S.$('[data-q-remove]'); if (first && document.activeElement === document.body) first.focus();
+  }
+  /** Take everything after the current song out of the queue. */
+  function clearQueue() {
+    if (intercept('clearQueue', [])) return;
+    if (st.index < 0 || st.queue.length <= st.index + 1) return;
+    st.queue.splice(st.index + 1);
+    st.userQ = 0; st.original = null;
+    S.toast('Queue cleared', 'queue');
+    renderQueue(); saveResume(true);
   }
   function reshuffle() {
     if (intercept('reshuffle', [])) return;
@@ -846,6 +857,7 @@ window.Spin = window.Spin || {};
     moveInQueue: moveInQueue,
     removeFromQueue: removeAt,
     reshuffle: reshuffle,
+    clearQueue: clearQueue,
     qualityButton: qualityButton,
     streamOnly: false,  // AirPlay can't reach a downloaded copy kept inside the app, so play from the server while it's on
     /** Load the current song again (used when the source should change, e.g. AirPlay switched on). */
