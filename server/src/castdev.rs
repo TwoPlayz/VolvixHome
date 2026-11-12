@@ -324,6 +324,57 @@ pub struct Media {
     pub track: String,
 }
 
+/// A second way to find Cast devices, for networks where mDNS doesn't get through: ask for DIAL devices with SSDP
+/// (a plain multicast UDP question), then check each answer really is a Cast device.
+fn discover_ssdp(found: Arc<Mutex<HashMap<String, Device>>>) {
+    std::thread::spawn(move || {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
+        rt.block_on(async move {
+            let mut not_cast: std::collections::HashSet<IpAddr> = std::collections::HashSet::new();
+            loop {
+                for ip in ssdp_search().await {
+                    if not_cast.contains(&ip) || found.lock().unwrap().values().any(|d| d.host == ip.to_string()) { continue; }
+                    match cast_info(ip).await {
+                        Some(dev) => {
+                            eprintln!("cast: found {} at {ip} (SSDP)", dev.name);
+                            found.lock().unwrap().insert(dev.id.clone(), dev);
+                        }
+                        None => { not_cast.insert(ip); }
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+    });
+}
+
+async fn ssdp_search() -> Vec<IpAddr> {
+    let Ok(sock) = tokio::net::UdpSocket::bind("0.0.0.0:0").await else { return vec![] };
+    let msg = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:dial-multiscreen-org:service:dial:1\r\n\r\n";
+    for _ in 0..2 {
+        let _ = sock.send_to(msg.as_bytes(), "239.255.255.250:1900").await;
+    }
+    let mut out: Vec<IpAddr> = vec![];
+    let mut buf = [0u8; 2048];
+    let end = std::time::Instant::now() + Duration::from_secs(4);
+    while let Some(left) = end.checked_duration_since(std::time::Instant::now()) {
+        match tokio::time::timeout(left, sock.recv_from(&mut buf)).await {
+            Ok(Ok((_, from))) => { if !out.contains(&from.ip()) { out.push(from.ip()); } }
+            _ => break,
+        }
+    }
+    out
+}
+
+/// Is this address a Cast device? Cast devices serve a little info page on port 8008.
+async fn cast_info(ip: IpAddr) -> Option<Device> {
+    let r = reqwest::Client::new().get(format!("http://{ip}:8008/setup/eureka_info?params=name,device_info")).timeout(Duration::from_secs(3)).send().await.ok()?;
+    let v = r.json::<Value>().await.ok()?;
+    let name = v["name"].as_str().filter(|n| !n.is_empty())?.to_string();
+    let model = v["device_info"]["model_name"].as_str().unwrap_or("").to_string();
+    Some(Device { id: format!("ip-{ip}"), name, model, host: ip.to_string(), port: 8009, manual: false })
+}
+
 pub struct Caster {
     found: Arc<Mutex<HashMap<String, Device>>>,
     manual: Mutex<Vec<Device>>,
@@ -337,6 +388,7 @@ impl Caster {
         let manual: Vec<Device> = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         let c = Caster { found: Arc::new(Mutex::new(HashMap::new())), manual: Mutex::new(manual), file, links: tokio::sync::Mutex::new(HashMap::new()) };
         c.discover();
+        discover_ssdp(c.found.clone());
         c
     }
 
@@ -344,8 +396,9 @@ impl Caster {
     fn discover(&self) {
         let found = self.found.clone();
         std::thread::spawn(move || {
-            let Ok(daemon) = mdns_sd::ServiceDaemon::new() else { eprintln!("cast: can't look for TVs on this network"); return };
-            let Ok(rx) = daemon.browse("_googlecast._tcp.local.") else { return };
+            let Ok(daemon) = mdns_sd::ServiceDaemon::new() else { eprintln!("cast: can't look for TVs on this network (mDNS)"); return };
+            let Ok(rx) = daemon.browse("_googlecast._tcp.local.") else { eprintln!("cast: mDNS browse failed"); return };
+            eprintln!("cast: looking for TVs and speakers (mDNS + SSDP)");
             while let Ok(ev) = rx.recv() {
                 match ev {
                     mdns_sd::ServiceEvent::ServiceResolved(info) => {
@@ -353,6 +406,7 @@ impl Caster {
                         let id = info.get_property_val_str("id").unwrap_or(info.get_fullname()).to_string();
                         let name = info.get_property_val_str("fn").unwrap_or("Cast device").to_string();
                         let model = info.get_property_val_str("md").unwrap_or("").to_string();
+                        eprintln!("cast: found {name} at {ip} (mDNS)");
                         found.lock().unwrap().insert(id.clone(), Device { id, name, model, host: ip.to_string(), port: info.get_port(), manual: false });
                     }
                     mdns_sd::ServiceEvent::ServiceRemoved(_, fullname) => {
