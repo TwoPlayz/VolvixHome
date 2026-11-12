@@ -71,6 +71,7 @@ final class PlayerModel: ObservableObject {
             let opts = (n.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt) ?? 0
             Task { @MainActor in self?.interruption(typeRaw: raw, optionsRaw: opts) }
         }
+        resumeLast()
     }
 
     // MARK: starting music
@@ -82,7 +83,7 @@ final class PlayerModel: ObservableObject {
         var list = ids
         var start = max(0, min(startAt, ids.count - 1))
         // with no server, only what is downloaded can play
-        if app?.offline == true, let d = downloads {
+        if app?.localOnly == true, let d = downloads {
             let wanted = ids[start]
             list = ids.filter { d.has($0) }
             if list.isEmpty {
@@ -111,6 +112,18 @@ final class PlayerModel: ObservableObject {
         if inParty { party?.fire("addNext", ["ids": [id]]); party?.notice = "Playing next in the party"; return }
         if queue.isEmpty { play([id]); return }
         queue.insert(id, at: min(index + 1, queue.count))
+    }
+
+    func playNext(ids: [String]) {
+        if inParty { party?.fire("addNext", ["ids": ids]); party?.notice = "Playing next in the party"; return }
+        if queue.isEmpty { play(ids); return }
+        queue.insert(contentsOf: ids, at: min(index + 1, queue.count))
+    }
+
+    func addToQueue(ids: [String]) {
+        if inParty { party?.fire("add", ["ids": ids]); party?.notice = "Added to the party queue"; return }
+        if queue.isEmpty { play(ids); return }
+        queue.append(contentsOf: ids)
     }
 
     func addToQueue(_ id: String) {
@@ -274,7 +287,7 @@ final class PlayerModel: ObservableObject {
         let asset: AVURLAsset
         if let local = downloads?.localURL(id) {
             asset = AVURLAsset(url: local)
-        } else if app.offline {
+        } else if app.localOnly {
             loading = false
             isPlaying = false
             problem = "This song isn't downloaded, and the server can't be reached."
@@ -386,6 +399,7 @@ final class PlayerModel: ObservableObject {
         }
         maybeCrossfade()
         keepInStep()
+        if isPlaying && Date().timeIntervalSince(lastSaved) > 5 { saveLast() }
         let playing = player.timeControlStatus == .playing
         if playing != isPlaying && player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
             isPlaying = playing
@@ -468,6 +482,32 @@ final class PlayerModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: resume where you left off
+
+    private var lastKey: String { "volvix.last." + (app?.user?.id ?? "") }
+    private var lastSaved = Date.distantPast
+
+    private func saveLast() {
+        guard !inParty, !queue.isEmpty, index >= 0 else { return }
+        lastSaved = Date()
+        let from = max(0, index - 20), to = min(queue.count, index + 200)
+        UserDefaults.standard.set(["queue": Array(queue[from..<to]), "index": index - from, "pos": position] as [String: Any], forKey: lastKey)
+    }
+
+    /// Reopening the app shows the last song and spot, paused.
+    private func resumeLast() {
+        guard queue.isEmpty, app?.fx.resumeLast != false,
+              let d = UserDefaults.standard.dictionary(forKey: lastKey),
+              let q = d["queue"] as? [String], let i = d["index"] as? Int, i >= 0, i < q.count else { return }
+        let ids = q.filter { app?.track($0) != nil }
+        guard let at = ids.firstIndex(of: q[i]) else { return }
+        let pos = (d["pos"] as? Double) ?? 0
+        queue = ids
+        index = at
+        pendingSeek = pos > 2 ? pos : nil
+        load(autoplay: false)
     }
 
     // MARK: listening party
@@ -600,7 +640,7 @@ final class PlayerModel: ObservableObject {
             if repeatMode == .all { next = 0 } else { return }
         }
         if !app.fx.crossfadeAlbums, let a = currentID.flatMap({ app.track($0) }), let b = app.track(queue[next]), a.albumId == b.albumId, b.no == a.no + 1 { return }
-        if app.offline, let d = downloads, !d.has(queue[next]) { return }
+        if app.localOnly, let d = downloads, !d.has(queue[next]) { return }
         xfading = true
         let outgoing = player
         fadingOut = outgoing
@@ -629,8 +669,10 @@ final class PlayerModel: ObservableObject {
     /// Tell the server (the household page shows what you're playing).
     private func report() {
         guard let api = app?.api else { return }
-        let id = currentID
-        let playing = isPlaying
+        // "Share what I'm listening to" and Private session decide what the household sees
+        let share = app?.fx.shareActivity != false && app?.fx.privateSession != true
+        let id = share ? currentID : nil
+        let playing = share && isPlaying
         let key = "\(id ?? "-")|\(playing)"
         if key == lastReported { return }
         lastReported = key

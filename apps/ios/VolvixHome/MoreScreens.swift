@@ -76,12 +76,9 @@ struct HouseholdView: View {
                         Text("No one else is on this server yet.").font(.system(size: 15)).foregroundColor(Theme.text2).padding(.top, 8)
                     }
                     ForEach(app.members) { m in
+                        VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 14) {
-                            ZStack {
-                                Circle().fill(Theme.tint(m.name))
-                                Text(initials(m.name)).font(.system(size: 16, weight: .bold)).foregroundColor(.white)
-                            }
-                            .frame(width: 48, height: 48)
+                            AvatarView(id: m.id, name: m.name, size: 48)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(m.name).font(.system(size: 16, weight: .semibold)).foregroundColor(Theme.text)
                                 if m.trackTitle.isEmpty {
@@ -93,6 +90,24 @@ struct HouseholdView: View {
                             }
                             Spacer(minLength: 0)
                             if let a = m.albumID { CoverView(albumID: a, corner: 6).frame(width: 44, height: 44) }
+                        }
+                        let theirs = app.householdLists.filter { $0.owner == m.id }
+                        if !theirs.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(theirs) { p in
+                                        NavigationLink(value: Route.playlist(p.id)) {
+                                            HStack(spacing: 8) {
+                                                PlaylistArt(playlist: p).frame(width: 34, height: 34)
+                                                Text(p.name).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text).lineLimit(1)
+                                            }
+                                            .padding(6).padding(.trailing, 6).background(Theme.surface3).clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
                         }
                         .padding(12)
                         .background(Theme.surface2)

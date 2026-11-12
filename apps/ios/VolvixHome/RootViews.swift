@@ -131,6 +131,13 @@ extension View {
             case .rewind(let year): RewindView(year: year)
             case .credit(let name): CreditView(name: name)
             case .playback: PlaybackSettingsView()
+            case .profile: ProfileView()
+            case .settings: SettingsView()
+            case .members: MembersView()
+            case .folder: FolderView()
+            case .lidarr: LidarrSettingsView()
+            case .shares: SharesView()
+            case .browse(let kind, let value): BrowseView(kind: kind, value: value)
             }
         }
     }

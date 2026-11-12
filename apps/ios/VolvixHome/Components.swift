@@ -14,6 +14,13 @@ enum Route: Hashable {
     case rewind(Int)
     case credit(String)
     case playback
+    case profile
+    case settings
+    case members
+    case folder
+    case lidarr
+    case shares
+    case browse(String, String)
 }
 
 /// An album's cover (a rounded square). Without art it shows the title on a tint, like the website.
@@ -156,11 +163,7 @@ struct TopBar: View {
             }
             .buttonStyle(.plain)
             NavigationLink(value: Route.account) {
-                ZStack {
-                    Circle().fill(Theme.tint(app.user?.name ?? "me"))
-                    Text(initials(app.user?.name ?? "?")).font(.system(size: 13, weight: .bold)).foregroundColor(.white)
-                }
-                .frame(width: 32, height: 32)
+                AvatarView(id: app.user?.id ?? "", name: app.user?.name ?? "me", size: 32)
             }
             .buttonStyle(.plain)
         }
@@ -269,7 +272,7 @@ struct TrackRow: View {
                 if !app.yourPlaylists.isEmpty {
                     Menu {
                         ForEach(app.yourPlaylists) { p in
-                            Button(p.name) { app.addTrack(track.id, to: p.id) }
+                            Button(p.name) { app.addTracks([track.id], to: p.id) }
                         }
                     } label: { Label("Add to playlist", systemImage: "plus.square.on.square") }
                 }
@@ -283,7 +286,7 @@ struct TrackRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .opacity(app.offline && !downloads.has(track.id) ? 0.4 : 1)
+        .opacity(app.localOnly && !downloads.has(track.id) ? 0.4 : 1)
         .contentShape(Rectangle())
         .onTapGesture { onPlay() }
         .sheet(isPresented: $showCredits) {

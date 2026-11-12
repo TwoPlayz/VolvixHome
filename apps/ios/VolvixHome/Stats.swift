@@ -60,6 +60,12 @@ struct FxSettings {
     var eqPre = 0.0
     var eqGains = [Double](repeating: 0, count: 10)
     var privateSession = false
+    var shareActivity = true
+    var resumeLast = true
+    var offlineOnly = false
+    var downloadMobile = false
+    /// "stream" (same as streaming), or a quality
+    var downloadQuality = "stream"
 
     init() {}
 
@@ -70,6 +76,11 @@ struct FxSettings {
         leveling = (s["leveling"] as? String) ?? "off"
         if leveling.isEmpty { leveling = "off" }
         privateSession = (s["privateSession"] as? Bool) ?? false
+        shareActivity = (s["shareActivity"] as? Bool) ?? true
+        resumeLast = (s["resumeLast"] as? Bool) ?? true
+        offlineOnly = (s["offlineOnly"] as? Bool) ?? false
+        downloadMobile = (s["downloadMobile"] as? Bool) ?? false
+        downloadQuality = (s["downloadQuality"] as? String) ?? "stream"
         if let e = s["eq"] as? [String: Any] {
             eqOn = (e["on"] as? Bool) ?? false
             eqPreset = (e["preset"] as? String) ?? "flat"

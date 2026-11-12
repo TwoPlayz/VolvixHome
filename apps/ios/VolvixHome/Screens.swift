@@ -100,7 +100,7 @@ struct HomeView: View {
 
                     if !app.playlists.isEmpty {
                         Shelf(title: "Your playlists") {
-                            ForEach(app.playlists) { p in PlaylistCard(playlist: p) }
+                            ForEach(app.playlists + app.sharedLists) { p in PlaylistCard(playlist: p) }
                         }
                     }
 
@@ -117,8 +117,8 @@ struct HomeView: View {
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
-        .task(id: app.stats.log.count * 100000 + app.allTracks.count + (app.offline ? 1 : 0)) {
-            mixes = MixEngine.mixes(app, playable: { app.offline ? downloads.has($0) : true })
+        .task(id: app.stats.log.count * 100000 + app.allTracks.count + (app.localOnly ? 1 : 0)) {
+            mixes = MixEngine.mixes(app, playable: { app.localOnly ? downloads.has($0) : true })
             mostPlayed = MixEngine.topAlbums(app, 10)
             picks = MixEngine.randomAlbums(app, 10)
         }
@@ -149,7 +149,9 @@ struct PlaylistArt: View {
     let playlist: PlaylistInfo
 
     var body: some View {
-        if playlist.liked {
+        if playlist.cover > 0 {
+            RemoteSquare(path: "/api/playlist-cover/\(app.api?.encode(playlist.owner.isEmpty ? app.myID : playlist.owner) ?? "")/\(app.api?.encode(playlist.id) ?? "")?v=\(playlist.cover)", title: playlist.name, corner: 8)
+        } else if playlist.liked {
             ZStack {
                 LinearGradient(colors: [Color(hex: 0x4B3FD6), Theme.accent], startPoint: .topLeading, endPoint: .bottomTrailing)
                 Image(systemName: "heart.fill").font(.system(size: 34)).foregroundColor(.white)
@@ -175,7 +177,7 @@ struct PlaylistArt: View {
 // MARK: - Library
 
 struct LibraryView: View {
-    enum Tab: String, CaseIterable { case albums = "Albums", artists = "Artists", songs = "Songs", playlists = "Playlists", downloaded = "Saved" }
+    enum Tab: String, CaseIterable { case albums = "Albums", artists = "Artists", songs = "Songs", playlists = "Playlists", browse = "Browse", downloaded = "Saved" }
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var downloads: DownloadStore
     @EnvironmentObject var player: PlayerModel
@@ -189,11 +191,13 @@ struct LibraryView: View {
             TopBar()
             Text("Your Library").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 4)
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { t in Text(t.rawValue).tag(t) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Tab.allCases, id: \.self) { t in chip(t.rawValue, on: tab == t) { tab = t } }
+                }
+                .padding(.horizontal, 16)
             }
-            .pickerStyle(.segmented)
-            .padding(16)
+            .padding(.vertical, 12)
 
             ScrollView {
                 switch tab {
@@ -201,6 +205,7 @@ struct LibraryView: View {
                 case .artists: artists
                 case .songs: songs
                 case .playlists: playlists
+                case .browse: BrowseSections()
                 case .downloaded: saved
                 }
             }
@@ -321,29 +326,7 @@ struct LibraryView: View {
         }
     }
 
-    private var playlists: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PillButton(title: "New playlist", icon: "plus", primary: false) { creating = true }
-                .padding(.horizontal, 16)
-            LazyVStack(spacing: 0) {
-                ForEach(app.playlists) { p in
-                    NavigationLink(value: Route.playlist(p.id)) {
-                        HStack(spacing: 14) {
-                            PlaylistArt(playlist: p).frame(width: 56, height: 56)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name).font(.system(size: 16)).foregroundColor(Theme.text).lineLimit(1)
-                                Text("\(p.trackIDs.count) song\(p.trackIDs.count == 1 ? "" : "s")").font(.system(size: 13)).foregroundColor(Theme.text2)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.system(size: 13)).foregroundColor(Theme.text3)
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 6)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
+    private var playlists: some View { PlaylistsTab() }
 }
 
 // MARK: - Album, artist, playlist
@@ -373,6 +356,10 @@ struct AlbumView: View {
                         PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
                         PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
                         DownloadButton(ids: ids)
+                    }
+                    HStack(spacing: 12) {
+                        AddToPlaylistButton(ids: ids)
+                        AlbumMenuButton(album: album, ids: ids)
                     }
                     LazyVStack(spacing: 0) {
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { i, t in
@@ -454,61 +441,6 @@ struct ArtistView: View {
         .background(Theme.surface)
         .navigationBarTitleDisplayMode(.inline)
         .task { app.loadInfo(name) }
-    }
-}
-
-struct PlaylistView: View {
-    @EnvironmentObject var app: AppModel
-    @EnvironmentObject var player: PlayerModel
-    @Environment(\.dismiss) private var dismiss
-    let id: String
-    @State private var confirmDelete = false
-
-    var body: some View {
-        ScrollView {
-            if let p = app.playlist(id) {
-                let tracks = p.trackIDs.compactMap { app.track($0) }
-                let ids = tracks.map { $0.id }
-                VStack(spacing: 14) {
-                    PlaylistArt(playlist: p).frame(width: 220, height: 220).padding(.top, 8)
-                    VStack(spacing: 4) {
-                        Text(p.name).font(.system(size: 24, weight: .bold)).foregroundColor(Theme.text).multilineTextAlignment(.center)
-                        if !p.description.isEmpty { Text(p.description).font(.system(size: 14)).foregroundColor(Theme.text2).multilineTextAlignment(.center) }
-                        Text("\(tracks.count) song\(tracks.count == 1 ? "" : "s")").font(.system(size: 13)).foregroundColor(Theme.text2)
-                    }
-                    .padding(.horizontal, 16)
-                    if !ids.isEmpty {
-                        HStack(spacing: 12) {
-                            PillButton(title: "Play", icon: "play.fill") { player.play(ids) }
-                            PillButton(title: "Shuffle", icon: "shuffle", primary: false) { player.play(ids, shuffled: true) }
-                            DownloadButton(ids: ids)
-                        }
-                    }
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(tracks.enumerated()), id: \.offset) { i, t in
-                            TrackRow(track: t, showCover: true, onRemove: { remove(p, at: i, track: t) }) { player.play(ids, startAt: i) }
-                        }
-                    }
-                    if !p.liked {
-                        Button("Delete playlist", role: .destructive) { confirmDelete = true }
-                            .font(.system(size: 14)).padding(.top, 12)
-                    }
-                }
-                .padding(.bottom, 24)
-            } else {
-                Text("That playlist isn't here any more.").foregroundColor(Theme.text2).padding(24)
-            }
-        }
-        .background(Theme.surface)
-        .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Delete this playlist?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { app.deletePlaylist(id); dismiss() }
-            Button("Cancel", role: .cancel) {}
-        }
-    }
-
-    private func remove(_ p: PlaylistInfo, at i: Int, track: Track) {
-        if p.liked { app.toggleLike(track.id) } else { app.removeTrack(at: i, from: p.id) }
     }
 }
 
@@ -634,7 +566,7 @@ struct AccountView: View {
                 Text("Account").font(.system(size: 30, weight: .bold)).foregroundColor(Theme.text)
                 if let u = app.user {
                     HStack(spacing: 14) {
-                        ArtistPic(name: u.name, corner: 28, photo: false).frame(width: 56, height: 56)
+    AvatarView(id: u.id, name: u.name, size: 56)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(u.name).font(.system(size: 18, weight: .semibold)).foregroundColor(Theme.text)
                             Text(u.admin ? "Admin" : "Member").font(.system(size: 13)).foregroundColor(Theme.text2)
@@ -665,6 +597,14 @@ struct AccountView: View {
                     }
                 }
                 NavigationLink(value: Route.playback) { accountRow("slider.horizontal.3", "Playback", "Crossfade, volume leveling, equalizer") }.buttonStyle(.plain)
+                NavigationLink(value: Route.profile) { accountRow("person.crop.circle", "Profile", "Your name, picture and password") }.buttonStyle(.plain)
+                NavigationLink(value: Route.settings) { accountRow("gearshape", "Settings", "Privacy, downloads, library") }.buttonStyle(.plain)
+                if app.can("members") {
+                    NavigationLink(value: Route.members) { accountRow("person.3", "Members", "Who can use this server, and what they may do") }.buttonStyle(.plain)
+                }
+                if app.can("share") || app.can("members") {
+                    NavigationLink(value: Route.shares) { accountRow("link", "Share links", "Links to albums and playlists that are open now") }.buttonStyle(.plain)
+                }
                 if let y = app.rewindYears.last {
                     NavigationLink(value: Route.rewind(y)) { accountRow("gobackward", "Rewind \(String(y))", "Your year in music") }.buttonStyle(.plain)
                 }

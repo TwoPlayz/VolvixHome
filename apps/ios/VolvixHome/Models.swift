@@ -91,8 +91,11 @@ struct User: Codable, Hashable {
     var name: String
     var username: String
     var admin: Bool
+    var avatar: Int
+    var perms: [String]
+    var hideExplicit: Bool
 
-    enum CodingKeys: String, CodingKey { case id, name, username, admin }
+    enum CodingKeys: String, CodingKey { case id, name, username, admin, avatar, perms, hideExplicit }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -100,6 +103,9 @@ struct User: Codable, Hashable {
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         username = (try? c.decode(String.self, forKey: .username)) ?? ""
         admin = (try? c.decode(Bool.self, forKey: .admin)) ?? false
+        avatar = (try? c.decode(Int.self, forKey: .avatar)) ?? 0
+        perms = (try? c.decode([String].self, forKey: .perms)) ?? []
+        hideExplicit = (try? c.decode(Bool.self, forKey: .hideExplicit)) ?? false
     }
 }
 
@@ -119,4 +125,16 @@ struct PlaylistInfo: Identifiable, Hashable {
     var description: String
     var trackIDs: [String]
     var liked: Bool
+    /// the server's id of whoever made it
+    var owner: String = ""
+    var mine = true
+    var editable = true
+    /// kept on the server so several people edit the same copy
+    var shared = false
+    var isPublic = false
+    var collaborators: [String] = []
+    var invited: [String] = []
+    var addedBy: [String] = []
+    var cover = 0
+    var rev = 0
 }

@@ -284,11 +284,7 @@ struct PartySheet: View {
     private func personRow(_ m: Member, on: Bool, enabled: Bool = true, sub: String, toggle: @escaping () -> Void) -> some View {
         Button(action: toggle) {
             HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill(Theme.tint(m.name))
-                    Text(initials(m.name)).font(.system(size: 14, weight: .bold)).foregroundColor(.white)
-                }
-                .frame(width: 40, height: 40)
+                AvatarView(id: m.id, name: m.name, size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(m.name).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
                     Text(sub).font(.system(size: 12)).foregroundColor(Theme.text2)
@@ -342,11 +338,7 @@ struct PartySheet: View {
             Text("In the party").font(.system(size: 12, weight: .bold)).foregroundColor(Theme.text2).textCase(.uppercase)
             ForEach(s.members, id: \.id) { m in
                 HStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(Theme.tint(party.name(m.id)))
-                        Text(initials(party.name(m.id))).font(.system(size: 13, weight: .bold)).foregroundColor(.white)
-                    }
-                    .frame(width: 36, height: 36)
+                    AvatarView(id: m.id, name: party.name(m.id), size: 36)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(party.name(m.id)).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
                         Text(m.id == s.host ? "Host" : (m.output == "host" ? "Listening on the host's speaker" : "Listening on their own device"))

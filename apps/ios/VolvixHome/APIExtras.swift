@@ -87,12 +87,14 @@ extension API {
         if let r = try? request("/api/notifications/read", method: "POST", json: [String: Any]()) { _ = try? await send(r) }
     }
 
-    func household() async -> [Member] {
+    func household() async -> (members: [Member], playlists: [[String: Any]]) {
         guard let data = try? await send(try request("/api/household")),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let list = o["members"] as? [[String: Any]] else { return [] }
+              let list = o["members"] as? [[String: Any]] else { return ([], []) }
         var out: [Member] = []
+        var lists: [[String: Any]] = []
         for m in list {
+            for p in (m["playlists"] as? [[String: Any]]) ?? [] { lists.append(p) }
             let now = m["now"] as? [String: Any]
             out.append(Member(
                 id: (m["id"] as? String) ?? UUID().uuidString,
@@ -103,7 +105,7 @@ extension API {
                 albumID: now?["albumId"] as? String,
                 listening: (now?["listening"] as? Bool) ?? false))
         }
-        return out
+        return (out, lists)
     }
 
     /// A short bio and a photo for an artist (from Wikipedia, kept by the server). The photo is a server path.

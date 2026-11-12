@@ -28,6 +28,11 @@ final class AppModel: ObservableObject {
     @Published var members: [Member] = []
     @Published var stats = Stats()
     @Published var fx = FxSettings()
+    @Published var people: [Person] = []
+    @Published var sharedLists: [PlaylistInfo] = []
+    @Published var invites: [PlaylistInvite] = []
+    @Published var householdLists: [PlaylistInfo] = []
+    @Published var followedIDs: [String] = []
     @Published var artistInfos: [String: ArtistInfoData] = [:]
     @Published var quality: String = UserDefaults.standard.string(forKey: "volvix.quality") ?? "original"
     /// "system", "dark" or "light"
@@ -221,7 +226,40 @@ final class AppModel: ObservableObject {
         let n = await api.notifications()
         notes = n.items
         unread = n.unread
-        members = await api.household()
+        let h = await api.household()
+        members = h.members
+        householdLists = h.playlists.compactMap { householdInfo($0) }
+        people = await api.people()
+        await loadShared()
+    }
+
+    func reloadPeople() async {
+        if let api = api { people = await api.people() }
+    }
+
+    /// The server gave a new key (after changing the password): use it from now on.
+    func replaceToken(_ t: String) {
+        UserDefaults.standard.set(t, forKey: tokenKey)
+        api?.token = t
+    }
+
+    /// Songs can only come from this phone: no server, or "Only play downloads" is on.
+    var localOnly: Bool { offline || fx.offlineOnly }
+
+    private func householdInfo(_ o: [String: Any]) -> PlaylistInfo? {
+        guard let id = o["id"] as? String else { return nil }
+        let owner = (o["owner"] as? String) ?? ""
+        let entries = (o["tracks"] as? [[String: Any]]) ?? []
+        var p = PlaylistInfo(id: id, name: (o["name"] as? String) ?? "Playlist", description: (o["description"] as? String) ?? "",
+                             trackIDs: entries.compactMap { $0["id"] as? String }, liked: false)
+        p.owner = owner
+        p.mine = false
+        p.editable = false
+        p.shared = (o["shared"] as? Bool) ?? false
+        p.isPublic = true
+        p.collaborators = (o["collaborators"] as? [String]) ?? []
+        p.addedBy = entries.map { ($0["addedBy"] as? String) ?? owner }
+        return p
     }
 
     /// Keep looking every few seconds while the app is on screen.
@@ -264,6 +302,11 @@ final class AppModel: ObservableObject {
         userData = [:]
         stats = Stats()
         fx = FxSettings()
+        people = []
+        sharedLists = []
+        invites = []
+        householdLists = []
+        followedIDs = []
     }
 
     private func index(_ c: Catalog) {
@@ -305,9 +348,15 @@ final class AppModel: ObservableObject {
             let entries = (p["tracks"] as? [[String: Any]]) ?? []
             let ids = entries.compactMap { $0["id"] as? String }
             let liked = (p["liked"] as? Bool) == true || id == "pl_liked"
-            list.append(PlaylistInfo(id: id, name: (p["name"] as? String) ?? "Playlist", description: (p["description"] as? String) ?? "", trackIDs: ids, liked: liked))
+            var info = PlaylistInfo(id: id, name: (p["name"] as? String) ?? "Playlist", description: (p["description"] as? String) ?? "", trackIDs: ids, liked: liked)
+            info.owner = user?.id ?? ""
+            info.isPublic = (p["public"] as? Bool) ?? false
+            info.cover = wholeNumber(p["cover"])
+            info.addedBy = entries.map { ($0["addedBy"] as? String) ?? "u_me" }
+            list.append(info)
         }
         playlists = list
+        followedIDs = (userData["followed"] as? [String]) ?? []
         stats = Stats(userData["stats"] as? [String: Any])
         fx = FxSettings(userData["settings"] as? [String: Any])
     }
@@ -323,10 +372,12 @@ final class AppModel: ObservableObject {
             return a.no < b.no
         }
     }
-    func playlist(_ id: String) -> PlaylistInfo? { playlists.first { $0.id == id } }
+    func playlist(_ id: String) -> PlaylistInfo? {
+        playlists.first { $0.id == id } ?? sharedLists.first { $0.id == id } ?? householdLists.first { $0.id == id }
+    }
     var liked: PlaylistInfo? { playlists.first { $0.liked } }
     func isLiked(_ trackID: String) -> Bool { liked?.trackIDs.contains(trackID) ?? false }
-    var yourPlaylists: [PlaylistInfo] { playlists.filter { !$0.liked } }
+    var yourPlaylists: [PlaylistInfo] { editablePlaylists }
 
     var recentAlbums: [Album] { recent.compactMap { albumByID[$0] } }
     var newestAlbums: [Album] { albums.sorted { $0.added > $1.added } }
@@ -388,7 +439,7 @@ final class AppModel: ObservableObject {
 
     func toggleLike(_ trackID: String) {
         let on = !isLiked(trackID)
-        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let now = Int(Date().timeIntervalSince1970)
         // show it straight away
         if let i = playlists.firstIndex(where: { $0.liked }) {
             playlists[i].trackIDs.removeAll { $0 == trackID }
@@ -429,7 +480,7 @@ final class AppModel: ObservableObject {
         let clean = name.trimmingCharacters(in: .whitespaces)
         if clean.isEmpty { return }
         let id = "pl_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12))
-        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let now = Int(Date().timeIntervalSince1970)
         var entries: [[String: Any]] = []
         for t in tracks { entries.append(["id": t, "addedBy": "u_me", "at": now]) }
         if let t = trackID { entries.append(["id": t, "addedBy": "u_me", "at": now]) }
@@ -444,7 +495,7 @@ final class AppModel: ObservableObject {
     }
 
     func addTrack(_ trackID: String, to playlistID: String) {
-        let now = Int(Date().timeIntervalSince1970 * 1000)
+        let now = Int(Date().timeIntervalSince1970)
         if let i = playlists.firstIndex(where: { $0.id == playlistID }) { playlists[i].trackIDs.append(trackID) }
         edit { d in
             var lists = (d["playlists"] as? [[String: Any]]) ?? []

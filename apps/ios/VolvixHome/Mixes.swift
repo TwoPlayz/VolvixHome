@@ -286,7 +286,7 @@ struct MixView: View {
         .background(Theme.surface)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: id) {
-            mix = MixEngine.mixes(app, playable: { app.offline ? downloads.has($0) : true }).first { $0.id == id }
+            mix = MixEngine.mixes(app, playable: { app.localOnly ? downloads.has($0) : true }).first { $0.id == id }
             looked = true
         }
     }
