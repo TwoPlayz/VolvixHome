@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AVFoundation
 
 /// Shows your Volvix Home server in a WKWebView.
 ///  - Stays on the server; it never opens Safari or navigates away on its own.
@@ -49,9 +50,45 @@ struct ServerView: UIViewRepresentable {
         let onDisconnect: () -> Void
         weak var webView: WKWebView?
 
+        private var observers: [NSObjectProtocol] = []
+
         init(server: URL, onDisconnect: @escaping () -> Void) {
             self.server = server
             self.onDisconnect = onDisconnect
+            super.init()
+            watchAudio()
+        }
+
+        deinit { observers.forEach { NotificationCenter.default.removeObserver($0) } }
+
+        /// Tell the page's Playback log (Settings) what iOS is doing to the audio, to find out why it stops in the background.
+        private func note(_ text: String) {
+            let js = "window.Spin&&Spin.audioLog&&Spin.audioLog.add('native: \(text)')"
+            DispatchQueue.main.async { [weak self] in self?.webView?.evaluateJavaScript(js, completionHandler: nil) }
+        }
+
+        private func watchAudio() {
+            let nc = NotificationCenter.default
+            let session = AVAudioSession.sharedInstance()
+            observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
+                let type = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) ?? 99
+                let reason = (n.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt) ?? 99
+                self?.note("audio interruption \(type == 1 ? "began" : "ended"), reason \(reason)")
+            })
+            observers.append(nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] n in
+                let reason = (n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) ?? 99
+                self?.note("audio route changed, reason \(reason)")
+            })
+            let events: [(Notification.Name, String)] = [
+                (UIApplication.willResignActiveNotification, "app will resign active"),
+                (UIApplication.didEnterBackgroundNotification, "app entered background"),
+                (UIApplication.willEnterForegroundNotification, "app entering foreground"),
+            ]
+            for (name, text) in events {
+                observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    self?.note("\(text); session \(session.category.rawValue), other audio playing: \(session.isOtherAudioPlaying)")
+                })
+            }
         }
 
         private func sameHost(_ url: URL?) -> Bool {
