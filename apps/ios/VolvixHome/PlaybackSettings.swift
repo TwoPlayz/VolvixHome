@@ -122,6 +122,8 @@ struct EQGraph: View {
 /// Playback settings: crossfade, volume levelling, the equalizer, private session.
 struct PlaybackSettingsView: View {
     @EnvironmentObject var app: AppModel
+    @EnvironmentObject var player: PlayerModel
+    @State private var sleepChoice = "0"
 
     private func segmented(_ title: String, _ detail: String?, selection: Binding<String>, _ options: [(String, String)]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -161,6 +163,13 @@ struct PlaybackSettingsView: View {
                 segmented("Volume leveling", "Quiet and loud songs sound about equally loud (needs ReplayGain tags in the files).",
                           selection: Binding(get: { fx.leveling }, set: { v in app.updateSettings { $0["leveling"] = v } }),
                           [("off", "Off"), ("track", "By song"), ("album", "By album")])
+
+                segmented("Sleep timer", player.sleepAfterSong ? "Pauses when this song ends." : (player.sleepAt != nil ? "Pauses after a while, so you can fall asleep to it." : "Pause the music after a while, so you can fall asleep to it."),
+                          selection: Binding(get: { (player.sleepAt != nil || player.sleepAfterSong) ? sleepChoice : "0" }, set: { v in
+                              sleepChoice = v
+                              player.setSleep(minutes: v == "song" ? -1 : (Int(v) ?? 0))
+                          }),
+                          [("0", "Off"), ("15", "15 min"), ("30", "30 min"), ("60", "1 hour"), ("song", "End of song")])
 
                 VStack(alignment: .leading, spacing: 12) {
                     toggleRow("Equalizer", "Shape the sound: drag the dots up to boost and down to cut. It works on this phone while it plays (not when casting to a TV).",

@@ -328,6 +328,31 @@ struct ProblemBox: View {
     }
 }
 
+/// Opens the system's speaker picker (AirPlay and Bluetooth) from a menu item.
+@MainActor
+final class AirPlayControl: ObservableObject {
+    fileprivate weak var picker: AVRoutePickerView?
+
+    func show() {
+        guard let b = picker?.subviews.compactMap({ $0 as? UIButton }).first else { return }
+        b.sendActions(for: .touchUpInside)
+    }
+}
+
+struct AirPlayTrigger: UIViewRepresentable {
+    let control: AirPlayControl
+
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let v = AVRoutePickerView()
+        v.alpha = 0.02
+        v.prioritizesVideoDevices = false
+        control.picker = v
+        return v
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) { control.picker = uiView }
+}
+
 /// The system's own speaker picker: AirPlay speakers and TVs, and Bluetooth headphones.
 struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {

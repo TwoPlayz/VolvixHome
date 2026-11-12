@@ -95,6 +95,7 @@ struct NowPlayingView: View {
     @State private var tvAddress = ""
     @State private var showQueue = false
     @State private var showLyrics = false
+    @StateObject private var airplay = AirPlayControl()
 
     private func go(_ r: Route) {
         app.openRoute = r
@@ -102,7 +103,7 @@ struct NowPlayingView: View {
     }
 
     private func tool(_ icon: String, on: Bool = false) -> some View {
-        Image(systemName: icon).font(.system(size: 20)).foregroundColor(on ? Theme.accent : Theme.text)
+        Image(systemName: icon).font(.system(size: 20, weight: .light)).foregroundColor(on ? Theme.accent : Theme.text2)
             .frame(width: 48, height: 44)
     }
 
@@ -119,7 +120,7 @@ struct NowPlayingView: View {
                         }
                         Spacer()
                         VStack(spacing: 1) {
-                            Text(player.partyOn ? "Listening party" : (player.remoteName != nil ? "Controlling" : "Playing from")).font(.system(size: 11)).foregroundColor(Theme.text2)
+                            Text(player.partyOn ? "Listening party" : (player.remoteName != nil ? "Controlling" : "Playing from")).font(.system(size: 11, weight: .medium)).tracking(1).textCase(.uppercase).foregroundColor(Theme.text2)
                             Text(player.partyOn ? "Everyone hears the same queue" : (player.remoteName ?? player.contextName ?? album?.title ?? "")).font(.system(size: 14, weight: .bold)).foregroundColor(Theme.text).lineLimit(1)
                         }
                         Spacer()
@@ -161,16 +162,8 @@ struct NowPlayingView: View {
                         }
                         AddToPlaylistButton(ids: [t.id], plain: true)
                         Menu {
-                            Button { go(.album(t.albumId)) } label: { Label("Go to album", systemImage: "square.stack") }
-                            Button { go(.artist(t.artist)) } label: { Label("Go to artist", systemImage: "person") }
+                            Button { showLyrics.toggle() } label: { Label(showLyrics ? "Cover" : "Lyrics", systemImage: "text.bubble") }
                             Button { showCredits = true } label: { Label("Credits", systemImage: "book") }
-                            Menu {
-                                Button("Off") { player.setSleep(minutes: 0) }
-                                Button("15 minutes") { player.setSleep(minutes: 15) }
-                                Button("30 minutes") { player.setSleep(minutes: 30) }
-                                Button("1 hour") { player.setSleep(minutes: 60) }
-                                Button("End of this song") { player.setSleep(minutes: -1) }
-                            } label: { Label("Sleep timer", systemImage: "moon.zzz") }
                         } label: {
                             Image(systemName: "ellipsis").font(.system(size: 20)).foregroundColor(Theme.text).frame(width: 40, height: 44)
                         }
@@ -183,30 +176,40 @@ struct NowPlayingView: View {
                     // controls
                     HStack(spacing: 0) {
                         Button { player.toggleShuffle() } label: {
-                            Image(systemName: "shuffle").font(.system(size: 20)).foregroundColor(player.shuffle ? Theme.accent : Theme.text2).frame(maxWidth: .infinity, minHeight: 44)
+                            Image(systemName: "shuffle").font(.system(size: 20, weight: .light)).foregroundColor(player.shuffle ? Theme.accent : Theme.text2).frame(maxWidth: .infinity, minHeight: 44)
                         }
                         Button { player.previous() } label: {
-                            Image(systemName: "backward.fill").font(.system(size: 26)).foregroundColor(Theme.text).frame(maxWidth: .infinity, minHeight: 44)
+                            Image(systemName: "backward.end").font(.system(size: 24, weight: .light)).foregroundColor(Theme.text2).frame(maxWidth: .infinity, minHeight: 44)
                         }
                         Button { player.toggle() } label: {
-                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).foregroundColor(Theme.text)
-                                .frame(width: 72, height: 72)
-                                .glass(Circle())
+                            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 26)).foregroundColor(Theme.surface)
+                                .frame(width: 66, height: 66)
+                                .background(Theme.text, in: Circle())
                                 .frame(maxWidth: .infinity)
                         }
                         Button { player.next() } label: {
-                            Image(systemName: "forward.fill").font(.system(size: 26)).foregroundColor(Theme.text).frame(maxWidth: .infinity, minHeight: 44)
+                            Image(systemName: "forward.end").font(.system(size: 24, weight: .light)).foregroundColor(Theme.text2).frame(maxWidth: .infinity, minHeight: 44)
                         }
                         Button { player.cycleRepeat() } label: {
-                            Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat").font(.system(size: 20))
+                            Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat").font(.system(size: 20, weight: .light))
                                 .foregroundColor(player.repeatMode == .off ? Theme.text2 : Theme.accent).frame(maxWidth: .infinity, minHeight: 44)
                         }
                     }
                     .padding(.top, 6)
 
-                    // tools along the bottom: lyrics, output, party, queue
+                    // tools along the bottom, as on the website: sound quality, output device, party, queue
                     HStack(spacing: 0) {
-                        Button { showLyrics.toggle() } label: { tool(showLyrics ? "quote.bubble.fill" : "quote.bubble", on: showLyrics) }.frame(maxWidth: .infinity)
+                        Menu {
+                            Section("Streaming quality") {
+                                Picker("Quality", selection: Binding(get: { app.quality }, set: { app.setQuality($0) })) {
+                                    Text("Original").tag("original")
+                                    Text("High").tag("high")
+                                    Text("Normal").tag("normal")
+                                    Text("Data saver").tag("low")
+                                }
+                            }
+                            if app.me?.transcoding != true { Text("Converting songs needs ffmpeg on the server") }
+                        } label: { tool("waveform") }.frame(maxWidth: .infinity)
                         Menu {
                             Section("Play on") {
                                 Button { devices.takeOver() } label: { Label(devices.deviceName + " (this device)", systemImage: devices.playingHere ? "checkmark" : "iphone") }
@@ -229,12 +232,15 @@ struct NowPlayingView: View {
                                     Button { addingTV = true } label: { Label(casting.devices.isEmpty ? "Can't find it? Add by address…" : "Not listed? Add by address…", systemImage: "plus") }
                                 }
                             }
+                            Section("This phone") {
+                                Button { airplay.show() } label: { Label("AirPlay and Bluetooth…", systemImage: "airplayaudio") }
+                            }
                         } label: { tool("laptopcomputer.and.iphone", on: !devices.playingHere || casting.active != nil) }.frame(maxWidth: .infinity)
-                        AirPlayButton().frame(width: 36, height: 36).frame(width: 48, height: 44).frame(maxWidth: .infinity)
-                        Button { showParty = true } label: { tool(party.active ? "person.3.fill" : "person.3", on: party.active) }.frame(maxWidth: .infinity)
-                        Button { showQueue = true } label: { tool("list.bullet") }.frame(maxWidth: .infinity)
+                        Button { showParty = true } label: { tool(party.active ? "person.2.fill" : "person.2", on: party.active) }.frame(maxWidth: .infinity)
+                        Button { showQueue = true } label: { tool("music.note.list") }.frame(maxWidth: .infinity)
                     }
                     .padding(.top, 4)
+                    .background(AirPlayTrigger(control: airplay).frame(width: 1, height: 1).allowsHitTesting(false), alignment: .center)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 8)

@@ -112,7 +112,15 @@ fn install(new: &PathBuf) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let old = old_exe().ok_or("No program path.")?;
     let _ = std::fs::remove_file(&old);
-    std::fs::rename(&exe, &old).map_err(|_| "Couldn't replace the app (is it in a protected folder?).".to_string())?;
+    // a running program can be renamed on Windows. If the usual name for the old copy is taken (an earlier old copy still
+    // running, or locked by a scanner), use another one.
+    let mut moved = std::fs::rename(&exe, &old);
+    let mut old = old;
+    if moved.is_err() {
+        let other = old.with_extension(format!("old{}", std::process::id()));
+        if std::fs::rename(&exe, &other).is_ok() { old = other; moved = Ok(()); }
+    }
+    moved.map_err(|e| format!("Couldn't replace the app: {e}. Windows blocked changing {}. If it is in Documents, Windows' Controlled folder access or OneDrive may be blocking it; move the app to a folder like C:\\Apps\\Volvix and try again.", exe.display()))?;
     if let Err(e) = std::fs::copy(new, &exe) {
         let _ = std::fs::rename(&old, &exe); // put the working one back
         return Err(format!("Couldn't install the update: {e}"));
