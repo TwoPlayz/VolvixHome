@@ -2628,7 +2628,9 @@ html.player-empty .queue-panel { bottom: var(--gap); }
   color: var(--text-3); transition: color .25s, transform .25s, background-color .12s; transform-origin: left center; }
 .ly-line.past { color: var(--text-2); }
 .ly-line.now { color: var(--text); transform: scale(1.03); }
-.ly-line:hover { background: var(--hover); color: var(--text); }
+/* only with a real pointer: on a touch screen :hover sticks to the line where a scroll started */
+@media (hover: hover) and (pointer: fine) { .ly-line:hover { background: var(--hover); color: var(--text); } }
+.ly-line { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .ly-gap { font-size: 16px; }
 /* word-synced lines: the line being sung fills in word by word (--p = how much of each word has been sung) */
 .ly-line.now.ly-words .ly-w { color: transparent; -webkit-background-clip: text; background-clip: text;
