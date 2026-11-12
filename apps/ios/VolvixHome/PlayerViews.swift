@@ -30,7 +30,7 @@ struct MiniPlayer: View {
                 .padding(8)
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.14))
+                        Capsule().fill(Theme.text.opacity(0.14))
                         Capsule().fill(Theme.text).frame(width: geo.size.width * CGFloat(player.duration > 0 ? min(1, player.position / player.duration) : 0))
                     }
                 }
@@ -172,8 +172,8 @@ struct NowPlayingView: View {
                         }
                         Button { player.toggle() } label: {
                             ZStack {
-                                Circle().fill(Color.white).frame(width: 68, height: 68)
-                                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).foregroundColor(.black)
+                                Circle().fill(Theme.text).frame(width: 68, height: 68)
+                                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).foregroundColor(Theme.surface)
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -246,7 +246,6 @@ struct QueueView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
-        .preferredColorScheme(.dark)
     }
 
     private func row(_ t: Track, index: Int?) -> some View {

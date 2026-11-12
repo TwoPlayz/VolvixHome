@@ -25,8 +25,8 @@ struct VolvixHomeApp: App {
                 .environmentObject(downloads)
                 .environmentObject(devices)
                 .environmentObject(casting)
-                .background(Color(UIColor.volvixSurface).ignoresSafeArea())
-                .preferredColorScheme(.dark)
+                .background(Theme.surface.ignoresSafeArea())
+                .preferredColorScheme(app.colorScheme)
         }
     }
 }

@@ -9,18 +9,28 @@ extension Color {
     }
 }
 
-/// The same colours as the website's dark theme.
+extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+}
+
+/// The same colours as the website, in its dark and light themes (they follow the phone, or the choice in Account).
 enum Theme {
-    static let frame = Color(hex: 0x000000)
-    static let surface = Color(hex: 0x121214)
-    static let surface2 = Color(hex: 0x19191C)
-    static let surface3 = Color(hex: 0x242428)
-    static let accent = Color(hex: 0xE5484D)
-    static let text = Color(hex: 0xF5F5F7)
-    static let text2 = Color(hex: 0xA1A1A8)
-    static let text3 = Color(hex: 0x86868E)
-    static let border = Color.white.opacity(0.08)
-    static let hover = Color.white.opacity(0.06)
+    private static func pick(_ dark: UInt32, _ light: UInt32) -> Color {
+        Color(UIColor { trait in trait.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
+    }
+
+    static let frame = pick(0x000000, 0xE9E9EC)
+    static let surface = pick(0x121214, 0xFFFFFF)
+    static let surface2 = pick(0x19191C, 0xF6F6F8)
+    static let surface3 = pick(0x242428, 0xEDEDF0)
+    static let accent = pick(0xE5484D, 0xCF3439)
+    static let text = pick(0xF5F5F7, 0x1D1D1F)
+    static let text2 = pick(0xA1A1A8, 0x5F5F65)
+    static let text3 = pick(0x86868E, 0x74747A)
+    static let border = Color.primary.opacity(0.08)
+    static let hover = Color.primary.opacity(0.06)
 
     /// A steady colour for a name (the same name always gets the same tint), for pictures that have none.
     static func tint(_ seed: String) -> Color {

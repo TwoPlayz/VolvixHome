@@ -244,7 +244,7 @@ struct LibraryView: View {
             Text(title).font(.system(size: 14, weight: .semibold))
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .background(on ? Theme.text : Theme.surface3)
-                .foregroundColor(on ? Color.black : Theme.text)
+                .foregroundColor(on ? Theme.surface : Theme.text)
                 .clipShape(Capsule())
         }
     }
@@ -600,6 +600,15 @@ struct AccountView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Server").font(.system(size: 13)).foregroundColor(Theme.text2)
                     Text(app.serverURL).font(.system(size: 15)).foregroundColor(Theme.text)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Appearance").font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
+                    Picker("", selection: Binding(get: { app.appearance }, set: { app.setAppearance($0) })) {
+                        Text("System").tag("system")
+                        Text("Dark").tag("dark")
+                        Text("Light").tag("light")
+                    }
+                    .pickerStyle(.segmented)
                 }
                 if app.me?.transcoding == true {
                     VStack(alignment: .leading, spacing: 8) {

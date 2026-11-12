@@ -28,6 +28,8 @@ final class AppModel: ObservableObject {
     @Published var members: [Member] = []
     @Published var artistInfos: [String: ArtistInfoData] = [:]
     @Published var quality: String = UserDefaults.standard.string(forKey: "volvix.quality") ?? "original"
+    /// "system", "dark" or "light"
+    @Published var appearance: String = UserDefaults.standard.string(forKey: "volvix.appearance") ?? "system"
 
     private(set) var api: API?
     private(set) var serverURL: String = ""
@@ -116,6 +118,19 @@ final class AppModel: ObservableObject {
         Persist.remove("me.json")
         Persist.remove("userdata.json")
         offline = false
+    }
+
+    var colorScheme: ColorScheme? {
+        switch appearance {
+        case "dark": return .dark
+        case "light": return .light
+        default: return nil
+        }
+    }
+
+    func setAppearance(_ a: String) {
+        appearance = a
+        UserDefaults.standard.set(a, forKey: "volvix.appearance")
     }
 
     func setQuality(_ q: String) {
