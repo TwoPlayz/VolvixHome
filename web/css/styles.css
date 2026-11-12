@@ -332,7 +332,8 @@ a:focus-visible:not(.btn):not(.card):not(.list-row):not(.nav-item):not(.playlist
 .nav-arrow:hover { color: var(--text); }
 .mobile-brand { display: none; }
 .topbar-spacer { flex: 1; }
-.avatar-btn { border-radius: 50%; padding: 2px; background: var(--surface-3); transition: transform .1s; }
+.avatar-btn { border-radius: 50%; padding: 2px; background: var(--surface-3); transition: transform .1s; display: grid; place-items: center; flex: none; aspect-ratio: 1; line-height: 0; }
+.avatar-btn > * { display: block; flex: none; }
 /* Desktop reaches Account from the sidebar user chip; the avatar menu is only for phones (no sidebar). */
 .topbar .avatar-btn { display: none; }
 .avatar-btn:hover { transform: scale(1.04); }
@@ -1594,8 +1595,8 @@ select.input {
   .sidebar { display: none; }
   .topbar .avatar-btn { display: inline-block; }
   .main { border-radius: 0; }
-  /* the bar stays put and solid: it covers the status-bar strip too, so nothing scrolls above or behind it */
-  .topbar { padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* the bar keeps its see-through blur; it just reaches up over the status-bar strip */
+  .topbar { padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
   .nav-arrow { display: none; }
   .mobile-brand { display: block; }
   .view { padding: 4px 16px 32px; }
