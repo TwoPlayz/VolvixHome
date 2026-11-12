@@ -119,7 +119,7 @@ extension View {
     /// Where every Route leads (used by each tab, and by sheets that can open pages).
     func routeDestinations() -> some View {
         navigationDestination(for: Route.self) { route in
-            switch route {
+            Group { switch route {
             case .album(let id): AlbumView(id: id)
             case .artist(let name): ArtistView(name: name)
             case .playlist(let id): PlaylistView(id: id)
@@ -131,14 +131,15 @@ extension View {
             case .rewind(let year): RewindView(year: year)
             case .credit(let name): CreditView(name: name)
             case .playback: PlaybackSettingsView()
-            case .profile: ProfileView()
-            case .settings: SettingsView()
-            case .members: MembersView()
+            case .profile: AccountHub(tab: .profile)
+            case .settings: AccountHub(tab: .settings)
+            case .members: AccountHub(tab: .members)
             case .folder: FolderView()
             case .lidarr: LidarrSettingsView()
             case .shares: SharesView()
             case .browse(let kind, let value): BrowseView(kind: kind, value: value)
-            }
+            } }
+            .modifier(CustomBack())
         }
     }
 }

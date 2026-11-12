@@ -190,6 +190,40 @@ extension View {
     }
 }
 
+// MARK: - Account: Profile, Members, Settings (tabs at the top, like the website)
+
+struct AccountHub: View {
+    @EnvironmentObject var app: AppModel
+    enum Tab: String { case profile = "Profile", members = "Members", settings = "Settings" }
+    @State var tab: Tab
+
+    private var tabs: [Tab] { app.can("members") ? [.profile, .members, .settings] : [.profile, .settings] }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tabs, id: \.self) { t in
+                        Button { tab = t } label: {
+                            Text(t.rawValue).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 16).padding(.vertical, 8)
+                                .foregroundColor(tab == t ? Theme.surface : Theme.text).glass(Capsule(), tint: tab == t ? Theme.text : nil)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.vertical, 10)
+            switch tab {
+            case .profile: ProfileView()
+            case .members: MembersView()
+            case .settings: SettingsView()
+            }
+        }
+        .background(Theme.surface)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 // MARK: - Profile
 
 struct ProfileView: View {
@@ -365,6 +399,7 @@ struct SettingsView: View {
                 }
 
                 group("Playback") {
+                    NavigationLink(value: Route.playback) { linkRow("slider.horizontal.3", "Sound", "Crossfade, volume leveling, equalizer, sleep timer") }.buttonStyle(.plain)
                     toggle("Resume where I left off", "Opening Volvix shows the last song and spot, paused.", fx.resumeLast) { v in app.updateSettings { $0["resumeLast"] = v } }
                     toggle("Only play downloads", "Use only the songs saved on this phone. Everything else is greyed out and skipped. This also happens by itself when the server can't be reached.", fx.offlineOnly) { v in app.updateSettings { $0["offlineOnly"] = v } }
                 }

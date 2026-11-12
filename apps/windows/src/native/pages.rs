@@ -872,6 +872,11 @@ pub fn notifications(app: &App) -> El<'_> {
 
 /* ---------- settings ---------- */
 
+/// A titled group of settings in a card (the website's phone look, now on computers too).
+fn card_section<'a>(title: &'a str, body: El<'a>) -> El<'a> {
+    column![ui::title(title, 22), container(body).padding([4, 16]).width(Length::Fill).style(ui::set_card)].spacing(12).into()
+}
+
 fn setting_row<'a>(title: impl text::IntoFragment<'a>, sub: impl text::IntoFragment<'a>, control: El<'a>) -> El<'a> {
     container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).width(Length::Fill), control].spacing(16).align_y(Alignment::Center)).padding([10, 4]).into()
 }
@@ -1118,14 +1123,14 @@ pub fn account(app: &App) -> El<'_> {
         _ => 0,
     };
     let may_members = app.me.as_ref().map(|m| m.user.admin || m.user.perms.iter().any(|p| p == "members")).unwrap_or(false);
-    let item = |c: char, label: &'static str, page: Page, on: bool| -> El<'static> {
-        button(row![ic(c, 16), text(label).size(14)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([10, 14]).style(ui::nav(on)).on_press(Message::Go(page)).into()
+    let item = |name: &'static str, label: &'static str, page: Page, on: bool| -> El<'static> {
+        button(row![ui::wi(name, 16.0, if on { ui::ACCENT() } else { ui::TEXT_2() }), text(label).size(14)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([10, 14]).style(ui::nav(on)).on_press(Message::Go(page)).into()
     };
-    let mut tabs = column![item(icon::PERSON, "Profile", Page::Profile, tab == 0)].spacing(2);
+    let mut tabs = column![item("user", "Profile", Page::Profile, tab == 0)].spacing(2);
     if may_members {
-        tabs = tabs.push(item(icon::PEOPLE, "Members", Page::Members, tab == 1));
+        tabs = tabs.push(item("family", "Members", Page::Members, tab == 1));
     }
-    tabs = tabs.push(item(icon::SETTINGS, "Settings", Page::Settings, tab == 2));
+    tabs = tabs.push(item("settings", "Settings", Page::Settings, tab == 2));
     let body: El = match tab {
         0 => profile(app),
         1 => members(app),
@@ -1186,7 +1191,7 @@ fn profile(app: &App) -> El<'_> {
     ]
     .spacing(14);
     let sign_out = action_row("Sign out on this device", "Your playlists and settings stay on the server.", button(text("Sign out").size(13)).padding([8, 16]).style(ui::secondary).on_press(Message::SignOut).into());
-    column![section("You", you.into()), section("Password", password.into()), section("Sign out", sign_out)].spacing(28).into()
+    column![card_section("You", you.into()), card_section("Password", password.into()), card_section("Sign out", sign_out)].spacing(28).into()
 }
 
 fn members(app: &App) -> El<'_> {
@@ -1219,7 +1224,7 @@ fn members(app: &App) -> El<'_> {
         add = add.push(container(text(e.as_str()).size(13)).padding([8, 10]).style(ui::error_box));
     }
     add = add.push(button(row![ic(icon::ADD, 14), text("Add to household").size(14)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::primary).on_press(Message::AddMember));
-    column![first, section("Add a member", add.into())].spacing(28).into()
+    column![first, card_section("Add a member", add.into())].spacing(28).into()
 }
 
 fn settings(app: &App) -> El<'_> {
@@ -1361,7 +1366,7 @@ fn settings(app: &App) -> El<'_> {
         },
         ui::seg(&[("system", "System"), ("dark", "Dark"), ("light", "Light")], &app.theme_choice(), Message::SetTheme),
     )];
-    let mut page = column![section("Appearance", theme.into()), section("Privacy", privacy.into()), section("Playback", playback.into()), section("Windows app", windows.into())].spacing(24);
+    let mut page = column![card_section("Appearance", theme.into()), card_section("Privacy", privacy.into()), card_section("Playback", playback.into()), card_section("Windows app", windows.into())].spacing(24);
     if app.can("share") || app.can("members") {
         let now = volvix_core::userdata::now();
         let mut shares = Column::new().spacing(0);
@@ -1386,16 +1391,16 @@ fn settings(app: &App) -> El<'_> {
             Some(_) => shares = shares.push(ui::dim("No links are open. Share an album or playlist from its menu.", 13)),
             None => shares = shares.push(ui::dim("Loading…", 13)),
         }
-        page = page.push(column![ui::title("Share links", 22), ui::dim("Open links, newest first. Cancelling one stops it working straight away.", 13), container(shares).padding([6, 0])].spacing(6));
+        page = page.push(column![ui::title("Share links", 22), ui::dim("Open links, newest first. Cancelling one stops it working straight away.", 13), container(shares).padding([4, 16]).width(Length::Fill).style(ui::set_card)].spacing(6));
     }
-    page = page.push(section("Downloads", downloads.into())).push(section("Cache", cache.into())).push(section("Library", library.into()));
+    page = page.push(card_section("Downloads", downloads.into())).push(card_section("Cache", cache.into())).push(card_section("Library", library.into()));
     if app.can("settings") {
         page = page.push(lidarr_section(app));
     }
     let version = app.server_status.as_ref().map(|s| format!("Version {}", s.version)).unwrap_or_default();
     let host = server.trim_start_matches("https://").trim_start_matches("http://").to_string();
     let _ = server_line;
-    page = page.push(section(
+    page = page.push(card_section(
         "About",
         column![setting_row("Volvix Home", version, iced::widget::Space::new(0, 0).into()), action_row("Server", host, btn("Switch server", Some(Message::SwitchServer)))].into(),
     ));
@@ -1419,7 +1424,7 @@ fn select<'a>(label: &'a str, options: Vec<String>, selected: Option<String>, wh
 
 /// Lidarr (admins): the address and key, where music is saved, and the quality and metadata profiles.
 fn lidarr_section(app: &App) -> El<'_> {
-    let Some(v) = &app.lidarr else { return section("Lidarr", ui::dim("Loading…", 13).into()) };
+    let Some(v) = &app.lidarr else { return card_section("Lidarr", ui::dim("Loading…", 13).into()) };
     let (s, l) = (&v["settings"], &v["lidarr"]);
     let configured = v["configured"].as_bool().unwrap_or(false);
     let url: &str = app.lidarr_url.as_deref().or(s["url"].as_str()).unwrap_or("");

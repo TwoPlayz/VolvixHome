@@ -143,6 +143,11 @@ pub fn dim<'a>(s: impl text::IntoFragment<'a>, size: u16) -> iced::widget::Text<
 
 /* ---------- containers ---------- */
 
+/// A settings section's box, like the website's: a slightly lighter surface with a thin edge.
+pub fn set_card(_: &Theme) -> container::Style {
+    container::Style { background: Some(SURFACE_2().into()), border: Border { radius: 12.0.into(), width: 1.0, color: BORDER() }, ..Default::default() }
+}
+
 pub fn panel(_: &Theme) -> container::Style {
     container::Style { background: Some(SURFACE().into()), border: border::rounded(RADIUS), ..Default::default() }
 }

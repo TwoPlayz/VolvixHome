@@ -3154,9 +3154,8 @@ a.gm-link:focus-visible { outline: none; }
 
   /* ---------- settings: plain rows (no boxes or row icons), title 15 + hint 13, control on the right ---------- */
   .set-group h2 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
-  .set-body { background: none; border: 0; border-radius: 0; padding: 0 4px; }
+  .set-body { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 4px 16px; }
   .set-row { min-height: 0; padding: 10px 0; }
-  .set-row + .set-row, .q-block + .set-row, .set-row + .q-block, .q-block + .q-block, .set-row + .storage { border-top: 0; }
   .set-icon { display: none; }
   .set-text strong, .set-row .set-label { font-size: 15px; font-weight: 400; }
   .set-text > span, .set-hint { font-size: 13px; color: var(--text-2); }

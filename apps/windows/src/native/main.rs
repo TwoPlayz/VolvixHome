@@ -2266,8 +2266,10 @@ impl App {
                 return self.update(*m);
             }
             Message::RowHover(h) => {
-                // not while a row is being carried around
-                if !self.drag.as_ref().map(|d| d.active).unwrap_or(false) {
+                // not while a menu or dialog is open over the rows, and not while a row is being carried around
+                if self.pop_menu.is_some() || self.dialog.is_some() {
+                    self.hover_row = None;
+                } else if !self.drag.as_ref().map(|d| d.active).unwrap_or(false) {
                     self.hover_row = h;
                 }
             }
