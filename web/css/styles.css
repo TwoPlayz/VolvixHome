@@ -336,7 +336,7 @@ a:focus-visible:not(.btn):not(.card):not(.list-row):not(.nav-item):not(.playlist
 .nav-arrow:hover { color: var(--text); }
 .mobile-brand { display: none; }
 .topbar-spacer { flex: 1; }
-.avatar-btn { border-radius: 50%; padding: 2px; background: var(--surface-3); transition: transform .1s; display: grid; place-items: center; flex: none; aspect-ratio: 1; line-height: 0; }
+.avatar-btn { border-radius: 50%; padding: 2px; background: var(--surface-3); transition: transform .1s; display: grid; place-items: center; flex: none; aspect-ratio: 1; }
 .avatar-btn > * { display: block; flex: none; }
 /* Desktop reaches Account from the sidebar user chip; the avatar menu is only for phones (no sidebar). */
 .topbar .avatar-btn { display: none; }
@@ -2799,7 +2799,11 @@ body.reordering { cursor: grabbing; user-select: none; }
 .eq-db { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .eq-hz { font-size: 11px; color: var(--text-3); }
 .eq-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 130px; accent-color: var(--accent); }
-@media (max-width: 520px) { .eq-slider { height: 100px; } }
+/* phone: ten tall sliders you can reach with a thumb */
+.eq-bands-phone { gap: 2px; }
+.eq-bands-phone .eq-slider { height: 190px; width: 30px; touch-action: none; }
+.eq-bands-phone .eq-db { min-width: 24px; text-align: center; }
+.eq-panel[data-off] .eq-bands-phone { pointer-events: none; }
 
 /* browse */
 .browse-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }

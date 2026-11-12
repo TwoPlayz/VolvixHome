@@ -416,16 +416,23 @@ Spin.views = Spin.views || {};
     const pts = eq.gains.map(function (g, i) {
       return '<circle class="eq-pt" data-pt="' + i + '" cx="' + gx(i) + '" cy="' + gy(g).toFixed(1) + '" r="9" tabindex="' + (eq.on ? 0 : -1) + '" role="slider" aria-label="' + hz(B[i]) + ' Hz" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="' + g + '" aria-valuetext="' + sgn(g) + ' dB"/>';
     }).join('');
-    return row('Equalizer', S.fx.available() ? 'Shape the sound: drag the dots up to boost and down to cut. It works on this device while it plays (not when casting to a TV).' : 'This browser can\'t process sound.', toggle('eqOn', !!eq.on), { icon: 'settings' }) +
+    // on a phone the graph's dots are too small to grab: ten tall sliders instead, one per band
+    const phone = !!(window.matchMedia && window.matchMedia('(max-width: 760px)').matches);
+    const sliders = '<div class="eq-bands eq-bands-phone">' + B.map(function (f, i) {
+      return '<div class="eq-band"><span class="eq-db" data-eq-db="' + i + '">' + sgn(eq.gains[i]) + '</span>' +
+        '<input class="eq-slider" type="range" min="-12" max="12" step="1" value="' + eq.gains[i] + '" data-eq-band="' + i + '" aria-label="' + hz(f) + ' Hz"' + (eq.on ? '' : ' disabled') + '>' +
+        '<span class="eq-hz">' + hz(f) + '</span></div>';
+    }).join('') + '</div>';
+    return row('Equalizer', S.fx.available() ? (phone ? 'Shape the sound: slide a band up to boost and down to cut.' : 'Shape the sound: drag the dots up to boost and down to cut.') + ` It works on this device while it plays (not when casting to a TV).` : 'This browser can\'t process sound.', toggle('eqOn', !!eq.on), { icon: 'settings' }) +
       '<div class="eq-panel"' + (eq.on ? '' : ' data-off') + '>' +
         '<div class="eq-top"><label class="eq-pick"><span>Preset</span><select class="input" data-eq-preset' + (eq.on ? '' : ' disabled') + '>' +
           Object.keys(P).map(function (k) { return '<option value="' + k + '"' + (eq.preset === k ? ' selected' : '') + '>' + S.esc(P[k].label) + '</option>'; }).join('') +
           '<option value="custom"' + (eq.preset === 'custom' ? ' selected' : '') + '>Custom</option></select></label>' +
           '<label class="eq-pick"><span>Preamp <b data-eq-prev>' + sgn(eq.pre) + ' dB</b></span><input type="range" min="-12" max="6" step="1" value="' + eq.pre + '" data-eq-pre' + (eq.on ? '' : ' disabled') + '></label>' +
           '<button class="btn btn-ghost btn-sm" data-act="eq-reset"' + (eq.on ? '' : ' disabled') + '>Reset</button></div>' +
-        '<div class="eq-graph"><svg viewBox="0 0 ' + G.w + ' ' + G.h + '" role="group" aria-label="Equalizer graph" data-eq-svg>' + grid + cols +
+        (phone ? sliders : '<div class="eq-graph"><svg viewBox="0 0 ' + G.w + ' ' + G.h + '" role="group" aria-label="Equalizer graph" data-eq-svg>' + grid + cols +
           '<path class="eq-fill" d="' + fillOf(eq.gains) + '"/><path class="eq-line" d="' + curve(eq.gains) + '"/>' + pts +
-          '<g class="eq-tip" data-eq-tip hidden><rect rx="6" width="92" height="24" x="-46" y="-40"/><text text-anchor="middle" y="-24"></text></g></svg></div>' +
+          '<g class="eq-tip" data-eq-tip hidden><rect rx="6" width="92" height="24" x="-46" y="-40"/><text text-anchor="middle" y="-24"></text></g></svg></div>') +
       '</div>';
   }
   /** Redraw the curve and dots while dragging (no re-render of the page). */
