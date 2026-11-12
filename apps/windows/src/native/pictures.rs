@@ -21,12 +21,12 @@ pub fn round_handle(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
 
 /// Album art ready to show: shrunk to at most `max` px (a few hundred KB each, not the full picture) with its corners
 /// rounded, so covers look like the website's. Done off the main thread; the answer is (width, height, RGBA bytes).
-pub fn cover_rgba(bytes: &[u8], max: u32) -> Option<(u32, u32, Vec<u8>)> {
+pub fn cover_rgba(bytes: &[u8], max: u32, frac: f32) -> Option<(u32, u32, Vec<u8>)> {
     let img = ::image::load_from_memory(bytes).ok()?;
     let k = (max as f32 / img.width().max(img.height()) as f32).min(1.0);
     let (w, h) = (((img.width() as f32 * k) as u32).max(1), ((img.height() as f32 * k) as u32).max(1));
     let mut px = if k < 1.0 { img.resize_exact(w, h, ::image::imageops::FilterType::Triangle).to_rgba8() } else { img.to_rgba8() };
-    let r = w.min(h) as f32 * 0.045;
+    let r = w.min(h) as f32 * frac;
     let (hw, hh) = (w as f32 / 2.0, h as f32 / 2.0);
     let raw = px.as_mut();
     // only the corners need touching
@@ -46,12 +46,12 @@ pub fn cover_rgba(bytes: &[u8], max: u32) -> Option<(u32, u32, Vec<u8>)> {
 }
 
 /// A chosen picture (a playlist's, or an album's that had no art) with its corners rounded, ready to show.
-pub fn rounded_handle(bytes: &[u8]) -> Option<iced::widget::image::Handle> {
+pub fn rounded_handle(bytes: &[u8], max: u32, frac: f32) -> Option<iced::widget::image::Handle> {
     let img = ::image::load_from_memory(bytes).ok()?;
-    let (w, h) = (img.width().min(1024), img.height().min(1024));
+    let (w, h) = (img.width().min(max), img.height().min(max));
     let mut px = if (w, h) == (img.width(), img.height()) { img.to_rgba8() } else { img.resize(w, h, ::image::imageops::FilterType::Triangle).to_rgba8() };
     let (w, h) = px.dimensions();
-    let r = w.min(h) as f32 * 0.045;
+    let r = w.min(h) as f32 * frac;
     let (hw, hh) = (w as f32 / 2.0, h as f32 / 2.0);
     let raw = px.as_mut();
     for y in 0..h {

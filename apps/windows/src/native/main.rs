@@ -116,6 +116,8 @@ pub fn app_dir() -> PathBuf {
 
 /// Covers are asked for at this size (the server makes and keeps these copies).
 pub const COVER: u32 = 640;
+/// Small covers (song rows, the player bar) are their own little bitmaps with a rounder corner for their size.
+pub const THUMB: u32 = 96;
 /// The app's own title bar: its height, and how wide the three window buttons are (logical px).
 pub const TITLE_BAR: f32 = 32.0;
 pub const TITLE_BUTTONS: f32 = 46.0 * 3.0;
@@ -1261,7 +1263,8 @@ impl App {
     fn fetch_covers(&mut self) -> Task<Message> {
         let Some(client) = self.client.clone() else { return Task::none() };
         let mut tasks = vec![];
-        for (id, size) in views::wanted_covers(self) {
+        let wanted: Vec<(String, u32)> = views::wanted_covers(self).into_iter().flat_map(|(id, s)| [(id.clone(), s), (id, THUMB)]).collect();
+        for (id, size) in wanted {
             let key = (id.clone(), size);
             if self.cover_images.contains_key(&key) || self.cover_pending.contains(&key) {
                 continue;
@@ -1277,8 +1280,10 @@ impl App {
             let (c, cache, fetch_id) = (client.clone(), self.covers.clone(), id.clone());
             tasks.push(Task::perform(
                 blocking(move || {
-                    let bytes = if offline { cache.cached(&fetch_id, size, version) } else { cache.get(&c, &fetch_id, size, version).ok() }?;
-                    pictures::cover_rgba(&bytes, 320)
+                    // a small cover is cut from the normal copy
+                    let (from, max, frac) = if size == THUMB { (COVER, 96, 0.11) } else { (size, 288, 0.045) };
+                    let bytes = if offline { cache.cached(&fetch_id, from, version) } else { cache.get(&c, &fetch_id, from, version).ok() }?;
+                    pictures::cover_rgba(&bytes, max, frac)
                 }),
                 move |b| Message::CoverLoaded(id.clone(), size, b),
             ));
@@ -2075,7 +2080,7 @@ impl App {
             Message::PlaylistCoverLoaded(id, v, bytes) => {
                 self.pl_cover_pending.remove(&(id.clone(), v));
                 if let Some(b) = bytes {
-                    self.pl_covers.insert((id, v), pictures::rounded_handle(&b).unwrap_or_else(|| image::Handle::from_bytes(b)));
+                    self.pl_covers.insert((id, v), pictures::rounded_handle(&b, 512, 0.045).unwrap_or_else(|| image::Handle::from_bytes(b)));
                 }
             }
             Message::CoverOpen(id) => {
@@ -2325,7 +2330,7 @@ impl App {
                     self.cover_order.push_back((id.clone(), size));
                     self.cover_images.insert((id, size), image::Handle::from_rgba(w, h, px));
                     // a very big library: let the oldest go (they are fetched again from disk when needed)
-                    while self.cover_order.len() > 900 {
+                    while self.cover_order.len() > 700 {
                         if let Some(k) = self.cover_order.pop_front() {
                             self.cover_images.remove(&k);
                         }
@@ -2334,7 +2339,9 @@ impl App {
             }
             Message::ImageLoaded(path, bytes) => {
                 if let Some(b) = bytes.filter(|b| !b.is_empty()) {
-                    self.images.insert(path, image::Handle::from_bytes(b));
+                    // pictures of found music are rounded squares too
+                    let h = pictures::rounded_handle(&b, 256, 0.12).unwrap_or_else(|| image::Handle::from_bytes(b));
+                    self.images.insert(path, h);
                 }
             }
 
@@ -2869,7 +2876,7 @@ impl App {
                 }
             }
             Message::ArtistInfoLoaded(name, bio, img) => {
-                let handle = img.and_then(|b| pictures::round_handle(&b));
+                let handle = img.and_then(|b| pictures::rounded_handle(&b, 420, 0.1));
                 self.artist_infos.insert(name, (bio, handle));
             }
             Message::QueueLoaded(r) => {

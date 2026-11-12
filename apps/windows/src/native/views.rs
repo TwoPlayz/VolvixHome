@@ -151,8 +151,19 @@ pub fn clip(s: &str, max: usize) -> String {
     }
 }
 
+/// The picture to show an album at this size: the little rounder bitmap for small covers, else the normal one.
+pub fn cover_handle<'a>(app: &'a App, album: Option<&Album>, size: f32) -> Option<&'a iced::widget::image::Handle> {
+    let a = album?;
+    if size <= 100.0 {
+        if let Some(h) = app.cover_images.get(&(a.id.clone(), crate::THUMB)) {
+            return Some(h);
+        }
+    }
+    app.cover_images.get(&(a.id.clone(), COVER))
+}
+
 pub fn cover_of<'a>(app: &'a App, album: Option<&Album>, size: f32) -> El<'a> {
-    let handle = album.and_then(|a| app.cover_images.get(&(a.id.clone(), COVER)));
+    let handle = cover_handle(app, album, size);
     if handle.is_none() {
         if let Some((a, look)) = album.and_then(|a| app.lib.look(&a.id).map(|l| (a, l))) {
             if !a.cover {
@@ -277,8 +288,6 @@ pub struct DragRows<'a> {
     pub row_h: f32,
     /// space left of the grip, and between the grip and the row's content
     pub lead: (f32, f32),
-    /// the hand cursor over rows (playlists); otherwise the pointing finger (the queue's rows are buttons on the website)
-    pub grab_cursor: bool,
 }
 
 /// The rows of a list you can reorder. The row under the pointer lights up and shows its grip. Picked up (after the
@@ -319,7 +328,7 @@ pub fn drag_list<'a>(app: &'a App, r: DragRows<'a>) -> El<'a> {
                 let lit = app.hover_row == Some((r.key, i));
                 col = col.push(
                     mouse_area(card(content, lit, false))
-                        .interaction(if r.grab_cursor { iced::mouse::Interaction::Grab } else { iced::mouse::Interaction::Pointer })
+                        .interaction(iced::mouse::Interaction::Pointer) // the grabbing hand only shows while a row is being carried
                         .on_press(Message::DragStart(r.list.clone(), i, n, div_at.map(|at| (at, LABEL_H)), h, Some(Box::new(click))))
                         .on_enter(Message::RowHover(Some((r.key, i))))
                         .on_exit(Message::RowLeave(r.key, i)),
@@ -457,7 +466,7 @@ pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbers:
         };
         let mut line = Row::new().spacing(12).align_y(Alignment::Center).push(container(lead).width(32).center_x(32));
         if !album_page {
-            line = line.push(ui::cover_box(album.and_then(|a| app.cover_images.get(&(a.id.clone(), COVER))), album.map(|a| a.title.as_str()).unwrap_or(""), 40.0, 40.0, 4.0));
+            line = line.push(ui::cover_box(cover_handle(app, album, 40.0), album.map(|a| a.title.as_str()).unwrap_or(""), 40.0, 40.0, 4.0));
         }
         line.push(container(words).width(Length::Fill).clip(true))
             .push(
@@ -479,7 +488,7 @@ pub fn track_list<'a>(app: &'a App, tracks: &[&'a Track], source: &str, numbers:
             let moving = app.drag.as_ref().filter(|d| d.list == list && d.active).map(|d| d.from);
             let ghost = moving.and_then(|from| tracks.get(from).map(|t| content(from, t, true, true)));
             let rows: Vec<(El<'a>, Message)> = tracks.iter().enumerate().map(|(i, t)| (content(i, t, hovered(i) && moving.is_none(), false), Message::PlayTracks(ids.clone(), i, source.to_string()))).collect();
-            drag_list(app, DragRows { list, key, rows, ghost, divider: None, row_h: h, lead: (12.0, 12.0), grab_cursor: true })
+            drag_list(app, DragRows { list, key, rows, ghost, divider: None, row_h: h, lead: (12.0, 12.0) })
         }
         Rows::Plain => {
             let mut col = Column::new();
@@ -1440,7 +1449,7 @@ fn queue_rows<'a>(app: &'a App, now: &'a Track) -> El<'a> {
             name = name.push(explicit_badge());
         }
         let mut line = row![
-            ui::cover_box(app.lib.album_of(t).and_then(|a| app.cover_images.get(&(a.id.clone(), COVER))), app.lib.album_of(t).map(|a| a.title.as_str()).unwrap_or(""), 40.0, 40.0, 4.0),
+            ui::cover_box(cover_handle(app, app.lib.album_of(t), 40.0), app.lib.album_of(t).map(|a| a.title.as_str()).unwrap_or(""), 40.0, 40.0, 4.0),
             container(column![name, ui::dim(clip(&t.artist, 50), 12).wrapping(text::Wrapping::None)].spacing(1)).width(Length::Fill).clip(true),
             ui::dim(format_duration(t.duration), 12),
         ]
@@ -1490,7 +1499,7 @@ fn queue_rows<'a>(app: &'a App, now: &'a Track) -> El<'a> {
     let ghost = moving.and_then(|k| upcoming.get(k).map(|t| content(t, Some(pos + 1 + k), false, true, true)));
     let rows: Vec<(El<'a>, Message)> = upcoming.iter().enumerate().map(|(k, t)| (content(t, Some(pos + 1 + k), false, hovered(k), false), Message::JumpQueue(pos + 1 + k))).collect();
     let divider = (mine > 0 && mine < upcoming.len()).then(|| (mine, label(from)));
-    col.push(drag_list(app, DragRows { list, key, rows, ghost, divider, row_h: QUEUE_ROW_H, lead: (4.0, 6.0), grab_cursor: false })).into()
+    col.push(drag_list(app, DragRows { list, key, rows, ghost, divider, row_h: QUEUE_ROW_H, lead: (4.0, 6.0) })).into()
 }
 
 fn player_bar(app: &App) -> El<'_> {

@@ -72,8 +72,7 @@ fn add_songs<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView) -> El<'
             container(
                 row![
                     cover_of(app, album, 40.0),
-                    column![text(clip(&t.title, 50)).size(15), ui::dim(clip(&t.artist, 50), 12)].spacing(1).width(Length::Fill),
-                    ui::dim(clip(album.map(|a| a.title.as_str()).unwrap_or(""), 30), 13),
+                    column![text(clip(&t.title, 50)).size(15), ui::dim(clip(&format!("{} · {}", t.artist, album.map(|a| a.title.as_str()).unwrap_or("")), 70), 12)].spacing(1).width(Length::Fill),
                     button(text("Add").size(13)).padding([6, 16]).style(ui::secondary).on_press(Message::AddSongTo(p.id.clone(), t.id.clone())),
                 ]
                 .spacing(12)
@@ -253,7 +252,7 @@ pub fn get_more(app: &App) -> Option<El<'_>> {
                     _ => 8,
                 };
                 let limit = if all && !f.open.contains(*kind) { limit } else { list.len() };
-                let rows: Vec<El> = list.iter().take(limit).map(|s| found_row(app, s, *kind)).collect();
+                let rows: Vec<El> = list.iter().take(limit).map(|s| found_row(app, s, *kind, true)).collect();
                 body = body.push(text(title).size(16).font(ui::FONT_BOLD)).push(Column::with_children(rows).spacing(2));
                 if list.len() > limit {
                     body = body.push(button(text(format!("Show {} more", list.len() - limit)).size(13)).padding([5, 12]).style(ui::flat).on_press(Message::ShowMoreFound(kind.to_string())));
@@ -300,7 +299,7 @@ pub fn discover_page<'a>(app: &'a App, id: &str) -> El<'a> {
     }
     let mut c = column![ui::dim(if d.on_server.is_some() { "Artist" } else { "Not in your library yet" }, 13), ui::title(d.name.clone(), 40), ui::dim(format!("{} releases", d.albums.len()), 15), actions].spacing(8);
     for (title, single) in [("Albums & EPs", false), ("Singles", true)] {
-        let rows: Vec<El> = d.albums.iter().filter(|a| (a.kind.as_deref() == Some("Single")) == single).map(|a| found_row(app, a, "albums")).collect();
+        let rows: Vec<El> = d.albums.iter().filter(|a| (a.kind.as_deref() == Some("Single")) == single).map(|a| found_row(app, a, "albums", false)).collect();
         if !rows.is_empty() {
             c = c.push(ui::gap(12)).push(ui::title(title, 22)).push(Column::with_children(rows).spacing(2));
         }
@@ -322,7 +321,7 @@ pub fn artist_get_more<'a>(app: &'a App, name: &str) -> Option<El<'a>> {
     if missing.is_empty() {
         return None;
     }
-    let rows: Vec<El> = missing.iter().take(6).map(|a| found_row(app, a, "albums")).collect();
+    let rows: Vec<El> = missing.iter().take(6).map(|a| found_row(app, a, "albums", false)).collect();
     let head = row![
         column![ui::title("Get more", 22), ui::dim(format!("More by {name} that isn't in your library yet."), 13)].spacing(4).width(Length::Fill),
         button(text("See all releases").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))),
@@ -425,7 +424,7 @@ pub fn requests(app: &App) -> El<'_> {
 }
 
 /// One found artist / song / album, with what you can do about it.
-fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str) -> El<'a> {
+fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str, link: bool) -> El<'a> {
     let is_artist = kind == "artists";
     let art: El = match s.image.as_ref().and_then(|p| app.images.get(p)) {
         Some(h) => image(h.clone()).width(48).height(48).content_fit(iced::ContentFit::Cover).into(),
@@ -443,6 +442,9 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str) -> El<'a> {
     }
     if let Some(y) = &s.year {
         sub.push(y.clone());
+    }
+    if let Some(d) = s.disambiguation.as_ref().filter(|_| is_artist) {
+        sub.push(d.clone());
     }
     let asked = |id: &Option<String>| id.as_ref().map(|i| app.find.asked.contains(i)).unwrap_or(false);
     let get = |label: &'a str, k: &'static str, id: String, primary: bool| -> El<'a> {
@@ -491,7 +493,26 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str) -> El<'a> {
             None => ui::dim("", 13).into(),
         }
     };
-    container(row![art, column![text(clip(&s.label(), 60)).size(15), ui::dim(clip(&sub.join(" · "), 70), 12)].spacing(2).width(Length::Fill), action].spacing(14).align_y(Alignment::Center)).padding([6, 12]).into()
+    // the whole card opens the artist's page (their releases, with a way to get them); the buttons on it still do their own thing
+    let go = if !link {
+        None
+    } else if is_artist {
+        s.foreign_id.clone()
+    } else {
+        s.artist_id.clone()
+    }
+    .map(|id| Message::Go(Page::Discover(id)));
+    button(row![art, column![text(clip(&s.label(), 60)).size(15), ui::dim(clip(&sub.join(" · "), 70), 12)].spacing(2).width(Length::Fill), action].spacing(14).align_y(Alignment::Center))
+        .padding([8, 10])
+        .width(Length::Fill)
+        .style(move |t, st| {
+            let mut x = ui::flat(t, st);
+            x.background = Some(if link && matches!(st, button::Status::Hovered | button::Status::Pressed) { ui::SURFACE_3() } else { ui::SURFACE_2() }.into());
+            x.border = iced::Border { color: ui::BORDER(), width: 1.0, radius: 12.0.into() };
+            x
+        })
+        .on_press_maybe(go)
+        .into()
 }
 
 /* ---------- credits (Now Playing) ---------- */

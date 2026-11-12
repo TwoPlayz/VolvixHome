@@ -1207,6 +1207,11 @@ async fn discover_artist(State(st): State<Shared>, headers: HeaderMap, Path(mbid
             a["onServer"] = json!(on_server(&st, Some(&title), &name));
             a["requested"] = json!(a["foreignId"].as_str().map(|id| requested.iter().any(|r| r == id)).unwrap_or(false));
         }
+        // someone else with the same name is not the artist you have: none of this artist's releases is in your library
+        let any_here = list.iter().any(|a| !(a["onServer"].is_null() || a["onServer"] == json!(false)));
+        if !list.is_empty() && !any_here {
+            v["onServer"] = Value::Null;
+        }
     }
     v["canRequest"] = json!(s.configured() && can_request(&user, &s));
     v["configured"] = json!(s.configured());
@@ -1345,10 +1350,13 @@ async fn lidarr_search(State(st): State<Shared>, headers: HeaderMap, Query(q): Q
     let is_requested = |v: &Value| -> bool {
         ["foreignId", "albumId", "singleId"].iter().any(|k| v[k].as_str().map(|id| requested.iter().any(|r| r == id)).unwrap_or(false))
     };
+    // artists that share a name are different people: only the first (the best match) can be the one in your library;
+    // its page checks that against their releases
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     let artists: Vec<Value> = f_artists.iter().map(|a| {
         let name = a["name"].as_str().unwrap_or("").to_string();
         let mut v = a.clone();
-        v["onServer"] = json!(on_server(&st, None, &name));
+        v["onServer"] = if seen_names.insert(norm(&name)) { json!(on_server(&st, None, &name)) } else { Value::Null };
         v["requested"] = json!(is_requested(a));
         v
     }).collect();

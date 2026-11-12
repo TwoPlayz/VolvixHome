@@ -603,7 +603,7 @@ fn mix(a: Color, b: Color) -> Color {
 }
 
 /// The patterned backgrounds, drawn as a picture in your two colours (stripes, rings, grid, sunburst, checker).
-fn look_svg(kind: &str, c1: Color, c2: Color) -> Option<String> {
+fn look_svg(kind: &str, c1: Color, c2: Color, rx: f32) -> Option<String> {
     let (h1, h2) = (to_hex(c1), to_hex(c2));
     let body = match kind {
         "stripes" => {
@@ -651,7 +651,7 @@ fn look_svg(kind: &str, c1: Color, c2: Color) -> Option<String> {
         }
         _ => return None,
     };
-    Some(format!("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'>{body}</svg>"))
+    Some(format!("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'><clipPath id='c'><rect width='100' height='100' rx='{rx:.2}'/></clipPath><g clip-path='url(#c)'>{body}</g></svg>"))
 }
 
 /// The website's cover fonts, as far as Windows has them.
@@ -683,7 +683,7 @@ pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, look: &volvix_
         let pct = if n <= 10 { 0.17 } else if n <= 22 { 0.13 } else if n <= 40 { 0.105 } else { 0.085 };
         text(shown).font(font).size(size * pct).color(ink).align_x(iced::alignment::Horizontal::Center).width(Length::Fixed(size * 0.82)).wrapping(text::Wrapping::WordOrGlyph).into()
     };
-    if let Some(doc) = look_svg(kind, c1, c2) {
+    if let Some(doc) = look_svg(kind, c1, c2, radius / size * 100.0) {
         let art = iced::widget::svg(iced::widget::svg::Handle::from_memory(doc.into_bytes())).width(size).height(size).content_fit(iced::ContentFit::Cover);
         return iced::widget::stack![art, container(body).width(size).height(size).center_x(size).center_y(size)].width(size).height(size).into();
     }
@@ -711,7 +711,7 @@ pub fn artist_hero<'a, M: 'a>(name: &str, tint_of: &str, size: f32) -> Element<'
         .height(size)
         .center_x(size)
         .center_y(size)
-        .style(move |_: &Theme| container::Style { background: Some(bg.into()), border: border::rounded(size), ..Default::default() })
+        .style(move |_: &Theme| container::Style { background: Some(bg.into()), border: border::rounded(size * 0.1), ..Default::default() })
         .into()
 }
 

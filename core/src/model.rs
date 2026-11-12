@@ -440,6 +440,12 @@ pub struct FoundItem {
     pub on_server: serde_json::Value,
     #[serde(default)]
     pub requested: bool,
+    /// an album's or song's artist on MusicBrainz (opens their page)
+    #[serde(default, rename = "artistId")]
+    pub artist_id: Option<String>,
+    /// what tells two artists with the same name apart ("American rock band")
+    #[serde(default)]
+    pub disambiguation: Option<String>,
 }
 
 impl FoundItem {
