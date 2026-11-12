@@ -111,14 +111,15 @@ final class DeviceHub: ObservableObject {
             devices = list
             activeID = e["active"] as? String
             nowState = e["now"] as? [String: Any]
-            syncRemote()
-            if activeID == deviceID { report(force: true) }
-            // another device took over: this one goes quiet
-            if let a = activeID, a != deviceID, a != before, player?.isPlaying == true {
+            // another device took over: this one goes quiet (only if this phone itself was playing; when it was only
+            // showing the other device, pausing would pause that device)
+            if let a = activeID, a != deviceID, a != before, player?.isPlaying == true, remote == nil {
                 player?.pause()
                 let n = list.first(where: { $0.id == a })?.name ?? "another device"
                 notice = "Playing on \(n)"
             }
+            syncRemote()
+            if activeID == deviceID { report(force: true) }
         case "transfer":
             if (e["to"] as? String) == deviceID, let s = e["state"] as? [String: Any] { receive(s) }
         case "now":

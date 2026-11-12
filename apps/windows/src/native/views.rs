@@ -1595,8 +1595,24 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     let queue_on = app.now_playing && app.np_tab == NpTab::Queue;
     // where the sound goes: this device, a TV or speaker, or a listening party (lit while either is on)
     let playing_elsewhere = app.cast.is_some() || app.party.is_some();
+    // the sound quality of what plays (a click opens the album's details), next to the cast button
+    let quality_text = track
+        .and_then(|t| app.lib.album_of(t))
+        .map(|a| {
+            let q = &a.quality;
+            if q.lossless {
+                let hi = q.bits.unwrap_or(16) >= 24 || q.khz.unwrap_or(44.1) > 48.0;
+                format!("Quality: {}", if hi { "Hi-Res Lossless" } else { "Lossless" })
+            } else {
+                let k = q.kbps.unwrap_or(0);
+                format!("Quality: {}{}", if k >= 256 { "High Quality" } else if k >= 128 { "Normal" } else { "Low" }, if k > 0 { format!(" ({k} kbps)") } else { String::new() })
+            }
+        })
+        .unwrap_or_else(|| "Audio quality".to_string());
+    let quality_album = track.and_then(|t| app.lib.album_of(t)).map(|a| a.id.clone());
     let right = row![
         horizontal_space(),
+        ui::tip(button(container(ui::quality_icon(17.0, ui::TEXT_2())).center_x(16).center_y(16)).padding(8).style(ui::icon_btn(false)).on_press_maybe(quality_album.map(Message::ShowAlbumInfo)), &quality_text),
         ui::tip(button(container(ui::cast_icon(17.0, if playing_elsewhere { ui::ACCENT() } else { ui::TEXT_2() })).center_x(16).center_y(16)).padding(8).style(ui::icon_btn(playing_elsewhere)).on_press(Message::PlayOn), "Play on"),
         ui::tip(button(ic(icon::QUEUE, 16)).padding(8).style(ui::icon_btn(queue_on)).on_press(if queue_on { Message::ToggleNowPlaying } else { Message::NpTab(NpTab::Queue) }), "Queue"),
         ui::tip(button(ic(vol_icon, 16)).padding(8).style(ui::icon_btn(false)).on_press(Message::ToggleMute), if app.volume <= 0.001 { "Unmute" } else { "Mute" }),
@@ -1604,7 +1620,7 @@ fn player_row(app: &App, width: f32) -> El<'_> {
     ]
     .spacing(2)
     .align_y(Alignment::Center)
-    .width(if narrow { 196 } else { 260 });
+    .width(if narrow { 232 } else { 296 });
 
     // fixed sides, the controls take the middle
     row![container(left).width(if narrow { 250 } else { 300 }).clip(true), container(center).width(Length::Fill).center_x(Length::Fill), right].spacing(12).align_y(Alignment::Center).into()
