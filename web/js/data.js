@@ -153,9 +153,9 @@ window.Spin = window.Spin || {};
       if (a && a.coverV) q.push('v=' + a.coverV);
       return '/api/cover/' + encodeURIComponent(albumId) + (q.length ? '?' + q.join('&') : '');
     },
-    json: function (method, path, body) {
+    json: function (method, path, body, opts) {
       return fetch(path, {
-        method: method, credentials: 'same-origin',
+        method: method, credentials: 'same-origin', signal: opts && opts.signal,
         headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
         body: body !== undefined ? JSON.stringify(body) : undefined
       }).then(function (r) {

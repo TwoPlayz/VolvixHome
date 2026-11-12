@@ -57,9 +57,15 @@ impl Client {
             tokio::time::sleep(wait).await;
         }
         let url = format!("{}/{path_and_query}", self.base);
-        let res = self.http.get(&url).header("Accept", "application/json").send().await
+        let mut res = self.http.get(&url).header("Accept", "application/json").send().await
             .map_err(|_| "Couldn't reach MusicBrainz.".to_string())?;
-        if res.status().as_u16() == 503 {
+        // busy or asked too fast (typing quickly sends several searches): wait a moment and ask once more
+        if matches!(res.status().as_u16(), 503 | 429) {
+            tokio::time::sleep(Duration::from_millis(1600)).await;
+            res = self.http.get(&url).header("Accept", "application/json").send().await
+                .map_err(|_| "Couldn't reach MusicBrainz.".to_string())?;
+        }
+        if matches!(res.status().as_u16(), 503 | 429) {
             return Err("MusicBrainz is busy. Try again in a moment.".into());
         }
         if !res.status().is_success() {
@@ -72,11 +78,11 @@ impl Client {
 
     fn cached(&self, key: &str) -> Option<Value> {
         let cache = self.cache.lock().unwrap();
-        cache.get(key).filter(|(at, _)| at.elapsed() < Duration::from_secs(600)).map(|(_, v)| v.clone())
+        cache.get(key).filter(|(at, _)| at.elapsed() < Duration::from_secs(1800)).map(|(_, v)| v.clone())
     }
     fn store(&self, key: &str, v: Value) {
         let mut cache = self.cache.lock().unwrap();
-        if cache.len() > 200 {
+        if cache.len() > 1000 {
             cache.clear();
         }
         cache.insert(key.to_string(), (Instant::now(), v));

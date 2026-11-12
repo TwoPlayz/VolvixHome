@@ -253,15 +253,62 @@ impl Client {
             q.push(("duration", duration.to_string()));
         }
         let res = self.http.get(&url).query(&q).send().await.map_err(|_| "Couldn't reach the lyrics service.".to_string())?;
-        if res.status().as_u16() == 404 {
-            return Ok(None);
+        let mut best: Option<Lyrics> = None;
+        if res.status().as_u16() != 404 {
+            if !res.status().is_success() {
+                return Err(format!("The lyrics service said {}.", res.status()));
+            }
+            let v: Value = res.json().await.map_err(|_| "The lyrics service sent something unexpected.".to_string())?;
+            best = from_lrclib(&v);
         }
-        if !res.status().is_success() {
-            return Err(format!("The lyrics service said {}.", res.status()));
+        // community records are sometimes cut short (the timing stops halfway through the song): look at the other
+        // records for the same song and take the one that reaches the end
+        let complete = best.as_ref().map(|l| l.instrumental || (!l.synced.is_empty() && coverage(l, duration) >= 0.75)).unwrap_or(false);
+        if !complete {
+            if let Ok(res) = self.http.get(format!("{}/api/search", self.base)).query(&[("track_name", title), ("artist_name", artist)]).send().await {
+                if res.status().is_success() {
+                    if let Ok(list) = res.json::<Value>().await {
+                        for c in list.as_array().cloned().unwrap_or_default().iter().take(15) {
+                            // the same recording: about the same length
+                            if duration > 0 && c["duration"].as_f64().map(|d| (d - duration as f64).abs() > 6.0).unwrap_or(false) { continue; }
+                            let Some(l) = from_lrclib(c) else { continue };
+                            if l.instrumental { continue; }
+                            if best.as_ref().map(|b| better(&l, b, duration)).unwrap_or(true) { best = Some(l); }
+                        }
+                    }
+                }
+            }
         }
-        let v: Value = res.json().await.map_err(|_| "The lyrics service sent something unexpected.".to_string())?;
-        Ok(from_lrclib(&v))
+        // timing that stops halfway is worse than the whole text: show the text
+        if let Some(l) = best.as_mut() {
+            let lines = l.plain.lines().filter(|x| !x.trim().is_empty()).count();
+            if !l.synced.is_empty() && duration > 0 && coverage(l, duration) < 0.6 && lines as f64 > l.synced.len() as f64 * 1.3 {
+                l.synced.clear();
+            }
+        }
+        Ok(best)
     }
+}
+
+/// How far through the song the last timed line is (1 = at the end). A record that stops halfway scores about 0.5.
+fn coverage(l: &Lyrics, duration: u32) -> f64 {
+    if duration == 0 { return 1.0; }
+    l.synced.last().map(|x| x.ms as f64 / (duration as f64 * 1000.0)).unwrap_or(0.0)
+}
+
+/// Is `a` a better record than `b`: timed beats plain, and reaching further through the song beats stopping early.
+fn better(a: &Lyrics, b: &Lyrics, duration: u32) -> bool {
+    match (a.synced.is_empty(), b.synced.is_empty()) {
+        (false, true) => return true,
+        (true, false) => return false,
+        _ => {}
+    }
+    if !a.synced.is_empty() {
+        let (ca, cb) = (coverage(a, duration).min(1.0), coverage(b, duration).min(1.0));
+        if (ca - cb).abs() > 0.02 { return ca > cb; }
+        return a.synced.len() > b.synced.len();
+    }
+    a.plain.lines().count() > b.plain.lines().count()
 }
 
 pub fn from_lrclib(v: &Value) -> Option<Lyrics> {
@@ -332,6 +379,18 @@ mod tests {
         let l = parse_lrc("[00:01.00]just a line");
         assert!(l[0].words.is_empty());
         assert!(line_json(&l[0]).get("words").is_none());
+    }
+
+    #[test]
+    fn a_record_that_reaches_the_end_beats_one_cut_short() {
+        let short = from_text("[00:10.00]a\n[00:20.00]b\n[01:00.00]c", "x").unwrap(); // stops at 1:00 of a 3:00 song
+        let whole = from_text("[00:10.00]a\n[01:20.00]b\n[02:50.00]c", "x").unwrap();
+        assert!(coverage(&short, 180) < 0.6);
+        assert!(coverage(&whole, 180) > 0.9);
+        assert!(better(&whole, &short, 180));
+        assert!(!better(&short, &whole, 180));
+        let plain = from_text("just words", "x").unwrap();
+        assert!(better(&short, &plain, 180), "timed beats plain");
     }
 
     #[test]

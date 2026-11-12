@@ -89,27 +89,33 @@ struct RemoteSquare: View {
     }
 }
 
-/// An artist's picture: their photo (a rounded square) when the server has one, else their initials on a tint.
+/// An artist's picture: their photo (a square with rounded corners, like album covers) when the server has one, else their
+/// initials on a tint. The corners are a tenth of the side, as on the website.
 struct ArtistPic: View {
     @EnvironmentObject var app: AppModel
     let name: String
-    var corner: CGFloat = 10
+    var corner: CGFloat? = nil
     var photo = true
     @State private var image: UIImage?
 
     var body: some View {
-        ZStack {
-            if let image = image {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                ZStack {
-                    Theme.tint(name)
-                    Text(initials(name)).font(.system(size: 22, weight: .bold)).foregroundColor(Color.white.opacity(0.92))
+        GeometryReader { g in
+            let side = min(g.size.width, g.size.height)
+            ZStack {
+                if let image = image {
+                    Image(uiImage: image).resizable().scaledToFill().frame(width: side, height: side).clipped()
+                } else {
+                    ZStack {
+                        Theme.tint(name)
+                        Text(initials(name)).font(.system(size: max(14, side * 0.3), weight: .bold)).foregroundColor(Color.white.opacity(0.92))
+                    }
+                    .frame(width: side, height: side)
                 }
             }
+            .frame(width: side, height: side)
+            .clipShape(RoundedRectangle(cornerRadius: corner ?? side * 0.1, style: .continuous))
         }
         .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         .task(id: name) { await load() }
     }
 
@@ -125,7 +131,7 @@ struct ArtistPic: View {
             tries += 1
         }
         guard let url = app.info(for: name)?.imageURL, let api = app.api else { return }
-        image = await ImageLoader.shared.image(url, auth: api.authHeader)
+        image = await ImageLoader.shared.image(url, auth: api.authFor(url))
     }
 }
 

@@ -89,7 +89,7 @@ Spin.views = Spin.views || {};
         clearTimeout(lidarrTimer);
         const host = S.$('[data-get-music]', root);
         if (ui.q.trim().length < 2 || (S.dl && S.dl.isOffline()) || (ui.type !== 'all' && ui.type !== 'albums' && ui.type !== 'artists' && ui.type !== 'songs')) { if (host) host.innerHTML = ''; return; }
-        lidarrTimer = setTimeout(function () { S.getMusic.searchInto(host, ui.q.trim(), ui.type); }, 350);
+        lidarrTimer = setTimeout(function () { S.getMusic.searchInto(host, ui.q.trim(), ui.type); }, 500);
       }
       function update() {
         lookFurther();

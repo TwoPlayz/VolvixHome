@@ -1767,7 +1767,8 @@ async fn track_lyrics(State(st): State<Shared>, headers: HeaderMap, Path(id): Pa
     if let Some(v) = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
         let found = !v["lyrics"].is_null();
         let age = if found { 90 * 86400 } else { 86400 };
-        if v["at"].as_u64().map(|at| at + age > auth::now()).unwrap_or(false) {
+        // answers kept before lyrics were checked for being cut short (no "v": 2) are asked for again
+        if v["v"].as_u64() == Some(2) && v["at"].as_u64().map(|at| at + age > auth::now()).unwrap_or(false) {
             return Json(json!({ "lyrics": v["lyrics"], "online": st.lyrics.online() })).into_response();
         }
     }
@@ -1776,7 +1777,7 @@ async fn track_lyrics(State(st): State<Shared>, headers: HeaderMap, Path(id): Pa
             let value = found.map(|l| l.to_json()).unwrap_or(Value::Null);
             if st.lyrics.online() {
                 if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
-                let _ = std::fs::write(&file, json!({ "at": auth::now(), "lyrics": value }).to_string());
+                let _ = std::fs::write(&file, json!({ "v": 2, "at": auth::now(), "lyrics": value }).to_string());
             }
             Json(json!({ "lyrics": value, "online": st.lyrics.online() })).into_response()
         }

@@ -70,6 +70,7 @@ Spin.views = Spin.views || {};
   }
 
   let seq = 0;
+  let aborter = null; // the searches still running when you type more are stopped, so they don't hold up the new one
   const SHOW = { artists: 4, songs: 6, albums: 8 };
   const TITLES = { artists: 'Artists', songs: 'Songs', albums: 'Albums' };
   /** Fill `host` with results from MusicBrainz for `q`, only the kinds the filter allows (Search calls this, debounced).
@@ -78,6 +79,9 @@ Spin.views = Spin.views || {};
     if (!host) return;
     type = type || 'all';
     const mine = ++seq;
+    if (aborter) { try { aborter.abort(); } catch (x) { /* ignore */ } }
+    aborter = window.AbortController ? new AbortController() : null;
+    const signal = aborter ? aborter.signal : undefined;
     const kinds = ['artists', 'songs', 'albums'].filter(function (k) { return type === 'all' || type === k; });
     const got = {}, open = {}, failed = {};
     let head = 'Searching…';
@@ -106,13 +110,13 @@ Spin.views = Spin.views || {};
     draw();
     host.onclick = function (e) { const b = e.target.closest('[data-gm-more]'); if (b) { open[b.dataset.gmMore] = true; draw(); } };
     kinds.forEach(function (k) {
-      S.server.json('GET', '/api/lidarr/search?kind=' + k + '&term=' + encodeURIComponent(q)).then(function (r) {
+      S.server.json('GET', '/api/lidarr/search?kind=' + k + '&term=' + encodeURIComponent(q), undefined, { signal: signal }).then(function (r) {
         if (mine !== seq) return; // a newer search took over
         canGet = !!r.canRequest; lidarrOn = !!r.configured;
         got[k] = r[k] || [];
         draw();
       }).catch(function (e) {
-        if (mine !== seq) return;
+        if (mine !== seq || (e && e.name === 'AbortError')) return;
         failed[k] = true; head = e.message; draw();
       });
     });

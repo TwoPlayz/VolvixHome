@@ -201,14 +201,24 @@ struct GetMoreSection: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard q.count >= 2, app.me?.lidarrConfigured == true, let api = app.api else { return }
         // wait for the typing to settle
-        try? await Task.sleep(nanoseconds: 600_000_000)
+        try? await Task.sleep(nanoseconds: 700_000_000)
         if Task.isCancelled { return }
         looking = true
         async let a = try? api.find(q, kind: "albums")
         async let s = try? api.find(q, kind: "songs")
         async let r = try? api.find(q, kind: "artists")
-        let (ra, rs, rr) = await (a, s, r)
+        var (ra, rs, rr) = await (a, s, r)
         if Task.isCancelled { return }
+        // MusicBrainz is sometimes busy for a second: one more try before saying it couldn't look
+        if ra == nil && rs == nil && rr == nil {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if Task.isCancelled { return }
+            async let a2 = try? api.find(q, kind: "albums")
+            async let s2 = try? api.find(q, kind: "songs")
+            async let r2 = try? api.find(q, kind: "artists")
+            (ra, rs, rr) = await (a2, s2, r2)
+            if Task.isCancelled { return }
+        }
         albums = ra?.albums ?? []
         songs = rs?.songs ?? []
         artists = rr?.artists ?? []
