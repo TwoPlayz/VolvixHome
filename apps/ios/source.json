@@ -16,12 +16,22 @@
       "iconURL": "https://raw.githubusercontent.com/TwoPlayz/VolvixHome/main/apps/ios/VolvixHome/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
       "tintColor": "E5484D",
       "screenshotURLs": [],
-      "versions": [],
-      "version": "1.4.4",
-      "versionDate": "2026-11-12",
-      "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v1.4.4/VolvixHome.ipa",
-      "size": 2030463,
-      "versionDescription": "Volvix Home 1.4.4"
+      "versions": [
+        {
+          "version": "2.0.0",
+          "buildVersion": "32",
+          "date": "2026-11-13",
+          "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v2.0.0/VolvixHome.ipa",
+          "size": 2057037,
+          "localizedDescription": "Volvix Home 2.0.0",
+          "minOSVersion": "15.0"
+        }
+      ],
+      "version": "2.0.0",
+      "versionDate": "2026-11-13",
+      "downloadURL": "https://github.com/TwoPlayz/VolvixHome/releases/download/v2.0.0/VolvixHome.ipa",
+      "size": 2057037,
+      "versionDescription": "Volvix Home 2.0.0"
     }
   ],
   "news": []
