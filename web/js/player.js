@@ -121,7 +121,7 @@ window.Spin = window.Spin || {};
     if (remote) {
       // party: the position comes from the party clock; a device making sound corrects itself if it drifts
       st.pos = remoteTarget();
-      if (remote.output === 'own' && !audio.paused && Math.abs((audio.currentTime || 0) - st.pos) > 2) setPos(st.pos);
+      driftFix(st.pos);
       renderProgress(); mediaPosition();
       return;
     }
@@ -469,6 +469,17 @@ window.Spin = window.Spin || {};
     return Math.max(0, (s.posMs + elapsed) / 1000);
   }
 
+  let partyLoad = 0; // which song load a "start together" is waiting for
+  /** The party's clock and this device's drifted apart: a small gap is closed by playing a touch faster or slower (no
+   *  audible jump), a big one by jumping. */
+  function driftFix(target) {
+    if (!remote || remote.output !== 'own' || audio.paused) { audio.playbackRate = 1; return; }
+    const drift = (audio.currentTime || 0) - target; // positive: ahead of the party
+    if (Math.abs(drift) > 1.2) { setPos(target); audio.playbackRate = 1; }
+    else if (Math.abs(drift) > 0.15) audio.playbackRate = drift > 0 ? 0.97 : 1.03;
+    else audio.playbackRate = 1;
+  }
+
   function applyRemote(s, output, offset) {
     remote = { state: s, output: output, offset: offset, blocked: remote ? remote.blocked : false };
     st.queue = s.queue.slice(); st.original = null;
@@ -480,10 +491,21 @@ window.Spin = window.Spin || {};
     const target = remoteTarget();
     st.pos = target;
     if (output === 'own') {
-      audio.muted = st.muted;
-      if (loadedId !== t.id) { audio.src = S.server.streamUrl(t.id); loadedId = t.id; setPos(target); }
-      else if (Math.abs((audio.currentTime || 0) - target) > 1.5) setPos(target);
-      if (st.playing) { if (audio.paused && !remote.blocked) startAudio(); } else { audio.pause(); remote.blocked = false; }
+      audio.muted = st.muted || !!S.player.silent;
+      if (loadedId !== t.id) {
+        // a new song: load it, and start it only once it is ready, at the spot the party is at by then (not from the start)
+        audio.pause(); audio.playbackRate = 1;
+        audio.src = S.server.streamUrl(t.id); loadedId = t.id;
+        const mine = ++partyLoad;
+        audio.addEventListener('canplay', function () {
+          if (mine !== partyLoad || !remote || remote.output !== 'own' || loadedId !== t.id) return;
+          setPos(remoteTarget());
+          if (st.playing && !remote.blocked) startAudio();
+        }, { once: true });
+      } else {
+        driftFix(target);
+        if (st.playing) { if (audio.paused && !remote.blocked) { setPos(target); startAudio(); } } else { audio.pause(); remote.blocked = false; }
+      }
     } else {
       audio.pause(); // the sound comes out of the host's speaker; this device stays silent
     }
@@ -492,6 +514,7 @@ window.Spin = window.Spin || {};
   }
 
   function releaseRemote() {
+    audio.playbackRate = 1; partyLoad++;
     if (!remote) return;
     const silent = remote.output === 'host';
     remote = null;

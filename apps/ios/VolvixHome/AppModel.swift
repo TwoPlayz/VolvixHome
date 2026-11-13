@@ -51,6 +51,8 @@ final class AppModel: ObservableObject {
     private(set) var appearsByArtist: [String: [Album]] = [:]
     var userData: [String: Any] = [:]
     private var infoAsked: Set<String> = []
+    /// the library size the server last reported that was already fetched (so a size that never matches isn't asked again and again)
+    private var lastLibraryAsk: (Int, Int) = (-1, -1)
     private var infoRunning = 0
 
     private let serverKey = "volvix.home.server"
@@ -241,6 +243,18 @@ final class AppModel: ObservableObject {
         let n = await api.notifications()
         notes = n.items
         unread = n.unread
+        // new music on the server: bring the library in quietly
+        if let data = try? await api.send(try api.request("/api/status")),
+           let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], (o["scanning"] as? Bool) != true {
+            let a = wholeNumber(o["albums"]), t = wholeNumber(o["tracks"])
+            if (a != albums.count || t != allTracks.count) && (a, t) != lastLibraryAsk {
+                lastLibraryAsk = (a, t)
+                if let raw = try? await api.libraryData(), let cat = try? JSONDecoder().decode(Catalog.self, from: raw) {
+                    index(cat)
+                    Persist.write(raw, "library.json")
+                }
+            }
+        }
         let h = await api.household()
         members = h.members
         householdLists = h.playlists.compactMap { householdInfo($0) }
@@ -280,7 +294,7 @@ final class AppModel: ObservableObject {
     /// Keep looking every few seconds while the app is on screen.
     func pollLoop() async {
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
             if phase != .ready { continue }
             if offline {
                 // look for the server again; when it answers, load everything fresh

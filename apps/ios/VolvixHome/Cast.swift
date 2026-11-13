@@ -73,6 +73,11 @@ final class CastHub: ObservableObject {
             notice = "Start a song first, then cast it"
             return
         }
+        // in a party the TV can play along, unless this phone is only showing the host's speaker
+        if player.partyOn, player.party?.output == "host" {
+            notice = "This phone is silent in the party. Choose \"Play on this phone\" first, then cast"
+            return
+        }
         active = dev
         player.setSilent(true)
         notice = "Connecting to \(dev.name)…"
@@ -149,6 +154,13 @@ final class CastHub: ObservableObject {
             let state = s["playerState"] as? String
             if state == "IDLE", (s["idleReason"] as? String) == "CANCELLED" { finish("\(dev.name) is playing something else now"); return }
             if Date() < quietUntil { continue }
+            // in a party the party's clock rules: the TV is kept to it, not the other way round
+            if player?.partyOn == true {
+                if state == "PLAYING" || state == "PAUSED", let t = s["currentTime"] as? Double, let here = player?.position, abs(here - t) > 2.5 {
+                    control("seek", value: here)
+                }
+                continue
+            }
             if state == "PLAYING" || state == "PAUSED" {
                 let remotePlaying = state == "PLAYING"
                 if remotePlaying != sentPlaying {

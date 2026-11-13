@@ -54,6 +54,8 @@ final class PartyHub: ObservableObject {
     private weak var player: PlayerModel?
     private var stream: Task<Void, Never>?
     private var started = false
+    /// the server's clock minus this phone's, in ms (so everyone agrees on "now")
+    private(set) var offsetMs: Double = 0
 
     var active: Bool { state != nil }
     var myID: String { app?.user?.id ?? "" }
@@ -62,7 +64,10 @@ final class PartyHub: ObservableObject {
 
     func name(_ id: String) -> String {
         if id == myID { return "You" }
-        return app?.members.first { $0.id == id }?.name ?? "Someone"
+        let n = app?.personName(id) ?? "Someone"
+        // the household list may not know them yet: look again (the name shows up on the next redraw)
+        if n == "Someone" { Task { await app?.reloadPeople() } }
+        return n
     }
 
     func first(_ id: String) -> String {
@@ -107,6 +112,7 @@ final class PartyHub: ObservableObject {
         }
         state = s
         let offset = s.serverNow - Date().timeIntervalSince1970 * 1000
+        offsetMs = offset
         player?.applyParty(s, output: output, offsetMs: offset)
     }
 

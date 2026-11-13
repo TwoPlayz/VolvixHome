@@ -29,7 +29,7 @@ window.Spin = window.Spin || {};
 
   /** Start casting to a device: what's playing moves there, at the same spot. */
   C.start = function (dev) {
-    if (S.party && S.party.active) { S.toast('Casting isn\'t available in a party', 'x'); return; }
+    if (S.party && S.party.active && S.party.output === 'host') { S.toast('This device is silent in the party. Switch to "This device" first, then cast', 'x'); return; }
     const t = S.player.current();
     if (!t) { S.toast('Start a song first, then cast it', 'devices'); return; }
     C.active = true; C.device = dev.id; C.name = dev.name;
@@ -103,6 +103,13 @@ window.Spin = window.Spin || {};
       if (s.playerState === 'IDLE' && s.idleReason === 'ERROR') { S.toast(C.name + ' couldn\'t play that song', 'x'); return; }
       const st = S.player.state;
       if (Date.now() < quietUntil) return;
+      // in a party the party's clock is the clock: the TV is kept to it (not the other way round)
+      if (S.party && S.party.active) {
+        if ((s.playerState === 'PLAYING' || s.playerState === 'PAUSED') && Math.abs(s.currentTime - st.pos) > 2.5) {
+          hush(); api('/api/cast/control', { device: C.device, action: 'seek', value: st.pos }).catch(function () {});
+        }
+        return;
+      }
       if (s.playerState === 'PLAYING' || s.playerState === 'PAUSED') {
         const remotePlaying = s.playerState === 'PLAYING';
         // changed on the TV itself (its remote, the Google Home app): this player follows

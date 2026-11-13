@@ -11,7 +11,16 @@ window.Spin = window.Spin || {};
   const me = function () { return S.data.me.serverId; };
   const post = function (path, body) { return S.server.json('POST', '/api/party' + path, body === undefined ? {} : body); };
   const isHost = function () { return !!(P.state && P.state.host === me()); };
-  const first = function (id) { return S.data.person(id).name.split(' ')[0]; };
+  /** A person's name: from the household data, and when that doesn't know them yet, asked for again. */
+  function nameOf(id) {
+    const p = S.data.person(id);
+    if (p && p.name && p.name !== 'Someone') return p.name;
+    const m = (S.household.members() || []).find(function (x) { return x.id === id; });
+    if (m && m.name) return m.name;
+    if (S.household.load) S.household.load().then(function () { if (P.paint) P.paint(); }).catch(function () {});
+    return 'Someone';
+  }
+  const first = function (id) { return nameOf(id).split(' ')[0]; };
   const members = function () { return P.state ? P.state.members : []; };
 
   function shuffled(list) {

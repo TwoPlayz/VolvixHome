@@ -55,6 +55,10 @@ final class PlayerModel: ObservableObject {
     private var remoteState: RemoteNow?
     private var remoteTimer: Timer?
     private var silent = false
+    private var castSilent = false
+    private var partySilent = false
+    /// a new party song is loaded paused and started when it is ready, at the spot the party is at by then
+    private var partyStartTogether = false
     private var xfading = false
     private var fadingOut: AVPlayer?
     private var currentProc: EQProcessor?
@@ -292,9 +296,20 @@ final class PlayerModel: ObservableObject {
     }
 
     /// Keep playing but make no sound here (the TV has it).
+    /// A TV or speaker has the sound (this phone keeps time): silent here.
     func setSilent(_ on: Bool) {
-        silent = on
-        player.isMuted = on
+        castSilent = on
+        applySilence()
+    }
+
+    private func setPartySilent(_ on: Bool) {
+        partySilent = on
+        applySilence()
+    }
+
+    private func applySilence() {
+        silent = castSilent || partySilent
+        player.isMuted = silent
     }
 
     /// The TV changed (its remote, the Google Home app): follow it without telling it back.
@@ -418,7 +433,19 @@ final class PlayerModel: ObservableObject {
         } else if ready {
             loading = false
             if secs.isFinite && secs > 0 { duration = secs }
-            if let p = pendingSeek {
+            if partyStartTogether {
+                // ready: join the party where it is now
+                partyStartTogether = false
+                if party?.state?.playing == true {
+                    applyingParty = true
+                    if let e = partyExpected() { seekLocal(e) }
+                    player.play()
+                    applyingParty = false
+                    isPlaying = true
+                } else {
+                    isPlaying = false
+                }
+            } else if let p = pendingSeek {
                 pendingSeek = nil
                 seekLocal(p)
             }
@@ -528,7 +555,7 @@ final class PlayerModel: ObservableObject {
         if isPlaying && Date().timeIntervalSince(lastSaved) > 5 { saveLast() }
         hub?.report()
         let playing = player.timeControlStatus == .playing
-        if playing != isPlaying && player.timeControlStatus != .waitingToPlayAtSpecifiedRate {
+        if playing != isPlaying && player.timeControlStatus != .waitingToPlayAtSpecifiedRate && !partyStartTogether {
             isPlaying = playing
             publishNowPlaying()
         }
@@ -766,7 +793,7 @@ final class PlayerModel: ObservableObject {
         let before = currentID
         queue = s.queue
         index = s.index
-        setSilent(output == "host")
+        setPartySilent(output == "host")
         guard s.index >= 0, s.index < s.queue.count else {
             player.pause()
             isPlaying = false
@@ -776,11 +803,25 @@ final class PlayerModel: ObservableObject {
         let serverNow = Date().timeIntervalSince1970 * 1000 + offsetMs
         let expected = (s.playing ? s.posMs + (serverNow - s.updatedAt) : s.posMs) / 1000
         if currentID != before || player.currentItem == nil {
-            pendingSeek = expected > 0.5 ? expected : nil
-            load(autoplay: s.playing)
+            // a new song: load it, and start it only once it is ready, at the spot the party is at by then (not from the start)
+            pendingSeek = nil
+            partyStartTogether = s.playing
+            load(autoplay: false)
+            if s.playing { isPlaying = true }
             return
         }
-        if abs(position - expected) > 1.5 { seekLocal(max(0, expected)) }
+        if partyStartTogether { return }
+        // a small gap to the party's clock is closed by playing a touch faster or slower (no jump you can hear), a big one by jumping
+        let here = player.currentTime().seconds
+        let drift = here.isFinite ? here - expected : 0
+        if abs(drift) > 1.2 {
+            seekLocal(max(0, expected))
+            if isPlaying { player.rate = 1 }
+        } else if s.playing && isPlaying && abs(drift) > 0.15 {
+            player.rate = drift > 0 ? 0.97 : 1.03
+        } else if isPlaying && player.rate != 1 && player.rate != 0 {
+            player.rate = 1
+        }
         if s.playing && !isPlaying {
             player.play()
             isPlaying = true
@@ -794,12 +835,21 @@ final class PlayerModel: ObservableObject {
 
     func releaseParty() {
         partyOn = false
-        setSilent(cast?.isCasting == true)
+        partyStartTogether = false
+        setPartySilent(false)
+        if isPlaying && player.rate != 0 { player.rate = 1 }
+    }
+
+    /// Where the party is right now, in seconds (its clock, not this phone's).
+    private func partyExpected() -> Double? {
+        guard let s = party?.state, let off = party?.offsetMs else { return nil }
+        let serverNow = Date().timeIntervalSince1970 * 1000 + off
+        return max(0, (s.playing ? s.posMs + (serverNow - s.updatedAt) : s.posMs) / 1000)
     }
 
     /// If the shared position and ours have drifted apart (a stall, a slow start), catch up.
     private func keepInStep() {
-        guard inParty, isPlaying, let s = party?.state, s.playing, Date().timeIntervalSince(lastDriftCheck) > 5 else { return }
+        guard inParty, isPlaying, let s = party?.state, s.playing, Date().timeIntervalSince(lastDriftCheck) > 2 else { return }
         lastDriftCheck = Date()
         let offset = s.serverNow - Date().timeIntervalSince1970 * 1000
         applyParty(s, output: party?.output ?? "own", offsetMs: offset)

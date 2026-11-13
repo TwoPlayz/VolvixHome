@@ -6,6 +6,24 @@ window.Spin = window.Spin || {};
 (function (S) {
   'use strict';
 
+  /** TVs and speakers (Google Cast), found by the server, and the system's speaker picker: shared by the plain menu and the party's. */
+  function castItems() {
+    const C = S.cast, items = [{ sep: true }];
+    if (C.active) {
+      items.push({ label: 'Casting to ' + C.name, icon: 'check', onClick: function () {} }, { label: 'Stop casting', icon: 'x', onClick: C.stop });
+    } else {
+      C.devices.forEach(function (dev) {
+        items.push({ label: dev.name + (dev.model ? ' · ' + dev.model : ''), icon: 'devices', onClick: function () { C.start(dev); } });
+      });
+      if (!C.devices.length) items.push({ label: 'No TVs or speakers found yet', icon: 'info', onClick: function () { C.refresh(); } });
+    }
+    // they are found by themselves; the address is only for when the server can't see them (e.g. it runs in Docker)
+    if (!C.active) items.push({ label: C.devices.length ? 'Not listed? Add by address…' : 'Can\'t find it? Add by address…', icon: 'plus', onClick: C.addByAddress });
+    // the system's own speaker picker (AirPlay speakers, Bluetooth headphones)
+    if (C.airplay()) items.push({ sep: true }, { label: 'AirPlay and Bluetooth…', icon: 'volume', onClick: C.airplayPicker });
+    return items;
+  }
+
   function menu(anchor) {
     const P = S.party;
     const inParty = P && P.active && P.state;
@@ -15,7 +33,7 @@ window.Spin = window.Spin || {};
       if (P.isHost()) {
         S.popover(anchor, {
           header: '<div class="q-pop"><div class="menu-name">Party sound</div><div class="menu-sub">Guests on your speaker hear this device</div></div>',
-          items: [{ label: 'This device (host)', icon: 'check', onClick: function () {} }].concat(P.menuItems())
+          items: [{ label: 'This device (host)', icon: 'check', onClick: function () {} }].concat(castItems(), P.menuItems())
         });
         return;
       }
@@ -25,7 +43,7 @@ window.Spin = window.Spin || {};
         items: [
           { label: 'This device', icon: own ? 'check' : 'devices', onClick: function () { if (!own) P.setOutput('own'); } },
           { label: host + '\'s speaker', icon: own ? 'devices' : 'check', onClick: function () { if (own) P.setOutput('host'); } }
-        ].concat(P.menuItems())
+        ].concat(own ? castItems() : [], P.menuItems())
       });
       return;
     }
@@ -46,21 +64,8 @@ window.Spin = window.Spin || {};
         D.transferTo(d.id);
       } });
     });
-    // TVs and speakers (Google Cast), found by the server
-    const C = S.cast;
-    items.push({ sep: true });
-    if (C.active) {
-      items.push({ label: 'Casting to ' + C.name, icon: 'check', onClick: function () {} }, { label: 'Stop casting', icon: 'x', onClick: C.stop });
-    } else {
-      C.devices.forEach(function (dev) {
-        items.push({ label: dev.name + (dev.model ? ' · ' + dev.model : ''), icon: 'devices', onClick: function () { C.start(dev); } });
-      });
-      if (!C.devices.length) items.push({ label: 'No TVs or speakers found yet', icon: 'info', onClick: function () { C.refresh(); } });
-    }
-    // they are found by themselves; the address is only for when the server can't see them (e.g. it runs in Docker)
-    if (!C.active) items.push({ label: C.devices.length ? 'Not listed? Add by address…' : 'Can\'t find it? Add by address…', icon: 'plus', onClick: C.addByAddress });
-    // the system's own speaker picker (AirPlay speakers, Bluetooth headphones), its own group just above the party items
-    if (C.airplay()) items.push({ sep: true }, { label: 'AirPlay and Bluetooth…', icon: 'volume', onClick: C.airplayPicker });
+    // TVs and speakers (Google Cast) and the system's speaker picker
+    castItems().forEach(function (i) { items.push(i); });
     // the party items bring their own divider
     if (P && P.menuItems) P.menuItems().forEach(function (i) { items.push(i); });
     S.popover(anchor, { header: '<div class="q-pop"><div class="menu-name">Play on</div><div class="menu-sub">One device plays at a time</div></div>', items: items });

@@ -781,6 +781,8 @@ pub struct App {
     /// what this computer last told the server it is playing (and when), so changes are sent and the rest is a heartbeat
     dev_now_key: String,
     dev_now_at: Instant,
+    /// the library size the server last reported that was already fetched
+    library_ask: (u64, u64),
     /// another device is playing: this one shows it (no sound) and sends it what you press
     remote: Option<RemoteNow>,
     dev_now: Option<serde_json::Value>,
@@ -929,6 +931,7 @@ impl App {
             dev_started: false,
             dev_now_key: String::new(),
             dev_now_at: Instant::now(),
+            library_ask: (u64::MAX, u64::MAX),
             remote: None,
             dev_now: None,
             remote_block: Instant::now(),
@@ -3644,7 +3647,17 @@ impl App {
             Message::CheckUpdate => self.check_update(),
             Message::ChangePassword => self.dialog = Some(Dialog::Password { current: String::new(), new: String::new(), error: None, busy: false }),
             Message::RenameMe => self.dialog = Some(Dialog::Rename { name: self.me.as_ref().map(|m| m.user.name.clone()).unwrap_or_default(), error: None }),
-            Message::ServerStatus(r) => self.server_status = r.ok(),
+            Message::ServerStatus(r) => {
+                self.server_status = r.ok();
+                // new music on the server: bring the library in quietly
+                if let (Some(s), Some(c)) = (self.server_status.clone(), self.client.clone()) {
+                    let (a, t) = (self.lib.albums().len() as u64, self.lib.tracks().len() as u64);
+                    if !s.scanning && !self.offline && (s.albums != a || s.tracks != t) && (s.albums, s.tracks) != self.library_ask {
+                        self.library_ask = (s.albums, s.tracks);
+                        return load_everything(c, self.downloads.clone());
+                    }
+                }
+            }
 
             /* ---------- the clock: player status, saving, presence, tray, media keys, updates ---------- */
             Message::Tick => return self.tick(),
@@ -4101,6 +4114,8 @@ impl App {
                 }
             }
             if let Some(c) = self.client.clone() {
+                let c2 = c.clone();
+                tasks.push(Task::perform(blocking(move || c2.status()), Message::ServerStatus));
                 tasks.push(Task::perform(blocking(move || c.user_data()), Message::DataPulled));
             }
         }
