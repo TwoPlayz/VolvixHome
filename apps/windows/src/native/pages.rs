@@ -183,11 +183,22 @@ pub fn lyrics<'a>(app: &'a App, track: &str) -> El<'a> {
     if ly.synced.is_empty() {
         return scrollable(ui::txt(ly.plain.clone()).size(20).color(ui::TEXT_2()).line_height(1.5)).style(ui::scroller).height(Length::Fill).into();
     }
-    let now = ly.line_at(app.status.position.as_millis() as i64);
+    let pos_ms = app.status.position.as_millis() as i64;
+    let now = ly.line_at(pos_ms);
+    // the next line brightens a little before it is sung (halfway to the sung colour in its last 1.2 seconds)
+    let soon = match now {
+        Some(n) if n + 1 < ly.synced.len() && ly.synced[n + 1].ms - pos_ms < 1200 => Some(n + 1),
+        None if !ly.synced.is_empty() && ly.synced[0].ms - pos_ms < 1200 => Some(0),
+        _ => None,
+    };
     let mut col = Column::new();
     for (i, l) in ly.synced.iter().enumerate() {
         let color = match now {
             Some(n) if n == i => ui::TEXT(),
+            _ if soon == Some(i) => {
+                let (a, b) = (ui::TEXT_2(), ui::TEXT());
+                iced::Color { r: (a.r + b.r) / 2.0, g: (a.g + b.g) / 2.0, b: (a.b + b.b) / 2.0, a: 1.0 }
+            }
             Some(n) if i < n => ui::TEXT_3(),
             _ => ui::TEXT_2(),
         };

@@ -2642,8 +2642,9 @@ html.player-empty .queue-panel { bottom: var(--gap); }
 .ly-body::-webkit-scrollbar { display: none; }
 .ly-lines { display: flex; flex-direction: column; gap: 2px; padding: 8px 0 24px; }
 .ly-line { text-align: left; font-size: 22px; font-weight: 700; line-height: 1.3; padding: 8px 10px; border-radius: 10px;
-  color: var(--text-3); transition: color .25s, transform .25s, background-color .12s; transform-origin: left center; }
+  color: var(--text-3); transition: color .45s ease, transform .3s, background-color .12s; transform-origin: left center; }
 .ly-line.past { color: var(--text-2); }
+.ly-line.next { color: var(--text-2); }
 .ly-line.now { color: var(--text); transform: scale(1.03); }
 /* only with a real pointer: on a touch screen :hover sticks to the line where a scroll started */
 @media (hover: hover) and (pointer: fine) { .ly-line:hover { background: var(--hover); color: var(--text); } }
@@ -3146,6 +3147,7 @@ a.gm-link:focus-visible { outline: none; }
   .np-lyrics .ly-line { font-size: 22px; font-weight: 600; }
   .np-lyrics .ly-line.now { font-size: 26px; color: var(--text); transform: none; }
   .np-lyrics .ly-line.past { color: var(--text-3); }
+  .np-lyrics .ly-line.next { color: var(--text-2); }
   .np-lyrics .ly-line:not(.now):not(.past) { color: var(--text-2); }
   .np-credits .credits-head { display: none; }
   .np-credits .credit-row { grid-template-columns: 150px minmax(0, 1fr); }

@@ -10,7 +10,7 @@ window.Spin = window.Spin || {};
   let shownId = null;          // track the panel is currently showing
   let lines = [];              // synced lines of that track
   let active = -1;
-  let userScrolledAt = 0;
+  let userScrolledAt = 0, upNext = -1;
   let wordFrame = 0;           // requestAnimationFrame id while words are being filled in
   let lastPos = -1, lastPosAt = 0;
 
@@ -102,11 +102,18 @@ window.Spin = window.Spin || {};
     const ms = S.player.state.pos * 1000 + 250; // show a line a touch early, as the eye is faster than the ear
     let lo = 0, hi = lines.length - 1, idx = -1;
     while (lo <= hi) { const mid = (lo + hi) >> 1; if (lines[mid].ms <= ms) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
+    const wrap = S.$('[data-lyrics-synced]');
+    // the next line lights up a little before it is sung
+    const soon = idx + 1 < lines.length && lines[idx + 1].ms - ms < 1200 ? idx + 1 : -1;
+    if (wrap && soon !== upNext) {
+      upNext = soon;
+      S.$$('.ly-line.next', wrap).forEach(function (n) { n.classList.remove('next'); });
+      if (soon >= 0 && wrap.children[soon]) wrap.children[soon].classList.add('next');
+    }
     if (idx === active && !instant) return;
     active = idx;
-    const wrap = S.$('[data-lyrics-synced]');
     if (!wrap) return;
-    S.$$('.ly-line.now, .ly-line.past', wrap).forEach(function (n) { n.classList.remove('now', 'past'); });
+    S.$$('.ly-line.now, .ly-line.past', wrap).forEach(function (n) { n.classList.remove('now', 'past', 'next'); }); upNext = -1;
     const kids = wrap.children;
     for (let i = 0; i < kids.length; i++) kids[i].classList.toggle('past', i < idx);
     const el = idx >= 0 ? kids[idx] : null;
@@ -115,7 +122,9 @@ window.Spin = window.Spin || {};
     words();
     if (Date.now() - userScrolledAt > 4000) {
       const box = S.$('[data-lyrics-body]');
-      const target = el.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2;
+      // measured against the scrolling box itself (offsetTop is relative to whatever is positioned, which sent the view to the bottom)
+      const br = box.getBoundingClientRect(), er = el.getBoundingClientRect();
+      const target = box.scrollTop + (er.top - br.top) - box.clientHeight / 2 + er.height / 2;
       if (instant) box.scrollTop = target; else box.scrollTo({ top: target, behavior: 'smooth' });
     }
   }

@@ -339,6 +339,14 @@ struct LyricsView: View {
     @ObservedObject var clock: PlayClock
     @State private var lyrics: LyricsData?
     @State private var loaded = false
+    /// when the reader last scrolled by hand: the lyrics don't pull the view away for a few seconds
+    @State private var touchedAt = Date.distantPast
+
+    /// the line about to be sung (lit a little early)
+    private var upNext: Int? {
+        guard let l = lyrics, let c = current, c + 1 < l.synced.count else { return nil }
+        return l.synced[c + 1].ms - (Int(clock.position * 1000) + 250) < 1200 ? c + 1 : nil
+    }
 
     private var current: Int? {
         guard let l = lyrics, !l.synced.isEmpty else { return nil }
@@ -360,7 +368,7 @@ struct LyricsView: View {
                                 .font(.system(size: 26, weight: .bold))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
-                                .onTapGesture { player.seek(to: Double(line.ms) / 1000) }
+                                .onTapGesture { touchedAt = .distantPast; player.seek(to: Double(line.ms) / 1000) }
                                 .id(i)
                         }
                     } else if let l = lyrics, l.instrumental {
@@ -376,9 +384,13 @@ struct LyricsView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 24)
             }
+            .simultaneousGesture(DragGesture(minimumDistance: 6).onChanged { _ in touchedAt = Date() })
             .onChange(of: current) { value in
-                if let i = value { withAnimation(.easeInOut(duration: 0.4)) { proxy.scrollTo(i, anchor: .center) } }
+                guard let i = value, Date().timeIntervalSince(touchedAt) > 4 else { return }
+                withAnimation(.easeInOut(duration: 0.4)) { proxy.scrollTo(i, anchor: .center) }
             }
+            .animation(.easeInOut(duration: 0.45), value: upNext)
+            .animation(.easeInOut(duration: 0.45), value: current)
         }
         .task(id: trackID) {
             loaded = false
@@ -396,7 +408,7 @@ struct LyricsView: View {
             for w in line.words { t = t + Text(w.text).foregroundColor(ms >= w.ms ? Theme.text : Theme.text3) }
             return t
         }
-        return Text(line.text.isEmpty ? "♪" : line.text).foregroundColor(color(i))
+        return Text(line.text.isEmpty ? "♪" : line.text).foregroundColor(i == upNext ? Theme.text.opacity(0.8) : color(i))
     }
 
     private func color(_ i: Int) -> Color {
