@@ -115,7 +115,7 @@ struct HomeView: View {
             .refreshable { await app.refresh() }
             .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
         .task(id: app.stats.log.count * 100000 + app.allTracks.count + (app.localOnly ? 1 : 0)) {
             mixes = MixEngine.mixes(app, playable: { app.localOnly ? downloads.has($0) : true })
@@ -234,7 +234,7 @@ struct LibraryView: View {
                 }
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
         .alert("New playlist", isPresented: $creating) {
             TextField("Name", text: $newName)
@@ -416,7 +416,7 @@ struct AlbumView: View {
                 Text("That album isn't in the library any more.").foregroundColor(Theme.text2).padding(24)
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -497,7 +497,7 @@ struct AccountView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
     }
 }

@@ -58,7 +58,7 @@ struct HouseholdView: View {
             .refreshable { await app.pollOnce() }
             .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
     }
 }
@@ -97,7 +97,7 @@ struct GetButton: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    if busy { ProgressView().tint(.white).scaleEffect(0.7) } else { Image(systemName: "arrow.down.to.line") }
+                    if busy { ProgressView().tint(Theme.text2).scaleEffect(0.7) } else { Image(systemName: "arrow.down.to.line") }
                     Text(busy ? "Asking…" : label).font(.system(size: 13, weight: .semibold))
                 }
                 .padding(.horizontal, 14).padding(.vertical, 7)
@@ -177,7 +177,7 @@ struct GetMoreSection: View {
         VStack(alignment: .leading, spacing: 12) {
             if app.me?.lidarrConfigured == true, query.trimmingCharacters(in: .whitespaces).count >= 2 {
                 SectionTitle(text: "Get more music")
-                if looking { HStack { ProgressView().tint(.white); Text("Looking…").font(.system(size: 13)).foregroundColor(Theme.text2) }.padding(.horizontal, 16) }
+                if looking { HStack { ProgressView().tint(Theme.text2); Text("Looking…").font(.system(size: 13)).foregroundColor(Theme.text2) }.padding(.horizontal, 16) }
                 if let f = failed { ProblemBox(text: f).padding(.horizontal, 16) }
                 if !artists.isEmpty { subtitle("Artists"); ForEach(artists.prefix(4)) { a in FoundRow(item: a, isArtist: true, isSong: false, asked: $asked) } }
                 if !albums.isEmpty { subtitle("Albums"); ForEach(albums.prefix(6)) { a in FoundRow(item: a, isArtist: false, isSong: false, asked: $asked) } }
@@ -293,7 +293,7 @@ struct RequestsView: View {
             .refreshable { await reload() }
             .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
         .task {
             // keep it up to date while this screen is open
@@ -370,7 +370,7 @@ struct LyricsView: View {
                     } else if loaded {
                         Text("No lyrics found for this song.").font(.system(size: 16)).foregroundColor(Theme.text2)
                     } else {
-                        ProgressView().tint(.white)
+                        ProgressView().tint(Theme.text2)
                     }
                 }
                 .padding(.horizontal, 24)

@@ -194,7 +194,7 @@ struct DownloadButton: View {
             ZStack {
                 Circle().fill(Theme.surface3).frame(width: 44, height: 44)
                 if busy {
-                    ProgressView().tint(.white)
+                    ProgressView().tint(Theme.text2)
                 } else {
                     Image(systemName: done ? "checkmark.circle.fill" : "arrow.down.circle")
                         .font(.system(size: 20)).foregroundColor(done ? Theme.accent : Theme.text)

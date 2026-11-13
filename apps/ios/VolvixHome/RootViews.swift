@@ -33,13 +33,13 @@ struct LoadingView: View {
                 PillButton(title: "Try again") { Task { await app.load() } }
                 PillButton(title: "Switch server", primary: false) { app.switchServer() }
             } else {
-                ProgressView().tint(.white)
+                ProgressView().tint(Theme.text2)
                 Text("Loading your library…").font(.system(size: 14)).foregroundColor(Theme.text2)
             }
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
     }
 }
 
@@ -85,7 +85,7 @@ struct SignInView: View {
 
                 Button(action: submit) {
                     HStack {
-                        if app.busy { ProgressView().tint(.white) }
+                        if app.busy { ProgressView().tint(Theme.text2) }
                         Text(app.busy ? "Signing in…" : "Sign in").font(.system(size: 16, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 13)
@@ -105,7 +105,7 @@ struct SignInView: View {
             .frame(maxWidth: 440)
             .frame(maxWidth: .infinity)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .onAppear { field = 0 }
     }
 

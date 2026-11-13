@@ -144,7 +144,7 @@ struct PictureCropper: View {
                 Spacer()
             }
             .padding(.top, 20)
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -219,7 +219,7 @@ struct AccountHub: View {
             case .settings: SettingsView()
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -286,7 +286,7 @@ struct ProfileView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { name = app.user?.name ?? "" }
         .onChange(of: picked) { item in
@@ -461,7 +461,7 @@ struct SettingsView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { status = try? await app.call("GET", "/api/status") }
     }
@@ -549,7 +549,7 @@ struct FolderView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await show("") }
     }
@@ -650,7 +650,7 @@ struct LidarrSettingsView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
@@ -792,7 +792,7 @@ struct MembersView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .sheet(item: $managing) { u in
@@ -884,7 +884,7 @@ struct ManageMemberSheet: View {
                 }
                 .padding(16)
             }
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Manage")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -969,7 +969,7 @@ struct ShareLinkSheet: View {
                 Spacer()
             }
             .padding(20)
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Share \(kind == "album" ? "this album" : "this playlist")")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -1029,7 +1029,7 @@ struct SharesView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
@@ -1144,7 +1144,7 @@ struct BrowseView: View {
             }
             .padding(.top, 8).padding(.bottom, 24)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
     }
 }

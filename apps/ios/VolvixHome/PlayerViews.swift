@@ -320,7 +320,7 @@ struct QueueView: View {
             .listStyle(.insetGrouped)
             .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle(player.partyOn ? "Party queue" : "Queue")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

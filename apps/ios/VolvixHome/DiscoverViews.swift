@@ -38,7 +38,7 @@ struct DiscoverAlbumView: View {
         ScrollView {
             VStack(spacing: 14) {
                 if !loaded && failed == nil {
-                    ProgressView().tint(.white).padding(.top, 40)
+                    ProgressView().tint(Theme.text2).padding(.top, 40)
                     Text("Looking it up on MusicBrainz…").font(.system(size: 14)).foregroundColor(Theme.text2)
                 }
                 if let f = failed { ProblemBox(text: f).padding(16) }
@@ -89,7 +89,7 @@ struct DiscoverAlbumView: View {
             }
             .padding(.bottom, 24)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
@@ -146,7 +146,7 @@ struct DiscoverArtistView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if !loaded && failed == nil {
-                    HStack { ProgressView().tint(.white); Text("Looking it up on MusicBrainz…").font(.system(size: 14)).foregroundColor(Theme.text2) }.padding(16)
+                    VStack(spacing: 12) { ProgressView().tint(Theme.text2); Text("Looking it up on MusicBrainz…").font(.system(size: 14)).foregroundColor(Theme.text2) }.frame(maxWidth: .infinity).padding(.top, 120)
                 }
                 if let f = failed { ProblemBox(text: f).padding(16) }
                 if loaded {
@@ -191,7 +191,7 @@ struct DiscoverArtistView: View {
             }
             .padding(.bottom, 24)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
@@ -233,7 +233,7 @@ struct GetEverything: View {
             }
         } label: {
             HStack(spacing: 6) {
-                if busy { ProgressView().tint(.white).scaleEffect(0.7) } else { Image(systemName: "arrow.down.to.line") }
+                if busy { ProgressView().tint(Theme.text2).scaleEffect(0.7) } else { Image(systemName: "arrow.down.to.line") }
                 Text("Get everything (\(count))").font(.system(size: 14, weight: .semibold))
             }
             .padding(.horizontal, 18).padding(.vertical, 10).background(Theme.accent).foregroundColor(.white).clipShape(Capsule())

@@ -274,7 +274,7 @@ struct PartySheet: View {
                 }
                 .padding(16)
             }
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Listening party")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -408,7 +408,7 @@ struct JoinPartySheet: View {
                 .frame(maxWidth: .infinity)
             }
             .padding(20)
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Join \(host)'s party")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Not now") { dismiss() } } }

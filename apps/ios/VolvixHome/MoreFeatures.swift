@@ -98,7 +98,7 @@ struct NotificationsView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $joining) { n in
             JoinPartySheet(partyID: n.partyID ?? "", host: n.from ?? "the host").environmentObject(party)
@@ -292,7 +292,7 @@ struct SearchView: View {
                 }
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
         .task(id: query) {
             if query.trimmingCharacters(in: .whitespaces).isEmpty { hits = SearchHits(); return }
@@ -397,7 +397,7 @@ struct ArtistView: View {
             }
             .padding(.bottom, 24)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task {
             app.loadInfo(name)

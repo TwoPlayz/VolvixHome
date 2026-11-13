@@ -49,7 +49,7 @@ struct ConnectView: View {
 
                 Button(action: connect) {
                     HStack {
-                        if checking { ProgressView().tint(.white) }
+                        if checking { ProgressView().tint(Theme.text2) }
                         Text(checking ? "Connecting…" : "Connect").font(.system(size: 16, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 13)

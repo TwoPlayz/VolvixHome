@@ -146,7 +146,7 @@ struct AlbumInfoSheet: View {
                 }
                 .padding(16)
             }
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Credits & info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

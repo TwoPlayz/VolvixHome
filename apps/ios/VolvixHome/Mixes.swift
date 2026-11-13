@@ -322,7 +322,7 @@ struct MixView: View {
                 .padding(40)
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task(id: id) {
             mix = MixEngine.mixes(app, playable: { app.localOnly ? downloads.has($0) : true }).first { $0.id == id }

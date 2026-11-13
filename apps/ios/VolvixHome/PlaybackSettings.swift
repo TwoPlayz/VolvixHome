@@ -218,7 +218,7 @@ struct PlaybackSettingsView: View {
             }
             .padding(16)
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
     }
 }

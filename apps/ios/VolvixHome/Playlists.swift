@@ -372,7 +372,7 @@ struct PlaylistView: View {
                 Text("That playlist isn't here any more.").foregroundColor(Theme.text2).padding(24)
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Delete this playlist?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
@@ -512,7 +512,7 @@ struct EditPlaylistSheet: View {
                 } footer: { Text("Others on this server can find this playlist on the Household page and follow it.") }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Edit details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -579,7 +579,7 @@ struct WhoCanEditSheet: View {
                 }
                 .padding(16)
             }
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Who can edit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -631,7 +631,7 @@ struct ReorderSheet: View {
             .listStyle(.insetGrouped)
             .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Reorder")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

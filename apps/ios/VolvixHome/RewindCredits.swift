@@ -168,7 +168,7 @@ struct RewindView: View {
                 .padding(.bottom, 24)
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -298,7 +298,7 @@ struct CreditView: View {
                 .padding(.bottom, 24)
             }
         }
-        .background(Theme.surface)
+        .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task(id: name) {
             found = app.creditedSongs(name)
@@ -394,7 +394,7 @@ struct CreditsSheet: View {
                     .task { await lookUp(t) }
                 }
             }
-            .background(Theme.surface)
+            .background(Theme.surface.ignoresSafeArea())
             .navigationTitle("Credits")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
