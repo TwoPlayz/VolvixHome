@@ -810,6 +810,10 @@ fn sidebar(app: &App) -> El<'_> {
     ]
     .spacing(2);
     nav = nav.push(item(icon::PEOPLE, "Household", Page::Household));
+    // Requests (music you asked for and what is downloading), when Lidarr is connected, like the website
+    if app.me.as_ref().map(|m| m.lidarr.configured).unwrap_or(false) {
+        nav = nav.push(item(icon::DOWNLOAD, "Requests", Page::GetMusic));
+    }
 
     // your playlists
     let head = row![ui::dim("Playlists", 13), horizontal_space(), ui::tip(button(ic(icon::ADD, 13)).padding(6).style(ui::icon_btn(false)).on_press(Message::NewPlaylist(vec![])), "New playlist")].align_y(Alignment::Center);
