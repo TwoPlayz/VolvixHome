@@ -266,7 +266,8 @@ fn parse_credits(rec: &Value) -> Vec<(String, String)> {
             }
         }
     }
-    out.into_iter().map(|(role, names)| (role, names.join(", "))).collect()
+    // a full orchestra or choir isn't a credit list: keep the first dozen of each role, and the first twenty roles
+    out.into_iter().take(20).map(|(role, names)| (role, names.into_iter().take(12).collect::<Vec<_>>().join(", "))).collect()
 }
 
 pub struct SearchResults {

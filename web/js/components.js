@@ -318,13 +318,37 @@ window.Spin = window.Spin || {};
     });
     return creditIdx;
   }
+  /** The people in an artist line: "A feat. B & C" -> A, B, C. A name that is an artist in the library stays whole
+   *  (so "Simon & Garfunkel" isn't torn apart when they have their own page). Features in the song title count too. */
+  S.artistParts = function (line, title) {
+    const known = {};
+    S.data.artists.forEach(function (n) { known[n.toLowerCase()] = n; });
+    const out = [], seen = {};
+    function add(n) { n = n.trim(); if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = 1; out.push(known[n.toLowerCase()] || n); } }
+    function split(s) {
+      if (!s) return;
+      if (known[s.trim().toLowerCase()]) { add(s); return; }
+      s.split(/\s*(?:;|\/|\bfeat(?:uring|\.)?\b\.?|\bft\.?\b|\bwith\b|\bvs\.?\b|\bx\b)\s*/i).forEach(function (p) {
+        p = p.replace(/^[\s(\[]+|[\s)\]]+$/g, '');
+        if (!p) return;
+        if (known[p.toLowerCase()]) { add(p); return; }
+        p.split(/\s*(?:,|&|\band\b)\s*/i).forEach(add);
+      });
+    }
+    split(line);
+    const m = /[(\[]\s*(?:feat(?:uring|\.)?|ft\.?|with)\s+([^)\]]+)[)\]]/i.exec(title || '');
+    if (m) split(m[1]);
+    return out;
+  };
   /** Every song in the library a person is credited on (as artist or by role). */
   S.creditedSongs = function (name) {
     const low = name.toLowerCase(), out = [], roles = {};
     Object.keys(S.data.tracks).forEach(function (id) {
       const t = S.data.tracks[id];
       const rs = [];
-      if (t.artist.toLowerCase() === low) rs.push('Artist');
+      if (S.artistParts(t.artist, t.title).some(function (n) { return n.toLowerCase() === low; })) rs.push('Artist');
+      const al0 = S.data.album(t.albumId);
+      if (al0 && S.artistParts(al0.artist).some(function (n) { return n.toLowerCase() === low; }) && rs.indexOf('Artist') === -1) rs.push('Album artist');
       (t.credits || []).forEach(function (c) {
         if (c.role !== 'ISRC' && c.names.split(', ').some(function (n) { return n.trim().toLowerCase() === low; })) rs.push(c.role);
       });
@@ -340,15 +364,30 @@ window.Spin = window.Spin || {};
     if (creditIndex()[low]) return S.link('#/credit/' + encodeURIComponent(name), S.esc(name));
     return S.esc(name);
   };
-  function nameList(names) { return names.split(', ').map(function (n) { return S.personLink(n.trim()); }).join(', '); }
+  /** Names as links; a very long list (an orchestra) is cut short rather than running on. */
+  function nameList(names) {
+    const all = names.split(', ');
+    const html = all.slice(0, 12).map(function (n) { return S.personLink(n.trim()); }).join(', ');
+    return all.length > 12 ? html + ' and ' + (all.length - 12) + ' more' : html;
+  }
   function creditRows(list) {
-    return list.map(function (c) { return '<div class="credit-row"><dt>' + S.esc(c.role) + '</dt><dd>' + nameList(c.names) + '</dd></div>'; }).join('');
+    return list.slice(0, 16).map(function (c) { return '<div class="credit-row"><dt>' + S.esc(c.role) + '</dt><dd>' + nameList(c.names) + '</dd></div>'; }).join('');
   }
   /** pairs are [label, text] or [label, text, html]; html is trusted markup that replaces the text. */
   function detailRows(pairs) {
     return pairs.filter(function (p) { return p[1]; }).map(function (p) { return '<div class="credit-row"><dt>' + S.esc(p[0]) + '</dt><dd>' + (p[2] || S.esc(p[1])) + '</dd></div>'; }).join('');
   }
 
+  /** The artist rows: everyone on the artist line (and featured in the title), and the album artist when it is someone else. */
+  function artistRows(t, al) {
+    const on = S.artistParts(t.artist, t.title);
+    const list = function (a) { return a.map(function (n) { return S.personLink(n); }).join(', '); };
+    let h = '<div class="credit-row"><dt>' + (on.length > 1 ? 'Artists' : 'Artist') + '</dt><dd>' + list(on.length ? on : [t.artist]) + '</dd></div>';
+    const lows = on.map(function (n) { return n.toLowerCase(); });
+    const aa = al ? S.artistParts(al.artist).filter(function (n) { return lows.indexOf(n.toLowerCase()) === -1; }) : [];
+    if (aa.length) h += '<div class="credit-row"><dt>Album artist</dt><dd>' + list(aa) + '</dd></div>';
+    return h;
+  }
   /** Who made a song: what's tagged in the file, plus what MusicBrainz knows. */
   S.creditsDialog = function (trackId) {
     const m = S.modal({ title: 'Credits', body: S.creditsHtml(trackId), actions: [{ label: 'Close', kind: 'secondary' }] });
@@ -362,10 +401,10 @@ window.Spin = window.Spin || {};
     return '<div class="credits">' +
         '<div class="credits-head"><a class="credits-art" href="#/album/' + al.id + '" aria-label="Go to the album">' + S.cover(al) + '</a><div>' +
           '<strong>' + S.esc(t.title) + '</strong>' +
-          '<span class="credits-artist">' + S.personLink(t.artist) + '</span>' +
+          '<span class="credits-artist">' + S.artistParts(t.artist, t.title).map(function (n) { return S.personLink(n); }).join(', ') + '</span>' +
           '<span>' + S.albumLink(al) + (al.year ? ' · ' + al.year : '') + '</span></div></div>' +
         '<div class="q-label">Credits</div>' +
-        '<dl class="credit-list">' + '<div class="credit-row"><dt>Artist</dt><dd>' + S.personLink(t.artist) + '</dd></div>' + creditRows(own.filter(function (c) { return c.role !== 'ISRC'; })) + '<span data-mb></span></dl>' +
+        '<dl class="credit-list">' + artistRows(t, al) + creditRows(own.filter(function (c) { return c.role !== 'ISRC'; })) + '<span data-mb></span></dl>' +
         '<p class="set-hint" data-mb-note><span class="chip-src">MusicBrainz</span> Looking up more…</p>' +
         '<div class="q-label">Details</div>' +
         '<dl class="credit-list">' + detailRows([

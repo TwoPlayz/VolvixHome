@@ -614,6 +614,48 @@ fn link<'a>(label: String, to: Message) -> El<'a> {
     }).into()
 }
 
+/// The people in an artist line: "A feat. B & C" gives A, B, C. A name that is an artist in the library stays whole;
+/// features in the song title count too.
+fn artist_parts(app: &App, line: &str, title: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    let mut add = |n: &str| {
+        let n = n.trim().trim_matches(|c| c == '(' || c == ')' || c == '[' || c == ']').trim();
+        if !n.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(n)) {
+            out.push(n.to_string());
+        }
+    };
+    let split = |s: &str, add: &mut dyn FnMut(&str)| {
+        if app.lib.has_artist(s.trim()) {
+            add(s);
+            return;
+        }
+        let mut pieces: Vec<String> = vec![s.to_string()];
+        for sep in [";", " / ", " feat. ", " feat ", " ft. ", " ft ", " featuring ", " with ", " vs. ", " x "] {
+            pieces = pieces.iter().flat_map(|p| p.split(sep).map(String::from).collect::<Vec<_>>()).collect();
+        }
+        for p in pieces {
+            if app.lib.has_artist(p.trim()) {
+                add(&p);
+                continue;
+            }
+            for q in p.split(", ").flat_map(|x| x.split(" & ")).flat_map(|x| x.split(" and ")) {
+                add(q);
+            }
+        }
+    };
+    split(line, &mut add);
+    let low = title.to_lowercase();
+    for key in ["(feat. ", "(ft. ", "(featuring ", "(with ", "[feat. ", "[ft. ", "[featuring ", "[with "] {
+        if let Some(i) = low.find(key) {
+            let rest = &title[i + key.len()..];
+            let end = rest.find(|c| c == ')' || c == ']').unwrap_or(rest.len());
+            split(&rest[..end], &mut add);
+            break;
+        }
+    }
+    out
+}
+
 /// "Jane Doe, Sam Lee & Kit Moss": each name that's an artist in your library opens their page
 /// (a band name with "&" in it, like "Juniper & Ash", stays whole).
 fn people_links<'a>(app: &'a App, names: &str) -> El<'a> {
@@ -649,8 +691,16 @@ pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
     let row_of = |k: String, v: String| -> El<'a> { row![container(ui::dim(k, 14)).width(150), ui::txt(v).size(15)].spacing(16).into() };
     let row_el = |k: String, v: El<'a>| -> El<'a> { row![container(ui::dim(k, 14)).width(150), v].spacing(16).into() };
     let own: Vec<&volvix_core::Credit> = t.credits.iter().filter(|c| c.role != "ISRC").collect();
-    let mut people = Column::new().spacing(10).push(row_el("Artist".into(), people_links(app, &t.artist)));
-    for c in &own {
+    // everyone on the artist line (and featured in the title), then the album artist if that is someone else
+    let on = artist_parts(app, &t.artist, &t.title);
+    let mut people = Column::new().spacing(10).push(row_el(if on.len() > 1 { "Artists" } else { "Artist" }.into(), people_links(app, &if on.is_empty() { t.artist.clone() } else { on.join(", ") })));
+    if let Some(a) = album {
+        let aa: Vec<String> = artist_parts(app, &a.artist, "").into_iter().filter(|n| !on.iter().any(|o| o.eq_ignore_ascii_case(n))).collect();
+        if !aa.is_empty() {
+            people = people.push(row_el("Album artist".into(), people_links(app, &aa.join(", "))));
+        }
+    }
+    for c in own.iter().take(16) {
         people = people.push(row_el(c.role.clone(), people_links(app, &c.names)));
     }
     // MusicBrainz fills in what the file doesn't say
@@ -665,7 +715,7 @@ pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
         }
         Some(Ok(list)) => {
             let extra: Vec<&volvix_core::Credit> = list.iter().filter(|c| !own.iter().any(|o| o.role == c.role)).collect();
-            for c in &extra {
+            for c in extra.iter().take(16) {
                 people = people.push(row_el(c.role.clone(), people_links(app, &c.names)));
             }
             if list.is_empty() {

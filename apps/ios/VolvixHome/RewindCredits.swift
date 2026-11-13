@@ -197,6 +197,40 @@ struct Credit: Codable, Hashable {
 }
 
 extension AppModel {
+    /// The people in an artist line: "A feat. B & C" gives A, B, C. A name that is an artist in the library stays whole;
+    /// features in the song title count too.
+    func artistParts(_ line: String, title: String = "") -> [String] {
+        var known: [String: String] = [:]
+        for n in artistNames { known[n.lowercased()] = n }
+        var out: [String] = []
+        var seen = Set<String>()
+        func add(_ raw: String) {
+            let n = raw.trimmingCharacters(in: .whitespaces)
+            if n.isEmpty || !seen.insert(n.lowercased()).inserted { return }
+            out.append(known[n.lowercased()] ?? n)
+        }
+        func split(_ s: String) {
+            if s.isEmpty { return }
+            if known[s.lowercased()] != nil { add(s); return }
+            let first = s.replacingOccurrences(of: "(?i)\\s*(?:;|/|\\bfeat(?:uring|\\.)?\\b\\.?|\\bft\\.?\\b|\\bwith\\b|\\bvs\\.?\\b|\\bx\\b)\\s*", with: "\u{1}", options: .regularExpression)
+            for p0 in first.components(separatedBy: "\u{1}") {
+                let p = p0.trimmingCharacters(in: CharacterSet(charactersIn: " ()[]"))
+                if p.isEmpty { continue }
+                if known[p.lowercased()] != nil { add(p); continue }
+                let more = p.replacingOccurrences(of: "(?i)\\s*(?:,|&|\\band\\b)\\s*", with: "\u{1}", options: .regularExpression)
+                for q in more.components(separatedBy: "\u{1}") { add(q) }
+            }
+        }
+        split(line)
+        if let r = title.range(of: "(?i)[(\\[]\\s*(?:feat(?:uring|\\.)?|ft\\.?|with)\\s+([^)\\]]+)[)\\]]", options: .regularExpression) {
+            var inner = String(title[r])
+            inner = inner.replacingOccurrences(of: "(?i)^[(\\[]\\s*(?:feat(?:uring|\\.)?|ft\\.?|with)\\s+", with: "", options: .regularExpression)
+            inner = inner.trimmingCharacters(in: CharacterSet(charactersIn: ")] "))
+            split(inner)
+        }
+        return out
+    }
+
     /// Every song a person is credited on (as the artist or by role), and how often in each role.
     func creditedSongs(_ name: String) -> (ids: [String], roles: [(String, Int)]) {
         let low = name.lowercased()
@@ -204,7 +238,8 @@ extension AppModel {
         var roles: [String: Int] = [:]
         for t in allTracks {
             var rs: [String] = []
-            if t.artist.lowercased() == low { rs.append("Artist") }
+            if artistParts(t.artist, title: t.title).contains(where: { $0.lowercased() == low }) { rs.append("Artist") }
+            else if let al = album(t.albumId), artistParts(al.artist).contains(where: { $0.lowercased() == low }) { rs.append("Album artist") }
             for c in t.credits where c.role != "ISRC" {
                 if c.names.components(separatedBy: ", ").contains(where: { $0.trimmingCharacters(in: .whitespaces).lowercased() == low }) { rs.append(c.role) }
             }
@@ -324,7 +359,8 @@ struct CreditsSheet: View {
     }
 
     private func names(_ list: String) -> some View {
-        let parts = list.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let all = list.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let parts = Array(all.prefix(12))
         return VStack(alignment: .leading, spacing: 2) {
             ForEach(parts, id: \.self) { n in
                 if let r = app.personRoute(n) {
@@ -333,6 +369,7 @@ struct CreditsSheet: View {
                     Text(n).font(.system(size: 14)).foregroundColor(Theme.text)
                 }
             }
+            if all.count > 12 { Text("and \(all.count - 12) more").font(.system(size: 13)).foregroundColor(Theme.text3) }
         }
     }
 
@@ -355,11 +392,19 @@ struct CreditsSheet: View {
                         }
                         Text("Credits").font(.system(size: 12, weight: .bold)).foregroundColor(Theme.text2).textCase(.uppercase)
                         VStack(alignment: .leading, spacing: 10) {
+                            let on = app.artistParts(t.artist, title: t.title)
                             HStack(alignment: .top) {
-                                Text("Artist").font(.system(size: 13)).foregroundColor(Theme.text2).frame(width: 110, alignment: .leading)
-                                names(t.artist)
+                                Text(on.count > 1 ? "Artists" : "Artist").font(.system(size: 13)).foregroundColor(Theme.text2).frame(width: 110, alignment: .leading)
+                                names((on.isEmpty ? [t.artist] : on).joined(separator: ", "))
                             }
-                            ForEach(own + more, id: \.role) { c in
+                            let aa = al.map { app.artistParts($0.artist).filter { n in !on.contains { $0.lowercased() == n.lowercased() } } } ?? []
+                            if !aa.isEmpty {
+                                HStack(alignment: .top) {
+                                    Text("Album artist").font(.system(size: 13)).foregroundColor(Theme.text2).frame(width: 110, alignment: .leading)
+                                    names(aa.joined(separator: ", "))
+                                }
+                            }
+                            ForEach(Array((own + more).prefix(16)), id: \.role) { c in
                                 HStack(alignment: .top) {
                                     Text(c.role).font(.system(size: 13)).foregroundColor(Theme.text2).frame(width: 110, alignment: .leading)
                                     names(c.names)
