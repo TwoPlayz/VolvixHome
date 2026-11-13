@@ -85,7 +85,7 @@ pub mod icon {
 /// Windows the website shows the system glyph for some names and its own drawing for the rest; this shows the same one.
 pub fn wi<'a, M: 'a>(name: &str, size: f32, color: Color) -> Element<'a, M> {
     if let Some((_, c)) = crate::webicons::GLYPHS.iter().find(|(n, _)| *n == name) {
-        return container(text(c.to_string()).font(ICONS).size((size * 0.9).round()).color(color).line_height(1.0)).width(size).height(size).center_x(size).center_y(size).into();
+        return container(txt(c.to_string()).font(ICONS).size((size * 0.9).round()).color(color).line_height(1.0)).width(size).height(size).center_x(size).center_y(size).into();
     }
     match web_svg(name) {
         Some(h) => iced::widget::svg(h).width(size).height(size).style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(color) }).into(),
@@ -97,7 +97,7 @@ pub fn wi<'a, M: 'a>(name: &str, size: f32, color: Color) -> Element<'a, M> {
 pub fn wi_btn<'a, M: 'a>(name: &str, size: f32, on: bool) -> Element<'a, M> {
     if let Some((_, c)) = crate::webicons::GLYPHS.iter().find(|(n, _)| *n == name) {
         // a glyph is text: it follows the button's text colour by itself
-        return container(text(c.to_string()).font(ICONS).size((size * 0.9).round()).line_height(1.0)).width(size).height(size).center_x(size).center_y(size).into();
+        return container(txt(c.to_string()).font(ICONS).size((size * 0.9).round()).line_height(1.0)).width(size).height(size).center_x(size).center_y(size).into();
     }
     match web_svg(name) {
         Some(h) => iced::widget::svg(h)
@@ -123,8 +123,14 @@ fn web_svg(name: &str) -> Option<iced::widget::svg::Handle> {
     Some(h)
 }
 
+/// Text that can show any language: with the default (basic) shaping, Japanese, Korean, Chinese and other scripts that
+/// the app's own font doesn't have come out as boxes; this shapes the text fully, which finds them in the system's fonts.
+pub fn txt<'a>(s: impl text::IntoFragment<'a>) -> iced::widget::Text<'a, Theme> {
+    text(s).shaping(text::Shaping::Advanced)
+}
+
 pub fn icon<'a>(c: char, size: u16) -> iced::widget::Text<'a, Theme> {
-    text(c.to_string()).font(ICONS).size(size as f32).line_height(1.0)
+    txt(c.to_string()).font(ICONS).size(size as f32).line_height(1.0)
 }
 
 pub fn theme() -> Theme {
@@ -135,10 +141,10 @@ pub fn theme() -> Theme {
 }
 
 pub fn title<'a, M: 'a>(s: impl text::IntoFragment<'a>, size: u16) -> Element<'a, M> {
-    text(s).font(FONT_BOLD).size(size as f32).color(TEXT()).into()
+    txt(s).font(FONT_BOLD).size(size as f32).color(TEXT()).into()
 }
 pub fn dim<'a>(s: impl text::IntoFragment<'a>, size: u16) -> iced::widget::Text<'a, Theme> {
-    text(s).size(size as f32).color(TEXT_2())
+    txt(s).size(size as f32).color(TEXT_2())
 }
 
 /* ---------- containers ---------- */
@@ -245,7 +251,7 @@ pub fn tip<'a>(content: impl Into<Element<'a, crate::Message>>, label: impl ToSt
     let ready = HINT.lock().map(|h| h.as_ref().map(|(l, at)| *l == label && at.elapsed() >= HINT_DELAY).unwrap_or(false)).unwrap_or(false);
     let shown: Element<'a, crate::Message> = if ready {
         // no outline: a soft shadow lifts it off the page instead
-        container(text(label.clone()).size(12)).padding([5, 10]).style(|_: &Theme| container::Style {
+        container(txt(label.clone()).size(12)).padding([5, 10]).style(|_: &Theme| container::Style {
             background: Some(SURFACE_3().into()),
             border: Border { radius: 6.0.into(), width: 0.0, color: Color::TRANSPARENT },
             text_color: Some(TEXT()),
@@ -368,19 +374,19 @@ fn btn_style(kind: Btn) -> fn(&Theme, button::Status) -> button::Style {
 
 /// The website's button: a pill 40 tall with 14 px words.
 pub fn btn<'a>(label: impl text::IntoFragment<'a>, kind: Btn) -> iced::widget::Button<'a, crate::Message> {
-    button(text(label).size(14).wrapping(text::Wrapping::None)).padding([10.9, 18.0]).style(btn_style(kind))
+    button(txt(label).size(14).wrapping(text::Wrapping::None)).padding([10.9, 18.0]).style(btn_style(kind))
 }
 
 /// The website's small button: 32 tall with 13 px words.
 pub fn btn_sm<'a>(label: impl text::IntoFragment<'a>, kind: Btn) -> iced::widget::Button<'a, crate::Message> {
-    button(text(label).size(13).wrapping(text::Wrapping::None)).padding([7.55, 14.0]).style(btn_style(kind))
+    button(txt(label).size(13).wrapping(text::Wrapping::None)).padding([7.55, 14.0]).style(btn_style(kind))
 }
 
 /// The same with one of the website's icons in front of the words.
 pub fn btn_icon<'a>(icon_name: &str, label: impl text::IntoFragment<'a>, kind: Btn, small: bool) -> iced::widget::Button<'a, crate::Message> {
     let color = if kind == Btn::Ghost { TEXT_2() } else if matches!(kind, Btn::Primary | Btn::Danger) { Color::WHITE } else { TEXT() };
     let (size, icon_size, pad) = if small { (13.0, 14.0, [7.55, 14.0]) } else { (14.0, 16.0, [10.9, 18.0]) };
-    button(iced::widget::row![wi(icon_name, icon_size, color), text(label).size(size).wrapping(text::Wrapping::None)].spacing(if small { 6 } else { 8 }).align_y(iced::Alignment::Center)).padding(pad).style(btn_style(kind))
+    button(iced::widget::row![wi(icon_name, icon_size, color), txt(label).size(size).wrapping(text::Wrapping::None)].spacing(if small { 6 } else { 8 }).align_y(iced::Alignment::Center)).padding(pad).style(btn_style(kind))
 }
 /// Seconds since the app started (drives the launch screen's animation).
 pub fn since_start() -> f32 {
@@ -401,7 +407,7 @@ pub fn avatar_key<'a, M: 'a>(key: &str, name: &str, size: f32) -> Element<'a, M>
     const COLORS: [(u8, u8, u8); 8] = [(0x5E, 0x54, 0x8E), (0x33, 0x5C, 0x67), (0x9E, 0x2A, 0x2B), (0xBC, 0x6C, 0x25), (0x3D, 0x5A, 0x80), (0x6B, 0x4F, 0x3A), (0x4A, 0x6C, 0x2F), (0x7A, 0x40, 0x69)];
     let (r, g, b) = COLORS[(key.chars().fold(0u32, |h, c| h.wrapping_mul(31).wrapping_add(c as u32)) as usize) % COLORS.len()];
     let initial: String = name.split_whitespace().filter_map(|p| p.chars().next()).take(2).collect::<String>().to_uppercase();
-    container(text(initial).size(size * 0.4).font(FONT_BOLD))
+    container(txt(initial).size(size * 0.4).font(FONT_BOLD))
         .width(size)
         .height(size)
         .center_x(size)
@@ -417,7 +423,7 @@ pub fn splash<'a, M: 'a>() -> Element<'a, M> {
     let word = ((t - 0.15) / 0.5).clamp(0.0, 1.0);
     let word = 1.0 - (1.0 - word).powi(2); // ease-out
     let mark = container(crate::marks::logo_scaled::<M>(104.0, breathe)).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill);
-    let name = container(text("Volvix").size(22).font(FONT_BOLD).color(Color { a: word, ..TEXT() }))
+    let name = container(txt("Volvix").size(22).font(FONT_BOLD).color(Color { a: word, ..TEXT() }))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
@@ -433,7 +439,7 @@ pub fn seg<'a>(options: &[(&'a str, &'a str)], selected: &str, f: impl Fn(String
     for (value, label) in options {
         let on = *value == selected;
         r = r.push(
-            button(text(*label).size(13).font(FONT_BOLD))
+            button(txt(*label).size(13).font(FONT_BOLD))
                 .padding([6, 12])
                 .style(move |_: &Theme, s: button::Status| button::Style {
                     background: if on { Some(SURFACE().into()) } else if matches!(s, button::Status::Hovered) { Some(HOVER().into()) } else { None },
@@ -541,12 +547,12 @@ pub fn cover_box<'a, M: 'a>(handle: Option<&image::Handle>, title: &str, w: f32,
     let side = w.min(h);
     let body: Element<'a, M> = match letter {
         None => wi("music", if side >= 100.0 { side * 0.38 } else { 22.0 }, ink), // the website's note, when there's no title
-        Some(c) if side <= 76.0 => text(c.to_uppercase().collect::<String>()).font(FONT_BOLD).size(side * 0.4).color(ink).into(),
+        Some(c) if side <= 76.0 => txt(c.to_uppercase().collect::<String>()).font(FONT_BOLD).size(side * 0.4).color(ink).into(),
         Some(_) => {
             // the website's sizes: shorter names are set bigger
             let n = name.chars().count();
             let pct = if n <= 10 { 0.17 } else if n <= 22 { 0.13 } else if n <= 40 { 0.105 } else { 0.085 };
-            text(name.to_string())
+            txt(name.to_string())
                 .font(FONT_BOLD)
                 .size(side * pct)
                 .color(ink)
@@ -696,11 +702,11 @@ pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, look: &volvix_
     let body: Element<'a, M> = if name.is_empty() {
         Space::new(0, 0).into()
     } else if size <= 76.0 {
-        text(name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default()).font(font).size(size * 0.4).color(ink).into()
+        txt(name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default()).font(font).size(size * 0.4).color(ink).into()
     } else {
         let n = name.chars().count();
         let pct = if n <= 10 { 0.17 } else if n <= 22 { 0.13 } else if n <= 40 { 0.105 } else { 0.085 };
-        text(shown).font(font).size(size * pct).color(ink).align_x(iced::alignment::Horizontal::Center).width(Length::Fixed(size * 0.82)).wrapping(text::Wrapping::WordOrGlyph).into()
+        txt(shown).font(font).size(size * pct).color(ink).align_x(iced::alignment::Horizontal::Center).width(Length::Fixed(size * 0.82)).wrapping(text::Wrapping::WordOrGlyph).into()
     };
     if let Some(doc) = look_svg(kind, c1, c2, radius / size * 100.0) {
         let art = iced::widget::svg(iced::widget::svg::Handle::from_memory(doc.into_bytes())).width(size).height(size).content_fit(iced::ContentFit::Cover);
@@ -725,7 +731,7 @@ pub fn cover_look<'a, M: 'a>(title: &str, size: f32, radius: f32, look: &volvix_
 pub fn artist_hero<'a, M: 'a>(name: &str, tint_of: &str, size: f32) -> Element<'a, M> {
     let initials: String = name.split_whitespace().filter(|w| w.chars().any(|c| c.is_alphanumeric())).filter_map(|w| w.chars().next()).take(2).collect::<String>().to_uppercase();
     let bg = tint_for(tint_of);
-    container(text(initials).size(size * 0.36).font(FONT_BOLD).color(Color { a: 0.92, ..rgb(0xF5, 0xF5, 0xF7) }))
+    container(txt(initials).size(size * 0.36).font(FONT_BOLD).color(Color { a: 0.92, ..rgb(0xF5, 0xF5, 0xF7) }))
         .width(size)
         .height(size)
         .center_x(size)

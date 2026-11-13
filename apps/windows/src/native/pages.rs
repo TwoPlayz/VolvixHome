@@ -72,8 +72,8 @@ fn add_songs<'a>(app: &'a App, p: &volvix_core::playlists::PlaylistView) -> El<'
             container(
                 row![
                     cover_of(app, album, 40.0),
-                    column![text(clip(&t.title, 50)).size(15), ui::dim(clip(&format!("{} · {}", t.artist, album.map(|a| a.title.as_str()).unwrap_or("")), 70), 12)].spacing(1).width(Length::Fill),
-                    button(text("Add").size(13)).padding([6, 16]).style(ui::secondary).on_press(Message::AddSongTo(p.id.clone(), t.id.clone())),
+                    column![ui::txt(clip(&t.title, 50)).size(15), ui::dim(clip(&format!("{} · {}", t.artist, album.map(|a| a.title.as_str()).unwrap_or("")), 70), 12)].spacing(1).width(Length::Fill),
+                    button(ui::txt("Add").size(13)).padding([6, 16]).style(ui::secondary).on_press(Message::AddSongTo(p.id.clone(), t.id.clone())),
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center),
@@ -96,7 +96,7 @@ pub fn mix_card(m: &Mix) -> El<'_> {
     let art: El = container(
         column![
             ui::wi(m.icon, 30.0, Color::WHITE),
-            text(m.title.clone()).size(16).font(ui::FONT_BOLD).color(Color::WHITE).align_x(iced::alignment::Horizontal::Center).width(Length::Fill).wrapping(text::Wrapping::Word),
+            ui::txt(m.title.clone()).size(16).font(ui::FONT_BOLD).color(Color::WHITE).align_x(iced::alignment::Horizontal::Center).width(Length::Fill).wrapping(text::Wrapping::Word),
         ]
         .spacing(10)
         .align_x(Alignment::Center),
@@ -181,7 +181,7 @@ pub fn lyrics<'a>(app: &'a App, track: &str) -> El<'a> {
         return note("Instrumental", "This song has no lyrics.".into());
     }
     if ly.synced.is_empty() {
-        return scrollable(text(ly.plain.clone()).size(20).color(ui::TEXT_2()).line_height(1.5)).style(ui::scroller).height(Length::Fill).into();
+        return scrollable(ui::txt(ly.plain.clone()).size(20).color(ui::TEXT_2()).line_height(1.5)).style(ui::scroller).height(Length::Fill).into();
     }
     let now = ly.line_at(app.status.position.as_millis() as i64);
     let mut col = Column::new();
@@ -196,7 +196,7 @@ pub fn lyrics<'a>(app: &'a App, track: &str) -> El<'a> {
         let line: El = if l.text.trim().is_empty() {
             ic('\u{E8D6}', size as u16).color(color).into()
         } else {
-            text(l.text.clone()).size(size).font(ui::FONT_BOLD).color(color).into()
+            ui::txt(l.text.clone()).size(size).font(ui::FONT_BOLD).color(color).into()
         };
         // long lines wrap (the scroll position estimate allows for one line each, close enough)
         col = col.push(
@@ -253,16 +253,16 @@ pub fn get_more(app: &App) -> Option<El<'_>> {
                 };
                 let limit = if all && !f.open.contains(*kind) { limit } else { list.len() };
                 let rows: Vec<El> = list.iter().take(limit).map(|s| found_row(app, s, *kind, true)).collect();
-                body = body.push(text(title).size(16).font(ui::FONT_BOLD)).push(Column::with_children(rows).spacing(2));
+                body = body.push(ui::txt(title).size(16).font(ui::FONT_BOLD)).push(Column::with_children(rows).spacing(2));
                 if list.len() > limit {
-                    body = body.push(button(text(format!("Show {} more", list.len() - limit)).size(13)).padding([5, 12]).style(ui::flat).on_press(Message::ShowMoreFound(kind.to_string())));
+                    body = body.push(button(ui::txt(format!("Show {} more", list.len() - limit)).size(13)).padding([5, 12]).style(ui::flat).on_press(Message::ShowMoreFound(kind.to_string())));
                 }
             }
         }
     }
     if !pending && !shown {
         // nothing to offer (or MusicBrainz didn't answer)
-        return failure.map(|e| section("Get more music", container(text(e).size(14)).padding([10, 12]).style(ui::error_box).into()));
+        return failure.map(|e| section("Get more music", container(ui::txt(e).size(14)).padding([10, 12]).style(ui::error_box).into()));
     }
     let sub = if pending && !shown {
         "Searching…"
@@ -273,7 +273,7 @@ pub fn get_more(app: &App) -> Option<El<'_>> {
     };
     let head = row![
         column![ui::title("Get more music", 22), ui::dim(sub, 13)].spacing(4).width(Length::Fill),
-        button(text("Your requests").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::GetMusic)),
+        button(ui::txt("Your requests").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::GetMusic)),
     ]
     .align_y(Alignment::Center);
     let mut c = column![head, body].spacing(12);
@@ -373,7 +373,7 @@ pub fn discover_album_page<'a>(app: &'a App, id: &str) -> El<'a> {
                 let no = format!("{}{}", if multi { format!("{}.", t["disc"].as_u64().unwrap_or(1)) } else { String::new() }, t["no"].as_str().map(String::from).or_else(|| t["no"].as_u64().map(|n| n.to_string())).unwrap_or_default());
                 let secs = t["lengthMs"].as_u64().map(|m| m / 1000);
                 let len = secs.map(|s| format!("{}:{:02}", s / 60, s % 60)).unwrap_or_default();
-                container(row![ui::dim(no, 13).width(40), text(clip(t["title"].as_str().unwrap_or(""), 70)).size(15).width(Length::Fill), ui::dim(len, 13)].spacing(10).align_y(Alignment::Center))
+                container(row![ui::dim(no, 13).width(40), ui::txt(clip(t["title"].as_str().unwrap_or(""), 70)).size(15).width(Length::Fill), ui::dim(len, 13)].spacing(10).align_y(Alignment::Center))
                     .padding([8, 12])
                     .into()
             })
@@ -397,7 +397,7 @@ pub fn artist_get_more<'a>(app: &'a App, name: &str) -> Option<El<'a>> {
     let rows: Vec<El> = missing.iter().take(6).map(|a| found_row(app, a, "albums", true)).collect();
     let head = row![
         column![ui::title("Get more", 22), ui::dim(format!("More by {name} that isn't in your library yet."), 13)].spacing(4).width(Length::Fill),
-        button(text("See all releases").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))),
+        button(ui::txt("See all releases").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))),
     ]
     .align_y(Alignment::Center);
     Some(column![head, Column::with_children(rows).spacing(2)].spacing(10).into())
@@ -419,7 +419,7 @@ pub fn requests(app: &App) -> El<'_> {
     c = c.push(ui::title("Downloading", 22));
     let items: Vec<serde_json::Value> = f.queue.as_ref().and_then(|q| q["items"].as_array().cloned()).unwrap_or_default();
     if let Some(e) = f.queue.as_ref().and_then(|q| q["error"].as_str()) {
-        c = c.push(container(text(e).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+        c = c.push(container(ui::txt(e).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
     } else if items.is_empty() {
         c = c.push(ui::dim("Nothing downloading right now.", 13));
     }
@@ -450,7 +450,7 @@ pub fn requests(app: &App) -> El<'_> {
             None => ui::cover(None, &title, 48.0),
         };
         let bar = iced::widget::progress_bar(0.0..=100.0, pct as f32).height(4).style(|_: &iced::Theme| iced::widget::progress_bar::Style { background: ui::SURFACE_3().into(), bar: ui::ACCENT().into(), border: iced::border::rounded(2.0) });
-        c = c.push(container(row![art, column![text(clip(&title, 60)).size(15), ui::dim(artist, 12), bar, ui::dim(meta, 12)].spacing(3).width(Length::Fill)].spacing(14).align_y(Alignment::Center)).padding([6, 12]));
+        c = c.push(container(row![art, column![ui::txt(clip(&title, 60)).size(15), ui::dim(artist, 12), bar, ui::dim(meta, 12)].spacing(3).width(Length::Fill)].spacing(14).align_y(Alignment::Center)).padding([6, 12]));
     }
     if f.requests.is_empty() {
         return c
@@ -479,7 +479,7 @@ pub fn requests(app: &App) -> El<'_> {
         let sub = format!("{}Requested by {who} · {}", if artist_req { String::new() } else { format!("{} · ", r.artist) }, ago(r.at));
         let mut line = row![
             art,
-            column![text(clip(&name, 60)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)
+            column![ui::txt(clip(&name, 60)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)
         ]
         .spacing(14)
         .align_y(Alignment::Center);
@@ -522,7 +522,7 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str, link: bool) -> El<'
     let asked = |id: &Option<String>| id.as_ref().map(|i| app.find.asked.contains(i)).unwrap_or(false);
     let get = |label: &'a str, k: &'static str, id: String, primary: bool| -> El<'a> {
         let busy = app.find.asking.contains(&id);
-        button(row![ic(icon::DOWNLOAD, 12), text(if busy { "Asking…" } else { label }).size(13)].spacing(6).align_y(Alignment::Center))
+        button(row![ic(icon::DOWNLOAD, 12), ui::txt(if busy { "Asking…" } else { label }).size(13)].spacing(6).align_y(Alignment::Center))
             .padding([6, 14])
             .style(if primary { ui::primary } else { ui::secondary })
             .on_press_maybe((!busy).then_some(Message::RequestMusic(k.to_string(), id)))
@@ -535,10 +535,10 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str, link: bool) -> El<'
             (serde_json::Value::String(v), true) => Some(Message::Go(Page::Artist(v.clone()))),
             _ => None,
         };
-        let mut r = row![button(row![ic(icon::DOWNLOADED, 12), text("In your library").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press_maybe(go)].spacing(6);
+        let mut r = row![button(row![ic(icon::DOWNLOADED, 12), ui::txt("In your library").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press_maybe(go)].spacing(6);
         if let (true, Some(id)) = (is_artist, &s.foreign_id) {
             // you have some of their music: this is how to find and get the rest
-            r = r.push(button(text("More from them").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))));
+            r = r.push(button(ui::txt("More from them").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::Go(Page::Discover(id.clone()))));
         }
         r.into()
     } else if s.requested || asked(&s.foreign_id) || asked(&s.album_id) || asked(&s.single_id) {
@@ -580,7 +580,7 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str, link: bool) -> El<'
         let id = if kind == "songs" { s.album_id.clone().or_else(|| s.single_id.clone()) } else { s.foreign_id.clone() };
         id.map(|id| Message::Go(Page::DiscoverAlbum(id)))
     });
-    button(row![art, column![text(clip(&s.label(), 60)).size(15), ui::dim(clip(&sub.join(" · "), 70), 12)].spacing(2).width(Length::Fill), action].spacing(14).align_y(Alignment::Center))
+    button(row![art, column![ui::txt(clip(&s.label(), 60)).size(15), ui::dim(clip(&sub.join(" · "), 70), 12)].spacing(2).width(Length::Fill), action].spacing(14).align_y(Alignment::Center))
         .padding([8, 10])
         .width(Length::Fill)
         .style(move |t, st| {
@@ -597,7 +597,7 @@ fn found_row<'a>(app: &'a App, s: &'a FoundItem, kind: &str, link: bool) -> El<'
 
 /// A link-looking text button (names in Credits).
 fn link<'a>(label: String, to: Message) -> El<'a> {
-    button(text(label).size(15)).padding(0).on_press(to).style(|_, s| button::Style {
+    button(ui::txt(label).size(15)).padding(0).on_press(to).style(|_, s| button::Style {
         text_color: if matches!(s, button::Status::Hovered) { ui::ACCENT() } else { ui::TEXT() },
         ..Default::default()
     }).into()
@@ -612,19 +612,19 @@ fn people_links<'a>(app: &'a App, names: &str) -> El<'a> {
         if app.lib.has_artist(n) {
             parts.push(link(n.to_string(), Message::Go(Page::Artist(n.to_string()))));
         } else {
-            parts.push(text(n.to_string()).size(15).into());
+            parts.push(ui::txt(n.to_string()).size(15).into());
         }
     };
     for (i, piece) in names.split(", ").enumerate() {
         if i > 0 {
-            parts.push(text(", ").size(15).into());
+            parts.push(ui::txt(", ").size(15).into());
         }
         if app.lib.has_artist(piece) || !piece.contains(" & ") {
             push_name(&mut parts, piece);
         } else {
             for (j, n) in piece.split(" & ").enumerate() {
                 if j > 0 {
-                    parts.push(text(" & ").size(15).into());
+                    parts.push(ui::txt(" & ").size(15).into());
                 }
                 push_name(&mut parts, n);
             }
@@ -635,7 +635,7 @@ fn people_links<'a>(app: &'a App, names: &str) -> El<'a> {
 
 pub fn credits<'a>(app: &'a App, t: &'a Track) -> El<'a> {
     let album = app.lib.album_of(t);
-    let row_of = |k: String, v: String| -> El<'a> { row![container(ui::dim(k, 14)).width(150), text(v).size(15)].spacing(16).into() };
+    let row_of = |k: String, v: String| -> El<'a> { row![container(ui::dim(k, 14)).width(150), ui::txt(v).size(15)].spacing(16).into() };
     let row_el = |k: String, v: El<'a>| -> El<'a> { row![container(ui::dim(k, 14)).width(150), v].spacing(16).into() };
     let own: Vec<&volvix_core::Credit> = t.credits.iter().filter(|c| c.role != "ISRC").collect();
     let mut people = Column::new().spacing(10).push(row_el("Artist".into(), people_links(app, &t.artist)));
@@ -717,9 +717,9 @@ pub fn household(app: &App) -> El<'_> {
             .map(|i| {
                 container(
                     row![
-                        column![text(format!("{} invited you to \"{}\"", i.owner_name, i.name)).size(15), ui::dim(format!("{} songs · collaborative", i.count), 12)].spacing(2).width(Length::Fill),
-                        button(text("Accept").size(13)).padding([6, 16]).style(ui::primary).on_press(Message::SharedOp(i.id.clone(), serde_json::json!({ "op": "accept" }))),
-                        button(text("Decline").size(13)).padding([6, 16]).style(ui::secondary).on_press(Message::SharedOp(i.id.clone(), serde_json::json!({ "op": "decline" }))),
+                        column![ui::txt(format!("{} invited you to \"{}\"", i.owner_name, i.name)).size(15), ui::dim(format!("{} songs · collaborative", i.count), 12)].spacing(2).width(Length::Fill),
+                        button(ui::txt("Accept").size(13)).padding([6, 16]).style(ui::primary).on_press(Message::SharedOp(i.id.clone(), serde_json::json!({ "op": "accept" }))),
+                        button(ui::txt("Decline").size(13)).padding([6, 16]).style(ui::secondary).on_press(Message::SharedOp(i.id.clone(), serde_json::json!({ "op": "decline" }))),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),
@@ -746,11 +746,11 @@ pub fn household(app: &App) -> El<'_> {
                 let live = n["listening"].as_bool().unwrap_or(false);
                 let id = n["id"].as_str().or(n["trackId"].as_str()).unwrap_or("").to_string();
                 let lead: El = if live { crate::marks::eq(true, 12.0) } else { ui::dim(format!("Last played {}", n["at"].as_u64().map(ago).unwrap_or_default()), 13).into() };
-                let song = text(clip(&format!("{title} Â· {artist}"), 40)).size(13).color(ui::TEXT()).wrapping(text::Wrapping::None);
+                let song = ui::txt(clip(&format!("{title} Â· {artist}"), 40)).size(13).color(ui::TEXT()).wrapping(text::Wrapping::None);
                 (live, row![lead, song].spacing(8).align_y(Alignment::Center).into(), (!id.is_empty()).then_some(id))
             }
         };
-        let mut r = row![ui::avatar_key::<Message>(&m.id, &m.name, 44.0), column![text(m.name.clone()).size(15).font(ui::FONT_BOLD), line].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
+        let mut r = row![ui::avatar_key::<Message>(&m.id, &m.name, 44.0), column![ui::txt(m.name.clone()).size(15).font(ui::FONT_BOLD), line].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
         if let Some(id) = play {
             r = r.push(ui::tip(button(ui::wi("play", 18.0, ui::TEXT())).padding(8).style(ui::secondary).on_press(Message::PlayTracks(vec![id], 0, format!("{}'s pick", m.name))), "Play this song"));
         }
@@ -814,7 +814,7 @@ pub fn notifications(app: &App) -> El<'_> {
         if tick {
             r = r.push(ui::wi("check", 14.0, ui::TEXT_2()));
         }
-        r.push(text(label).size(13).font(ui::FONT_BOLD).color(ui::TEXT_2())).into()
+        r.push(ui::txt(label).size(13).font(ui::FONT_BOLD).color(ui::TEXT_2())).into()
     };
     let mut list = Column::new().spacing(6);
     for n in &app.notes.items {
@@ -857,7 +857,7 @@ pub fn notifications(app: &App) -> El<'_> {
                 row![
                     dot,
                     container(ui::wi(icon_name, 18.0, ui::TEXT_2())).width(36).height(36).center_x(36).center_y(36).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(18.0), ..Default::default() }),
-                    column![text(n.text.clone()).size(15), text(ago(n.at)).size(12).color(ui::TEXT_3())].spacing(2).width(Length::Fill),
+                    column![ui::txt(n.text.clone()).size(15), ui::txt(ago(n.at)).size(12).color(ui::TEXT_3())].spacing(2).width(Length::Fill),
                     actions,
                 ]
                 .spacing(8)
@@ -878,7 +878,7 @@ fn card_section<'a>(title: &'a str, body: El<'a>) -> El<'a> {
 }
 
 fn setting_row<'a>(title: impl text::IntoFragment<'a>, sub: impl text::IntoFragment<'a>, control: El<'a>) -> El<'a> {
-    container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).width(Length::Fill), control].spacing(16).align_y(Alignment::Center)).padding([10, 4]).into()
+    container(row![column![ui::txt(title).size(15), ui::dim(sub, 13)].spacing(2).width(Length::Fill), control].spacing(16).align_y(Alignment::Center)).padding([10, 4]).into()
 }
 
 /// The website's description box: a few lines tall.
@@ -905,12 +905,12 @@ fn desc_box<'a>(app: &'a App) -> El<'a> {
 
 /// A small label above a form field, like the website's.
 fn labelled<'a>(label: &'a str, field: El<'a>) -> El<'a> {
-    column![text(label).size(13).font(ui::FONT_BOLD), field].spacing(6).into()
+    column![ui::txt(label).size(13).font(ui::FONT_BOLD), field].spacing(6).into()
 }
 
 /// The website's switch row: a bordered card with a title, a line of text and the switch.
 fn switch_card<'a>(title: &'a str, about: &'a str, on: bool, f: fn(bool) -> Message) -> El<'a> {
-    container(row![column![text(title).size(14).font(ui::FONT_BOLD), ui::dim(about, 13)].spacing(2).width(Length::Fill), switch(on, f)].spacing(16).align_y(Alignment::Center))
+    container(row![column![ui::txt(title).size(14).font(ui::FONT_BOLD), ui::dim(about, 13)].spacing(2).width(Length::Fill), switch(on, f)].spacing(16).align_y(Alignment::Center))
         .padding([12, 14])
         .width(Length::Fill)
         .style(|_: &iced::Theme| container::Style { border: iced::Border { color: ui::BORDER(), width: 1.0, radius: 10.0.into() }, ..Default::default() })
@@ -933,7 +933,7 @@ pub const PERMISSIONS: [(&str, &str, &str); 6] = [
 
 /// A row with a button: the button sits right after the text, not pushed to the far edge.
 fn action_row<'a>(title: impl text::IntoFragment<'a>, sub: impl text::IntoFragment<'a>, control: El<'a>) -> El<'a> {
-    container(row![column![text(title).size(15), ui::dim(sub, 13)].spacing(2).max_width(520), control].spacing(24).align_y(Alignment::Center)).padding([10, 4]).into()
+    container(row![column![ui::txt(title).size(15), ui::dim(sub, 13)].spacing(2).max_width(520), control].spacing(24).align_y(Alignment::Center)).padding([10, 4]).into()
 }
 
 /* ---------- Rewind: your year in music ---------- */
@@ -1007,9 +1007,9 @@ pub fn rewind(app: &App) -> El<'_> {
         v
     }
     let (artists, albums) = (rank(artists), rank(albums));
-    let stat = |n: String, label: &'static str| -> El<'static> { column![text(n).size(30).font(ui::FONT_BOLD), ui::dim(label, 13)].spacing(2).into() };
+    let stat = |n: String, label: &'static str| -> El<'static> { column![ui::txt(n).size(30).font(ui::FONT_BOLD), ui::dim(label, 13)].spacing(2).into() };
     let hero = column![
-        text(y.to_string()).size(56).font(ui::FONT_BOLD).color(ui::ACCENT()),
+        ui::txt(y.to_string()).size(56).font(ui::FONT_BOLD).color(ui::ACCENT()),
         ui::title("Your year in music", 28),
         row![stat(minutes.to_string(), "minutes listened"), stat(plays.to_string(), "plays"), stat(songs.len().to_string(), "different songs")].spacing(40),
     ]
@@ -1020,9 +1020,9 @@ pub fn rewind(app: &App) -> El<'_> {
     for (i, (t, n)) in songs.iter().take(5).enumerate() {
         rows = rows.push(
             row![
-                container(text((i + 1).to_string()).size(15).color(ui::TEXT_2())).width(24),
+                container(ui::txt((i + 1).to_string()).size(15).color(ui::TEXT_2())).width(24),
                 cover_of(app, app.lib.album_of(t), 44.0),
-                column![text(clip(&t.title, 40)).size(15), ui::dim(clip(&t.artist, 40), 12)].spacing(2).width(Length::Fill),
+                column![ui::txt(clip(&t.title, 40)).size(15), ui::dim(clip(&t.artist, 40), 12)].spacing(2).width(Length::Fill),
                 ui::dim(format!("{n} plays"), 13),
             ]
             .spacing(12)
@@ -1030,14 +1030,14 @@ pub fn rewind(app: &App) -> El<'_> {
         );
     }
     let top_songs = column![
-        row![ui::title("Top songs", 22), horizontal_space(), button(row![ic(icon::PLAY, 13), text("Play them").size(13)].spacing(8).align_y(Alignment::Center)).padding([7, 16]).style(ui::secondary).on_press(Message::PlayTracks(top_ids, 0, format!("Your {y} Rewind")))].align_y(Alignment::Center),
+        row![ui::title("Top songs", 22), horizontal_space(), button(row![ic(icon::PLAY, 13), ui::txt("Play them").size(13)].spacing(8).align_y(Alignment::Center)).padding([7, 16]).style(ui::secondary).on_press(Message::PlayTracks(top_ids, 0, format!("Your {y} Rewind")))].align_y(Alignment::Center),
         rows,
     ]
     .spacing(12);
 
     let mut chips = Row::new().spacing(8);
     for (i, (name, n)) in artists.iter().take(5).enumerate() {
-        chips = chips.push(button(text(format!("{}  {}  ·  {n} plays", i + 1, clip(name, 22))).size(13)).padding([8, 14]).style(ui::chip(false)).on_press(Message::Go(Page::Artist(name.to_string()))));
+        chips = chips.push(button(ui::txt(format!("{}  {}  ·  {n} plays", i + 1, clip(name, 22))).size(13)).padding([8, 14]).style(ui::chip(false)).on_press(Message::Go(Page::Artist(name.to_string()))));
     }
     let top_artists = column![ui::title("Top artists", 22), scrollable(chips).direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().width(4).scroller_width(4))).style(ui::scroller)].spacing(12);
 
@@ -1050,7 +1050,7 @@ pub fn rewind(app: &App) -> El<'_> {
         let mut other = Row::new().spacing(8).align_y(Alignment::Center);
         other = other.push(ui::dim("Other years:", 13));
         for v in done {
-            other = other.push(button(text(v.to_string()).size(13)).padding([6, 12]).style(ui::chip(false)).on_press(Message::RewindYear(v)));
+            other = other.push(button(ui::txt(v.to_string()).size(13)).padding([6, 12]).style(ui::chip(false)).on_press(Message::RewindYear(v)));
         }
         page = page.push(other);
     }
@@ -1066,13 +1066,13 @@ fn manage_dialog<'a>(app: &'a App, id: &'a str, password: &'a str, error: &'a Op
     let switch_row = |title: &'a str, sub: String, on: bool, key: String, enabled: bool| -> El<'a> {
         let t = toggler(on).size(22).style(ui::switch_style);
         let t = if enabled { t.on_toggle(move |_| Message::ManageToggle(key.clone())) } else { t };
-        container(row![column![text(title).size(14), ui::dim(sub, 12)].spacing(2).width(Length::Fill), t].spacing(12).align_y(Alignment::Center)).padding([6, 0]).into()
+        container(row![column![ui::txt(title).size(14), ui::dim(sub, 12)].spacing(2).width(Length::Fill), t].spacing(12).align_y(Alignment::Center)).padding([6, 0]).into()
     };
     let mut c = column![
         ui::title(format!("Manage {}", m.name), 22),
-        row![ui::avatar_key::<Message>(&m.id, &m.name, 48.0), column![text(m.name.clone()).size(15).font(ui::FONT_BOLD), ui::dim(m.role(), 12)].spacing(2)].spacing(12).align_y(Alignment::Center),
+        row![ui::avatar_key::<Message>(&m.id, &m.name, 48.0), column![ui::txt(m.name.clone()).size(15).font(ui::FONT_BOLD), ui::dim(m.role(), 12)].spacing(2)].spacing(12).align_y(Alignment::Center),
         switch_row("Turn off explicit music", "Songs marked explicit stay listed but are skipped for them.".into(), m.hide_explicit, "hideExplicit".into(), true),
-        text(format!("What {} can do", m.name)).size(13).font(ui::FONT_BOLD),
+        ui::txt(format!("What {} can do", m.name)).size(13).font(ui::FONT_BOLD),
     ]
     .spacing(8);
     for (key, title, about) in PERMISSIONS {
@@ -1082,28 +1082,28 @@ fn manage_dialog<'a>(app: &'a App, id: &'a str, password: &'a str, error: &'a Op
     }
     c = c.push(
         row![
-            button(text("Everything (admin)").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe(me.admin.then_some(Message::ManagePreset(true))),
-            button(text("Basics only").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManagePreset(false)),
+            button(ui::txt("Everything (admin)").size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe(me.admin.then_some(Message::ManagePreset(true))),
+            button(ui::txt("Basics only").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManagePreset(false)),
         ]
         .spacing(8),
     );
     c = c.push(field_dialog("New password", password));
     c = c.push(
         row![
-            button(text("Set new password").size(13)).padding([8, 16]).style(ui::secondary).on_press_maybe((!password.is_empty()).then_some(Message::ManagePassword)),
+            button(ui::txt("Set new password").size(13)).padding([8, 16]).style(ui::secondary).on_press_maybe((!password.is_empty()).then_some(Message::ManagePassword)),
             ui::dim("They're signed out everywhere and use this password next time.", 12),
         ]
         .spacing(12)
         .align_y(Alignment::Center),
     );
     if let Some(e) = error {
-        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+        c = c.push(container(ui::txt(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
     }
     c = c.push(
         row![
-            button(text(if confirm_remove { format!("Really remove {}? Click again", m.name) } else { format!("Remove {}", m.name) }).size(13).color(ui::ACCENT())).padding([8, 16]).style(ui::secondary).on_press(Message::ManageRemove),
+            button(ui::txt(if confirm_remove { format!("Really remove {}? Click again", m.name) } else { format!("Remove {}", m.name) }).size(13).color(ui::ACCENT())).padding([8, 16]).style(ui::secondary).on_press(Message::ManageRemove),
             horizontal_space(),
-            button(text("Done").size(14)).padding([8, 18]).style(ui::primary).on_press(Message::DialogCancel),
+            button(ui::txt("Done").size(14)).padding([8, 18]).style(ui::primary).on_press(Message::DialogCancel),
         ]
         .align_y(Alignment::Center),
     );
@@ -1111,7 +1111,7 @@ fn manage_dialog<'a>(app: &'a App, id: &'a str, password: &'a str, error: &'a Op
 }
 
 fn field_dialog<'a>(label: &'a str, value: &'a str) -> El<'a> {
-    column![text(label).size(13).font(ui::FONT_BOLD), text_input("At least 8 characters", value).on_input(|s| Message::DialogText(0, s)).secure(true).padding(10).size(15).style(ui::input)].spacing(6).into()
+    column![ui::txt(label).size(13).font(ui::FONT_BOLD), text_input("At least 8 characters", value).on_input(|s| Message::DialogText(0, s)).secure(true).padding(10).size(15).style(ui::input)].spacing(6).into()
 }
 
 /* ---------- Account: Profile, Members, Settings (three tabs, like the website) ---------- */
@@ -1124,7 +1124,7 @@ pub fn account(app: &App) -> El<'_> {
     };
     let may_members = app.me.as_ref().map(|m| m.user.admin || m.user.perms.iter().any(|p| p == "members")).unwrap_or(false);
     let item = |name: &'static str, label: &'static str, page: Page, on: bool| -> El<'static> {
-        button(row![ui::wi(name, 16.0, if on { ui::ACCENT() } else { ui::TEXT_2() }), text(label).size(14)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([10, 14]).style(ui::nav(on)).on_press(Message::Go(page)).into()
+        button(row![ui::wi(name, 16.0, if on { ui::ACCENT() } else { ui::TEXT_2() }), ui::txt(label).size(14)].spacing(12).align_y(Alignment::Center)).width(Length::Fill).padding([10, 14]).style(ui::nav(on)).on_press(Message::Go(page)).into()
     };
     let mut tabs = column![item("user", "Profile", Page::Profile, tab == 0)].spacing(2);
     if may_members {
@@ -1160,7 +1160,7 @@ fn field<'a>(label: &'a str, value: &'a str, n: u8, secret: bool, hint: Option<&
     if let Some(m) = submit {
         input = input.on_submit(m);
     }
-    let mut c = column![text(label).size(13).font(ui::FONT_BOLD), input].spacing(6);
+    let mut c = column![ui::txt(label).size(13).font(ui::FONT_BOLD), input].spacing(6);
     if let Some(h) = hint {
         c = c.push(ui::dim(h, 12).color(ui::TEXT_3()));
     }
@@ -1172,12 +1172,12 @@ fn profile(app: &App) -> El<'_> {
     let name: &str = app.profile_name.as_deref().or(app.me.as_ref().map(|m| m.user.name.as_str())).unwrap_or("");
     let you = column![
         field("Your name", name, 0, false, Some("This is also what you sign in with, on every device."), Some(Message::SaveName)),
-        button(text("Save name").size(14)).padding([10, 22]).style(ui::primary).on_press(Message::SaveName),
+        button(ui::txt("Save name").size(14)).padding([10, 22]).style(ui::primary).on_press(Message::SaveName),
         row![
             ui::avatar_pic::<Message>(app.avatar_handle(&user.id, user.avatar), "u_me", &user.name, 56.0),
-            column![text(user.name.clone()).size(15), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(2).width(Length::Fill),
-            button(row![ic(icon::PERSON, 13), text("Change picture").size(13)].spacing(8).align_y(Alignment::Center)).padding([7, 16]).style(ui::secondary).on_press(Message::PickPicture),
-            button(text("Remove").size(13)).padding([7, 14]).style(ui::flat).on_press_maybe((user.avatar > 0).then_some(Message::RemovePicture)),
+            column![ui::txt(user.name.clone()).size(15), ui::dim(if user.admin { "Admin" } else { "Member" }, 12)].spacing(2).width(Length::Fill),
+            button(row![ic(icon::PERSON, 13), ui::txt("Change picture").size(13)].spacing(8).align_y(Alignment::Center)).padding([7, 16]).style(ui::secondary).on_press(Message::PickPicture),
+            button(ui::txt("Remove").size(13)).padding([7, 14]).style(ui::flat).on_press_maybe((user.avatar > 0).then_some(Message::RemovePicture)),
         ]
         .spacing(10)
         .spacing(14)
@@ -1187,10 +1187,10 @@ fn profile(app: &App) -> El<'_> {
     let password = column![
         field("Current password", app.pw_current.as_str(), 1, true, None, None),
         field("New password", app.pw_new.as_str(), 2, true, Some("At least 8 characters. Your other devices will need to sign in again."), Some(Message::SavePassword)),
-        button(text("Change password").size(14)).padding([10, 22]).style(ui::primary).on_press_maybe((!app.pw_current.is_empty() && !app.pw_new.is_empty()).then_some(Message::SavePassword)),
+        button(ui::txt("Change password").size(14)).padding([10, 22]).style(ui::primary).on_press_maybe((!app.pw_current.is_empty() && !app.pw_new.is_empty()).then_some(Message::SavePassword)),
     ]
     .spacing(14);
-    let sign_out = action_row("Sign out on this device", "Your playlists and settings stay on the server.", button(text("Sign out").size(13)).padding([8, 16]).style(ui::secondary).on_press(Message::SignOut).into());
+    let sign_out = action_row("Sign out on this device", "Your playlists and settings stay on the server.", button(ui::txt("Sign out").size(13)).padding([8, 16]).style(ui::secondary).on_press(Message::SignOut).into());
     column![card_section("You", you.into()), card_section("Password", password.into()), card_section("Sign out", sign_out)].spacing(28).into()
 }
 
@@ -1202,9 +1202,9 @@ fn members(app: &App) -> El<'_> {
     let mut list = Column::new().spacing(10);
     for m in &app.members {
         let you = if m.id == me { " (you)" } else { "" };
-        let mut line = row![ui::avatar_pic::<Message>(app.avatar_handle(&m.id, m.avatar), &m.id, &m.name, 36.0), column![text(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2).width(Length::Fixed(300.0))].spacing(12).align_y(Alignment::Center);
+        let mut line = row![ui::avatar_pic::<Message>(app.avatar_handle(&m.id, m.avatar), &m.id, &m.name, 36.0), column![ui::txt(format!("{}{you}", m.name)).size(15), ui::dim(m.role(), 12)].spacing(2).width(Length::Fixed(300.0))].spacing(12).align_y(Alignment::Center);
         if m.id != me && can_manage(m) {
-            line = line.push(button(text("Manage").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManageMember(m.id.clone())));
+            line = line.push(button(ui::txt("Manage").size(13)).padding([6, 14]).style(ui::secondary).on_press(Message::ManageMember(m.id.clone())));
         }
         list = list.push(line);
     }
@@ -1221,9 +1221,9 @@ fn members(app: &App) -> El<'_> {
     ]
     .spacing(14);
     if let Some(e) = &app.member_error {
-        add = add.push(container(text(e.as_str()).size(13)).padding([8, 10]).style(ui::error_box));
+        add = add.push(container(ui::txt(e.as_str()).size(13)).padding([8, 10]).style(ui::error_box));
     }
-    add = add.push(button(row![ic(icon::ADD, 14), text("Add to household").size(14)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::primary).on_press(Message::AddMember));
+    add = add.push(button(row![ic(icon::ADD, 14), ui::txt("Add to household").size(14)].spacing(8).align_y(Alignment::Center)).padding([10, 22]).style(ui::primary).on_press(Message::AddMember));
     column![first, card_section("Add a member", add.into())].spacing(28).into()
 }
 
@@ -1243,7 +1243,7 @@ fn settings(app: &App) -> El<'_> {
         Some(crate::update::State::Ready(v)) => format!("Version {v} is installed. The app restarts to use it."),
         Some(crate::update::State::Failed(m)) => m.clone(),
     };
-    let btn = |label: &'static str, m: Option<Message>| -> El<'static> { button(text(label).size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe(m).into() };
+    let btn = |label: &'static str, m: Option<Message>| -> El<'static> { button(ui::txt(label).size(13)).padding([6, 14]).style(ui::secondary).on_press_maybe(m).into() };
     let nothing = || -> El<'static> { iced::widget::Space::new(0, 0).into() };
 
     let privacy = column![
@@ -1377,9 +1377,9 @@ fn settings(app: &App) -> El<'_> {
                     shares = shares.push(
                         container(
                             row![
-                                column![text(s.name.clone()).size(15), ui::dim(count, 13)].spacing(2).width(Length::Fill),
-                                button(row![ic(icon::LINK, 13), text("Copy link").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press(Message::ShareCopy(s.path.clone())),
-                                button(text("Cancel").size(13)).padding([6, 14]).style(ui::flat).on_press(Message::ShareCancel(s.token.clone())),
+                                column![ui::txt(s.name.clone()).size(15), ui::dim(count, 13)].spacing(2).width(Length::Fill),
+                                button(row![ic(icon::LINK, 13), ui::txt("Copy link").size(13)].spacing(6).align_y(Alignment::Center)).padding([6, 14]).style(ui::secondary).on_press(Message::ShareCopy(s.path.clone())),
+                                button(ui::txt("Cancel").size(13)).padding([6, 14]).style(ui::flat).on_press(Message::ShareCancel(s.token.clone())),
                             ]
                             .spacing(8)
                             .align_y(Alignment::Center),
@@ -1412,7 +1412,7 @@ fn select<'a>(label: &'a str, options: Vec<String>, selected: Option<String>, wh
     // like a drop-down on the website: nothing chosen yet shows the first one
     let selected = selected.filter(|s| options.contains(s)).or_else(|| options.first().cloned());
     let mut c = column![
-        text(label).size(13).font(ui::FONT_BOLD),
+        ui::txt(label).size(13).font(ui::FONT_BOLD),
         iced::widget::pick_list(options, selected, move |n: String| Message::LidarrPick(which, n)).padding([11, 12]).text_size(15).width(Length::Fill).style(ui::pick_style).menu_style(ui::pick_menu),
     ]
     .spacing(6);
@@ -1430,8 +1430,8 @@ fn lidarr_section(app: &App) -> El<'_> {
     let url: &str = app.lidarr_url.as_deref().or(s["url"].as_str()).unwrap_or("");
     let status: El = if configured {
         match v["error"].as_str() {
-            Some(e) => container(text(e.to_string()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box).into(),
-            None => row![ic(icon::DOWNLOADED, 14), text(format!("Connected to Lidarr {}", l["version"].as_str().unwrap_or(""))).size(14)].spacing(8).align_y(Alignment::Center).into(),
+            Some(e) => container(ui::txt(e.to_string()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box).into(),
+            None => row![ic(icon::DOWNLOADED, 14), ui::txt(format!("Connected to Lidarr {}", l["version"].as_str().unwrap_or(""))).size(14)].spacing(8).align_y(Alignment::Center).into(),
         }
     } else {
         ui::dim("Connect Lidarr to search for music you don't have and add it to this server automatically. Lidarr finds and downloads it with the sources you set up there.", 13).into()
@@ -1449,11 +1449,11 @@ fn lidarr_section(app: &App) -> El<'_> {
             .push(ui::dim("Who may ask for music is set per member (Members → Manage → Request music).", 12));
     }
     if let Some(e) = &app.lidarr_error {
-        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+        c = c.push(container(ui::txt(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
     }
-    let mut actions = Row::new().spacing(10).push(button(text(if configured { "Save" } else { "Connect" }).size(14)).padding([10, 22]).style(ui::primary).on_press(Message::LidarrSave));
+    let mut actions = Row::new().spacing(10).push(button(ui::txt(if configured { "Save" } else { "Connect" }).size(14)).padding([10, 22]).style(ui::primary).on_press(Message::LidarrSave));
     if configured {
-        actions = actions.push(button(text("Disconnect").size(14)).padding([10, 18]).style(ui::flat).on_press(Message::LidarrOff));
+        actions = actions.push(button(ui::txt("Disconnect").size(14)).padding([10, 18]).style(ui::flat).on_press(Message::LidarrOff));
     }
     c = c.push(actions);
     if configured {
@@ -1478,7 +1478,7 @@ fn eq_panel(eq: &crate::eq::EqSettings) -> El<'static> {
             container(iced::widget::slider(-12.0..=6.0, eq.pre_db, Message::EqPre).step(1.0_f32).style(ui::vslider_style)).width(180),
         ]
         .spacing(10),
-        button(text("Reset").size(13)).padding([6, 14]).style(ui::flat).on_press(Message::EqReset),
+        button(ui::txt("Reset").size(13)).padding([6, 14]).style(ui::flat).on_press(Message::EqReset),
     ]
     .spacing(24)
     .align_y(Alignment::End);
@@ -1506,7 +1506,7 @@ fn folder_dialog<'a>(browse: &'a Option<volvix_core::admin::Browse>, error: &'a 
         None => c = c.push(ui::dim("Loading…", 13)),
         Some(b) => {
             if b.denied {
-                c = c.push(container(text("Volvix isn't allowed to read this folder. The user the server runs as needs read access to it.").size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+                c = c.push(container(ui::txt("Volvix isn't allowed to read this folder. The user the server runs as needs read access to it.").size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
             }
             if b.missing {
                 c = c.push(ui::dim("That folder doesn't exist on the server, so this is the closest one that does.", 12));
@@ -1514,14 +1514,14 @@ fn folder_dialog<'a>(browse: &'a Option<volvix_core::admin::Browse>, error: &'a 
             if b.docker {
                 c = c.push(ui::dim("Volvix is running in Docker, so it only sees folders you mounted into the container.", 12));
             }
-            c = c.push(row![ic(icon::LIBRARY, 14), text(b.path.clone()).size(13)].spacing(8).align_y(Alignment::Center));
+            c = c.push(row![ic(icon::LIBRARY, 14), ui::txt(b.path.clone()).size(13)].spacing(8).align_y(Alignment::Center));
             c = c.push(ui::dim(if b.songs_here > 0 { format!("{} song{} directly in this folder", b.songs_here, if b.songs_here == 1 { "" } else { "s" }) } else { "No songs directly in this folder (subfolders count too)".to_string() }, 12));
             let mut list = Column::new().spacing(2);
             if let Some(p) = &b.parent {
-                list = list.push(button(row![ic(icon::BACK, 13), text("Up one level").size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([8, 10]).style(ui::flat).on_press(Message::BrowseTo(p.clone())));
+                list = list.push(button(row![ic(icon::BACK, 13), ui::txt("Up one level").size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([8, 10]).style(ui::flat).on_press(Message::BrowseTo(p.clone())));
             }
             for d in &b.dirs {
-                list = list.push(button(row![ic(icon::LIBRARY, 13), text(d.name.clone()).size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([8, 10]).style(ui::flat).on_press(Message::BrowseTo(d.path.clone())));
+                list = list.push(button(row![ic(icon::LIBRARY, 13), ui::txt(d.name.clone()).size(14)].spacing(10).align_y(Alignment::Center)).width(Length::Fill).padding([8, 10]).style(ui::flat).on_press(Message::BrowseTo(d.path.clone())));
             }
             if b.dirs.is_empty() {
                 list = list.push(ui::dim("No folders in here.", 12));
@@ -1530,13 +1530,13 @@ fn folder_dialog<'a>(browse: &'a Option<volvix_core::admin::Browse>, error: &'a 
         }
     }
     if let Some(e) = error {
-        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+        c = c.push(container(ui::txt(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
     }
     c.push(
         row![
             horizontal_space(),
-            button(text("Cancel").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel),
-            button(text("Use this folder").size(14)).padding([8, 18]).style(ui::primary).on_press_maybe(browse.as_ref().map(|_| Message::ChooseFolder)),
+            button(ui::txt("Cancel").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel),
+            button(ui::txt("Use this folder").size(14)).padding([8, 18]).style(ui::primary).on_press_maybe(browse.as_ref().map(|_| Message::ChooseFolder)),
         ]
         .spacing(10),
     )
@@ -1549,14 +1549,14 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
     let buttons = |ok: &'a str, enabled: bool| -> El<'a> {
         row![
             horizontal_space(),
-            button(text("Cancel").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel),
-            button(text(ok).size(14)).padding([8, 18]).style(ui::primary).on_press_maybe(enabled.then_some(Message::DialogOk)),
+            button(ui::txt("Cancel").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel),
+            button(ui::txt(ok).size(14)).padding([8, 18]).style(ui::primary).on_press_maybe(enabled.then_some(Message::DialogOk)),
         ]
         .spacing(10)
         .into()
     };
     let field = |placeholder: &'a str, value: &'a str, n: u8| text_input(placeholder, value).on_input(move |s| Message::DialogText(n, s)).on_submit(Message::DialogOk).padding(10).size(15).style(ui::input);
-    let err = |e: &'a Option<String>| -> Option<El<'a>> { e.as_ref().map(|e| container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box).into()) };
+    let err = |e: &'a Option<String>| -> Option<El<'a>> { e.as_ref().map(|e| container(ui::txt(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box).into()) };
     match d {
         Dialog::NewPlaylist { name, description: _, add, collaborative, public } => {
             let title = if add.is_empty() { "New playlist".to_string() } else { format!("New playlist with {} song{}", add.len(), if add.len() == 1 { "" } else { "s" }) };
@@ -1584,7 +1584,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
         Dialog::AddTo { tracks } => {
             let mut list = Column::new().spacing(2);
             list = list.push(
-                button(row![container(ic(icon::ADD, 18)).width(44).height(44).center_x(44).center_y(44).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(6.0), ..Default::default() }), text("New playlist").size(15)].spacing(12).align_y(Alignment::Center))
+                button(row![container(ic(icon::ADD, 18)).width(44).height(44).center_x(44).center_y(44).style(|_| container::Style { background: Some(ui::SURFACE_3().into()), border: iced::border::rounded(6.0), ..Default::default() }), ui::txt("New playlist").size(15)].spacing(12).align_y(Alignment::Center))
                     .width(Length::Fill)
                     .padding(6)
                     .style(ui::flat)
@@ -1593,14 +1593,14 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             for p in app.playlists().into_iter().filter(|p| p.can_edit()) {
                 let all_in = tracks.iter().all(|t| p.tracks.contains(t));
                 let sub = format!("{}{} song{}", if p.is_shared() { "Collaborative · " } else { "" }, p.tracks.len(), if p.tracks.len() == 1 { "" } else { "s" });
-                let mut r = row![playlist_art(app, &p, 44.0), column![text(clip(&p.name, 40)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
+                let mut r = row![playlist_art(app, &p, 44.0), column![ui::txt(clip(&p.name, 40)).size(15), ui::dim(sub, 12)].spacing(2).width(Length::Fill)].spacing(12).align_y(Alignment::Center);
                 if all_in {
                     r = r.push(row![ui::wi("check", 14.0, ui::TEXT_2()), ui::dim("Added", 12)].spacing(4).align_y(Alignment::Center));
                 }
                 list = list.push(button(r).width(Length::Fill).padding(6).style(ui::flat).on_press_maybe((!all_in).then(|| Message::AddToChosen(p.id.clone()))));
             }
             let title = if tracks.len() == 1 { "Add to playlist".to_string() } else { format!("Add {} songs to a playlist", tracks.len()) };
-            column![ui::title(title, 22), scrollable(list).style(ui::scroller).height(Length::Shrink).height(380), row![horizontal_space(), button(text("Cancel").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel)]].spacing(14).into()
+            column![ui::title(title, 22), scrollable(list).style(ui::scroller).height(Length::Shrink).height(380), row![horizontal_space(), button(ui::txt("Cancel").size(14)).padding([8, 18]).style(ui::secondary).on_press(Message::DialogCancel)]].spacing(14).into()
         }
         Dialog::Password { current, new, error, busy } => {
             let mut c = column![
@@ -1655,7 +1655,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 let on = look.font == k;
                 let (f, upper) = ui::look_font(k);
                 let text_label = if upper { label.to_uppercase() } else { label.to_string() };
-                fonts = fonts.push(button(text(text_label).font(f).size(15).wrapping(text::Wrapping::None)).padding([7, 10]).style(move |t, st| {
+                fonts = fonts.push(button(ui::txt(text_label).font(f).size(15).wrapping(text::Wrapping::None)).padding([7, 10]).style(move |t, st| {
                     let mut x = ui::secondary(t, st);
                     x.border = iced::Border { color: if on { ui::ACCENT() } else { Color::TRANSPARENT }, width: 2.0, radius: 10.0.into() };
                     x
@@ -1680,7 +1680,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 }
                 let shown = cur.clone().unwrap_or_default();
                 row![
-                    container(text(label).size(13)).width(76),
+                    container(ui::txt(label).size(13)).width(76),
                     pal,
                     text_input(&ui::to_hex(def), &shown).on_input(move |v| Message::CoverColour(which, v)).padding(6).size(13).width(84).style(ui::input),
                 ]
@@ -1692,10 +1692,10 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 ui::title("Customize cover", 22),
                 row![
                     ui::cover_look::<Message>(name, 170.0, 6.0, look),
-                    column![text("Background").size(13).font(ui::FONT_BOLD), sw_rows, text("Font").size(13).font(ui::FONT_BOLD), Row::with_children(vec![fonts.wrap().into()])].spacing(8).width(Length::Fill),
+                    column![ui::txt("Background").size(13).font(ui::FONT_BOLD), sw_rows, ui::txt("Font").size(13).font(ui::FONT_BOLD), Row::with_children(vec![fonts.wrap().into()])].spacing(8).width(Length::Fill),
                 ]
                 .spacing(18),
-                text("Colours").size(13).font(ui::FONT_BOLD),
+                ui::txt("Colours").size(13).font(ui::FONT_BOLD),
                 colour_row("Primary", 0, &look.c1, d1),
                 colour_row("Secondary", 1, &look.c2, d2),
                 colour_row("Text", 2, &look.ink, d3),
@@ -1750,8 +1750,8 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
             rows.push(("Songs", format!("{} · {} min", tracks.len(), (secs / 60.0).round() as u64)));
             rows.push(("Quality", quality));
             if let Some(c) = &a.copyright { rows.push(("Copyright", c.clone())); }
-            let line = |k: &str, v: String| -> El<'_> { row![container(ui::dim(k.to_string(), 13)).width(130), text(v).size(14).width(Length::Fill)].spacing(8).into() };
-            let mut body = column![row![cover_of(app, Some(a), 56.0), column![text(a.title.clone()).size(16).font(ui::FONT_BOLD), ui::dim(a.artist.clone(), 13)].spacing(2)].spacing(12).align_y(Alignment::Center)].spacing(10);
+            let line = |k: &str, v: String| -> El<'_> { row![container(ui::dim(k.to_string(), 13)).width(130), ui::txt(v).size(14).width(Length::Fill)].spacing(8).into() };
+            let mut body = column![row![cover_of(app, Some(a), 56.0), column![ui::txt(a.title.clone()).size(16).font(ui::FONT_BOLD), ui::dim(a.artist.clone(), 13)].spacing(2)].spacing(12).align_y(Alignment::Center)].spacing(10);
             for (k, v) in rows {
                 body = body.push(line(k, v));
             }
@@ -1787,7 +1787,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                 None => {
                     c = c.push(ui::seg(&[("1", "1 day"), ("7", "7 days"), ("30", "30 days")], &day, |v| Message::ShareDays(v.parse().unwrap_or(7))));
                     if let Some(e) = error {
-                        c = c.push(container(text(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
+                        c = c.push(container(ui::txt(e.as_str()).size(13)).padding([8, 10]).width(Length::Fill).style(ui::error_box));
                     }
                     c = c.push(row![horizontal_space(), ui::btn("Close", ui::Btn::Secondary).on_press(Message::DialogCancel), ui::btn("Create link", ui::Btn::Primary).on_press_maybe((!*busy).then_some(Message::ShareCreate))].spacing(10));
                 }
@@ -1821,7 +1821,7 @@ pub fn dialog<'a>(app: &'a App, d: &'a Dialog) -> El<'a> {
                     let on = picked.contains(&uid);
                     let u2 = uid.clone();
                     c = c.push(
-                        row![ui::avatar_key::<Message>(&uid, &uname, 40.0), column![text(uname.clone()).size(15), ui::dim(state, 13)].spacing(1).width(Length::Fill), checkbox("", on).size(18).on_toggle(move |v| Message::PartyPick(u2.clone(), v))]
+                        row![ui::avatar_key::<Message>(&uid, &uname, 40.0), column![ui::txt(uname.clone()).size(15), ui::dim(state, 13)].spacing(1).width(Length::Fill), checkbox("", on).size(18).on_toggle(move |v| Message::PartyPick(u2.clone(), v))]
                             .spacing(12)
                             .align_y(Alignment::Center),
                     );
@@ -1895,7 +1895,7 @@ fn people_list<'a>(app: &'a App, picked: &'a [String], skip: &[String]) -> El<'a
 fn play_on(app: &App) -> El<'_> {
     let line = || -> El<'_> { container(iced::widget::Space::new(Length::Fill, 1)).width(Length::Fill).height(1).style(|_: &iced::Theme| container::Style { background: Some(ui::BORDER().into()), ..Default::default() }).into() };
     let item = |icon_name: &'static str, label: String, sub: Option<String>, on: bool, msg: Option<Message>, danger: bool| -> El<'_> {
-        let mut t = column![text(label).size(14).font(ui::FONT_BOLD).color(if danger { ui::ACCENT() } else { ui::TEXT() })].spacing(2);
+        let mut t = column![ui::txt(label).size(14).font(ui::FONT_BOLD).color(if danger { ui::ACCENT() } else { ui::TEXT() })].spacing(2);
         if let Some(s) = sub {
             t = t.push(ui::dim(s, 12));
         }
@@ -1906,7 +1906,7 @@ fn play_on(app: &App) -> El<'_> {
             .on_press_maybe(msg)
             .into()
     };
-    let mut c = column![container(column![text("Play on").size(14).font(ui::FONT_BOLD), ui::dim("One device plays at a time", 12)].spacing(2)).padding([8, 12]), line()].spacing(4);
+    let mut c = column![container(column![ui::txt("Play on").size(14).font(ui::FONT_BOLD), ui::dim("One device plays at a time", 12)].spacing(2)).padding([8, 12]), line()].spacing(4);
     let mut list = Column::new().spacing(2);
     let casting = app.cast.as_ref();
     let here_active = app.dev_active.as_deref().map(|a| a == app.dev_id).unwrap_or(true);
