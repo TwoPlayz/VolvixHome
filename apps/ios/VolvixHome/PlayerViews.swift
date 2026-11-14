@@ -103,6 +103,15 @@ struct NowPlayingView: View {
         player.currentID.flatMap { app.track($0) }.flatMap { app.album($0.albumId)?.quality }
     }
     @State private var dragY: CGFloat = 0
+    /// The player opens as clear glass over the app and turns into a solid "privacy screen" as it settles; closing
+    /// (or dragging it down) turns it back into glass. 1 = glass, 0 = solid.
+    @State private var glassy = true
+    private var glassAmount: CGFloat { glassy ? 1 : min(1, dragY / 320) }
+
+    private func close() {
+        withAnimation(.easeIn(duration: 0.22)) { glassy = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { onClose() }
+    }
 
     /// Drag the header or the cover down to close the player, like the website.
     private var swipeDown: some Gesture {
@@ -110,7 +119,7 @@ struct NowPlayingView: View {
             .onChanged { v in dragY = max(0, v.translation.height) }
             .onEnded { v in
                 if v.translation.height > 140 || v.predictedEndTranslation.height > 420 {
-                    onClose()
+                    close()
                 } else {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { dragY = 0 }
                 }
@@ -119,7 +128,7 @@ struct NowPlayingView: View {
 
     private func go(_ r: Route) {
         app.openRoute = r
-        onClose()
+        close()
     }
 
     private func tool(_ icon: String, on: Bool = false) -> some View {
@@ -129,13 +138,23 @@ struct NowPlayingView: View {
 
     var body: some View {
         ZStack {
-            Theme.surface.ignoresSafeArea()
+            // glass underneath, the solid page over it (less and less see-through as the player settles)
+            Group {
+                if #available(iOS 26.0, *) {
+                    Color.clear.glassEffect(.regular, in: Rectangle())
+                } else {
+                    Rectangle().fill(.ultraThinMaterial)
+                }
+            }
+            .ignoresSafeArea()
+            Theme.surface.opacity(1 - glassAmount).ignoresSafeArea()
+            Group {
             if let id = player.currentID, let t = app.track(id) {
                 let album = app.album(t.albumId)
                 VStack(spacing: 0) {
                     // where it is playing from
                     HStack {
-                        Button { onClose() } label: {
+                        Button { close() } label: {
                             Image(systemName: "chevron.down").font(.system(size: 22, weight: .semibold)).foregroundColor(Theme.text).frame(width: 44, height: 44)
                         }
                         Spacer()
@@ -264,11 +283,15 @@ struct NowPlayingView: View {
             } else {
                 VStack(spacing: 12) {
                     Text("Nothing playing").foregroundColor(Theme.text2)
-                    PillButton(title: "Close", primary: false) { onClose() }
+                    PillButton(title: "Close", primary: false) { close() }
                 }
             }
+            }
+            .opacity(1 - glassAmount)
+            .blur(radius: glassAmount * 18)
         }
         .offset(y: dragY)
+        .onAppear { withAnimation(.easeOut(duration: 0.55)) { glassy = false } }
         .alert(quality?.label ?? "Quality", isPresented: $showQuality) {
             Button("OK", role: .cancel) {}
         } message: {

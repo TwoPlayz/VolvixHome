@@ -353,6 +353,7 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                 st.loading = false;
                 match result.and_then(|(dec, total)| Sink::try_new(&handle).map(|s| (s, dec, total)).map_err(|e| e.to_string())) {
                     Ok((s, dec, total)) => {
+                        let mut s = s;
                         s.set_volume(volume * gain);
                         let inner: Arc<Mutex<Inner>> = Arc::new(Mutex::new(Box::new(crate::eq::EqSource::new(dec.convert_samples::<f32>(), eq.clone()))));
                         let h = Handoff::new(inner.clone(), 0);
@@ -368,8 +369,30 @@ fn audio_thread(rx: Receiver<Cmd>, back: Sender<Cmd>, status: Arc<Mutex<Status>>
                         st.duration = total;
                         st.playing = play;
                         if start > Duration::ZERO {
-                            let _ = s.try_seek(start);
-                            pos_base = Duration::ZERO;
+                            if s.try_seek(start).is_ok() {
+                                pos_base = Duration::ZERO;
+                            } else if let Some((client, tr, lo)) = cur_media.clone() {
+                                // this song can't be jumped into (a stream without a seek table): open it again and skip ahead,
+                                // instead of playing from the start while the clock says otherwise
+                                if let Ok((dec2, _)) = open(&client, &tr, lo) {
+                                    if let Ok(s2) = Sink::try_new(&handle) {
+                                        s2.set_volume(volume * gain);
+                                        let inner2: Arc<Mutex<Inner>> = Arc::new(Mutex::new(Box::new(crate::eq::EqSource::new(dec2.skip_duration(start).convert_samples::<f32>(), eq.clone()))));
+                                        let h2 = Handoff::new(inner2.clone(), 0);
+                                        cur_leave = Some(h2.leave.clone());
+                                        s2.append(h2);
+                                        cur_src = Some(inner2);
+                                        if play {
+                                            s2.play();
+                                        } else {
+                                            s2.pause();
+                                        }
+                                        s.stop();
+                                        s = s2;
+                                        pos_base = start;
+                                    }
+                                }
+                            }
                             st.position = start;
                         }
                         sink = Some(s);
