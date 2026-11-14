@@ -14,7 +14,10 @@ struct CustomBack: ViewModifier {
                     Button { dismiss() } label: {
                         Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).foregroundColor(Theme.text)
                             .frame(width: 36, height: 36).glass(Circle())
+                            .contentShape(Circle())
                     }
+                    // the toolbar's own button look draws a square behind it while it is pressed
+                    .buttonStyle(.plain)
                 }
             }
     }

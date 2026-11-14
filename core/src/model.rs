@@ -152,6 +152,9 @@ pub struct ServerStatus {
     pub albums: u64,
     #[serde(default)]
     pub tracks: u64,
+    /// a fingerprint of the library: changes when songs change, even if there are as many
+    #[serde(default)]
+    pub rev: String,
 }
 
 /// `/api/me`: the signed-in person and what the server can do for them.

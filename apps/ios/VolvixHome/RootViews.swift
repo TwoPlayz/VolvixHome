@@ -224,6 +224,11 @@ struct MainTabs: View {
         NavigationStack(path: $paths[i]) {
             content.routeDestinations()
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayer(showFull: $showFull) }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                DownloadBanner()
+                MiniPlayer(showFull: $showFull)
+            }
+        }
     }
 }

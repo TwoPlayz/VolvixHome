@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import SwiftUI
 
 struct ArtistInfoData: Hashable {
@@ -53,6 +54,13 @@ final class AppModel: ObservableObject {
     private var infoAsked: Set<String> = []
     /// the library size the server last reported that was already fetched (so a size that never matches isn't asked again and again)
     private var lastLibraryAsk: (Int, Int) = (-1, -1)
+    /// the server's fingerprint of its library the last time we looked (it changes when songs change, even if there are as many)
+    private var lastRev = ""
+    /// addresses of the server on the home network (set by an admin in Settings); used instead of the domain when they answer
+    private(set) var localAddresses: [String] = UserDefaults.standard.stringArray(forKey: "volvix.home.local") ?? []
+    @Published var onHomeNetwork = false
+    private let pathMonitor = NWPathMonitor()
+    private var pollRound = 0
     private var infoRunning = 0
 
     private let serverKey = "volvix.home.server"
@@ -68,6 +76,35 @@ final class AppModel: ObservableObject {
             phase = (token ?? "").isEmpty ? .signIn : .loading
         }
         hookMoved()
+        pathMonitor.pathUpdateHandler = { [weak self] _ in
+            Task { @MainActor in await self?.chooseRoute() }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "volvix.route"))
+    }
+
+    /// On the home network, talk to the server directly; anywhere else, through the domain.
+    func chooseRoute() async {
+        guard let api = api, api.token != nil else { return }
+        var chosen: String? = nil
+        for a in localAddresses {
+            if api.phoneShares(a), await api.reachable(a) { chosen = a; break }
+        }
+        let before = api.base
+        api.use(chosen)
+        onHomeNetwork = api.onHomeNetwork
+        if api.base != before { objectWillChange.send() }
+    }
+
+    func setLocalAddresses(_ list: [String]) {
+        localAddresses = list
+        UserDefaults.standard.set(list, forKey: "volvix.home.local")
+        Task { await chooseRoute() }
+    }
+
+    /// Ask the server which home-network addresses it has.
+    func syncNetwork() async {
+        guard let o = try? await call("GET", "/api/network"), let list = o["localAddresses"] as? [String], list != localAddresses else { return }
+        setLocalAddresses(list)
     }
 
     /// If the server sends us from http to https, keep using https from now on.
@@ -169,6 +206,7 @@ final class AppModel: ObservableObject {
 
     func load() async {
         guard let api = api else { return }
+        await chooseRoute()
         do {
             let meRaw = try await api.meData()
             let libRaw = try await api.libraryData()
@@ -196,6 +234,12 @@ final class AppModel: ObservableObject {
                 api.token = nil
                 message = "Your sign-in ran out. Sign in again."
                 phase = .signIn
+            } else if e.status == 0 && api.onHomeNetwork {
+                // the home address stopped answering (left the Wi-Fi): back to the domain
+                api.use(nil)
+                onHomeNetwork = false
+                await load()
+                return
             } else if e.status == 0 && loadOffline() {
                 return
             } else {
@@ -247,14 +291,21 @@ final class AppModel: ObservableObject {
         if let data = try? await api.send(try api.request("/api/status")),
            let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], (o["scanning"] as? Bool) != true {
             let a = wholeNumber(o["albums"]), t = wholeNumber(o["tracks"])
-            if (a != albums.count || t != allTracks.count) && (a, t) != lastLibraryAsk {
+            let rev = (o["rev"] as? String) ?? ""
+            if lastRev.isEmpty && !rev.isEmpty { lastRev = rev } // the first look: the library was just loaded
+            let sizeDiffers = (a != albums.count || t != allTracks.count) && (a, t) != lastLibraryAsk
+            if sizeDiffers || (!rev.isEmpty && rev != lastRev) {
                 lastLibraryAsk = (a, t)
                 if let raw = try? await api.libraryData(), let cat = try? JSONDecoder().decode(Catalog.self, from: raw) {
                     index(cat)
                     Persist.write(raw, "library.json")
+                    if !rev.isEmpty { lastRev = rev }
                 }
             }
         }
+        pollRound += 1
+        if pollRound % 4 == 1 { await syncNetwork() }
+        if pollRound % 4 == 3 { await chooseRoute() }
         let h = await api.household()
         members = h.members
         householdLists = h.playlists.compactMap { householdInfo($0) }

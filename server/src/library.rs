@@ -177,6 +177,9 @@ pub struct Library {
     covers: HashMap<String, CoverSource>,
     pub scanning: bool,
     pub scanned_at: Option<SystemTime>,
+    /// a fingerprint of what the catalog says (songs, titles, albums): changes whenever any of it does, so an app can
+    /// tell its copy is out of date even when the number of songs is the same
+    pub rev: u64,
 }
 
 impl Library {
@@ -503,7 +506,16 @@ pub fn scan(root: &Path) -> Library {
     lib.catalog.artists = artists;
     lib.catalog.albums = albums;
     lib.scanned_at = Some(SystemTime::now());
+    lib.rev = fingerprint(&lib.catalog);
     lib
+}
+
+fn fingerprint(c: &Catalog) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for t in &c.tracks { (&t.id, &t.title, &t.artist, &t.album_id, t.no, t.disc, t.duration as u64).hash(&mut h); }
+    for a in &c.albums { (&a.id, &a.title, &a.artist, a.year, &a.track_ids).hash(&mut h); }
+    h.finish()
 }
 
 #[cfg(test)]

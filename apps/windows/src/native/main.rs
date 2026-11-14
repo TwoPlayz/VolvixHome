@@ -783,6 +783,8 @@ pub struct App {
     dev_now_at: Instant,
     /// the library size the server last reported that was already fetched
     library_ask: (u64, u64),
+    /// the server's fingerprint of its library at the last look
+    library_rev: String,
     /// another device is playing: this one shows it (no sound) and sends it what you press
     remote: Option<RemoteNow>,
     dev_now: Option<serde_json::Value>,
@@ -932,6 +934,7 @@ impl App {
             dev_now_key: String::new(),
             dev_now_at: Instant::now(),
             library_ask: (u64::MAX, u64::MAX),
+            library_rev: String::new(),
             remote: None,
             dev_now: None,
             remote_block: Instant::now(),
@@ -3177,6 +3180,11 @@ impl App {
 
             /* ---------- downloads ---------- */
             Message::ToggleSaved(kind, id) => {
+                if kind == "track" && !self.is_saved(&kind, &id) && self.downloaded.contains(&id) {
+                    // it came with an album or playlist: that button removes it
+                    self.say("Already downloaded with its album or playlist. Use that download button to remove it.");
+                    return Task::none();
+                }
                 if self.is_saved(&kind, &id) {
                     self.saved.retain(|s| !(s.kind == kind && s.id == id));
                     self.say("Removed from this computer");
@@ -3652,8 +3660,12 @@ impl App {
                 // new music on the server: bring the library in quietly
                 if let (Some(s), Some(c)) = (self.server_status.clone(), self.client.clone()) {
                     let (a, t) = (self.lib.albums().len() as u64, self.lib.tracks().len() as u64);
-                    if !s.scanning && !self.offline && (s.albums != a || s.tracks != t) && (s.albums, s.tracks) != self.library_ask {
+                    if self.library_rev.is_empty() { self.library_rev = s.rev.clone(); } // the first look
+                    let rev_changed = !s.rev.is_empty() && s.rev != self.library_rev;
+                    let size_differs = (s.albums != a || s.tracks != t) && (s.albums, s.tracks) != self.library_ask;
+                    if !s.scanning && !self.offline && (size_differs || rev_changed) {
                         self.library_ask = (s.albums, s.tracks);
+                        self.library_rev = s.rev.clone();
                         return load_everything(c, self.downloads.clone());
                     }
                 }

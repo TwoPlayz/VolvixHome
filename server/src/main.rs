@@ -159,12 +159,13 @@ fn user_data_path(st: &AppState, user_id: &str) -> PathBuf {
 
 /* ---------------- accounts ---------------- */
 
-async fn status(State(st): State<Shared>) -> Response {
+async fn status(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    learn_local_address(&st, &headers);
     let lib = st.lib.read().unwrap();
     let setup = st.accounts.lock().unwrap().needs_setup();
     Json(json!({
         "name": "Volvix Home", "version": VERSION, "setupNeeded": setup,
-        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len(), "watching": st.watch.live(), "transcoding": st.transcoder.available(),
+        "scanning": lib.scanning, "albums": lib.catalog.albums.len(), "tracks": lib.catalog.tracks.len(), "rev": lib.rev.to_string(), "watching": st.watch.live(), "transcoding": st.transcoder.available(),
         "rescanMinutes": st.cfg.rescan_minutes
     }))
     .into_response()
@@ -2147,6 +2148,87 @@ async fn device_transfer(State(st): State<Shared>, headers: HeaderMap, Json(b): 
     }
 }
 
+/* ---------------- local addresses ---------------- */
+
+fn network_file(cfg: &Config) -> PathBuf {
+    cfg.data_dir.join("network.json")
+}
+
+fn local_addresses(cfg: &Config) -> Vec<String> {
+    std::fs::read_to_string(network_file(cfg)).ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["localAddresses"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()))
+        .unwrap_or_default()
+}
+
+/// Home-network addresses this server was reached at (a computer on the Wi-Fi opening it by its address): remembered,
+/// so phones can find the direct way without anyone typing anything.
+fn learned() -> &'static std::sync::Mutex<Vec<String>> {
+    static L: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
+    L.get_or_init(|| std::sync::Mutex::new(vec![]))
+}
+
+fn private_v4(host: &str) -> bool {
+    let p: Vec<u8> = host.split('.').filter_map(|x| x.parse().ok()).collect();
+    p.len() == 4 && host.split('.').count() == 4 && (p[0] == 10 || (p[0] == 192 && p[1] == 168) || (p[0] == 172 && (16..32).contains(&p[1])))
+}
+
+fn learn_local_address(st: &Shared, headers: &HeaderMap) {
+    let Some(host) = headers.get(header::HOST).and_then(|h| h.to_str().ok()) else { return };
+    let ip = host.split(':').next().unwrap_or("");
+    if !private_v4(ip) { return; }
+    let addr = format!("http://{host}");
+    let _ = st;
+    let mut l = learned().lock().unwrap();
+    if !l.contains(&addr) && l.len() < 8 { l.push(addr); }
+}
+
+/// What the apps may use on the home network: the ones an admin typed (rarely needed), the ones this server was
+/// reached at, and the address it has itself. A phone uses one only when it is on the same network (it checks).
+fn all_local_addresses(cfg: &Config) -> Vec<String> {
+    let mut out = local_addresses(cfg);
+    for a in learned().lock().unwrap().iter() { if !out.contains(a) { out.push(a.clone()); } }
+    if let Some(ip) = castdev::local_ip_towards("192.168.0.1").filter(|ip| ip.is_ipv4() && !ip.is_loopback()) {
+        let a = format!("http://{ip}:{}", cfg.port);
+        if !out.contains(&a) { out.push(a); }
+    }
+    out
+}
+
+/// The addresses this server has on the home network. The apps use them instead of the public address when they can
+/// reach them (same Wi-Fi), so music doesn't take a trip through the internet.
+async fn get_network(State(st): State<Shared>, headers: HeaderMap) -> Response {
+    if let Err(r) = signed_in(&st, &headers) { return r; }
+    learn_local_address(&st, &headers);
+    Json(json!({ "localAddresses": all_local_addresses(&st.cfg), "manual": local_addresses(&st.cfg) })).into_response()
+}
+
+#[derive(Deserialize)]
+struct NetworkBody {
+    #[serde(default, rename = "localAddresses")]
+    local_addresses: Vec<String>,
+}
+
+async fn set_network(State(st): State<Shared>, headers: HeaderMap, Json(body): Json<NetworkBody>) -> Response {
+    if let Err(r) = require(&st, &headers, "settings") { return r; }
+    let mut list: Vec<String> = vec![];
+    for a in body.local_addresses.iter().take(8) {
+        let mut a = a.trim().trim_end_matches('/').to_string();
+        if a.is_empty() { continue; }
+        if !a.contains("://") { a = format!("http://{a}"); }
+        if !(a.starts_with("http://") || a.starts_with("https://")) || a.contains(' ') || a.len() > 200 {
+            return error(StatusCode::BAD_REQUEST, "That doesn't look like an address. Try something like 192.168.1.20:8080.");
+        }
+        if !list.contains(&a) { list.push(a); }
+    }
+    let file = network_file(&st.cfg);
+    let tmp = file.with_extension("json.tmp");
+    if std::fs::write(&tmp, json!({ "localAddresses": list }).to_string()).and_then(|_| std::fs::rename(&tmp, &file)).is_err() {
+        return error(StatusCode::INTERNAL_SERVER_ERROR, "Couldn't save the setting.");
+    }
+    Json(json!({ "localAddresses": list })).into_response()
+}
+
 /* ---------------- music folder ---------------- */
 
 fn music_dir_file(cfg: &Config) -> PathBuf {
@@ -2412,6 +2494,7 @@ async fn main() {
         .route("/api/album/{id}/picture", axum::routing::put(put_album_picture).delete(delete_album_picture))
         .route("/api/library", get(get_library))
         .route("/api/library/rescan", post(rescan))
+        .route("/api/network", get(get_network).put(set_network))
         .route("/api/library/folder", get(library_folder).put(set_library_folder))
         .route("/api/library/browse", get(browse_folders))
         .route("/api/stream/{id}", get(stream).options(cast_preflight))

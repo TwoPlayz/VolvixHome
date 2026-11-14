@@ -31,6 +31,13 @@ final class DownloadStore: ObservableObject {
     @Published private(set) var pending: [String] = []
     @Published private(set) var working: String?
     @Published var problem: String?
+    /// how far each song that is coming down has got (0...1), for the little animated marks and the progress bar
+    @Published private(set) var progress: [String: Double] = [:]
+    /// songs asked for in this go, and how many of them are finished (so "3 of 12")
+    @Published private(set) var batchTotal = 0
+    @Published private(set) var batchDone = 0
+    private var active: Set<String> = []
+    private let fetcher = DownloadFetcher()
 
     private weak var app: AppModel?
     private var running = false
@@ -76,6 +83,24 @@ final class DownloadStore: ObservableObject {
 
     func hasAll(_ ids: [String]) -> Bool { !ids.isEmpty && ids.allSatisfy { files[$0] != nil } }
     func isBusy(_ ids: [String]) -> Bool { ids.contains { pending.contains($0) } }
+    func isComing(_ id: String) -> Bool { pending.contains(id) }
+
+    /// Songs being fetched right now, in the order they were asked for.
+    var comingNow: [String] { pending.filter { active.contains($0) } }
+
+    /// How much of a group of songs is on the phone (0...1), counting the ones part way.
+    func fraction(_ ids: [String]) -> Double {
+        if ids.isEmpty { return 0 }
+        let sum = ids.reduce(0.0) { $0 + (files[$1] != nil ? 1.0 : (progress[$1] ?? 0)) }
+        return sum / Double(ids.count)
+    }
+
+    /// Everything in this go, as a fraction.
+    var overall: Double {
+        guard batchTotal > 0 else { return 0 }
+        let part = progress.values.reduce(0, +)
+        return min(1, (Double(batchDone) + part) / Double(batchTotal))
+    }
 
     var count: Int { files.count }
 
@@ -90,12 +115,14 @@ final class DownloadStore: ObservableObject {
 
     func add(_ ids: [String]) {
         problem = nil
-        for id in ids where files[id] == nil && !pending.contains(id) { pending.append(id) }
+        for id in ids where files[id] == nil && !pending.contains(id) { pending.append(id); batchTotal += 1 }
         start()
     }
 
     func remove(_ ids: [String]) {
         pending.removeAll { ids.contains($0) }
+        for id in ids { progress[id] = nil }
+        if pending.isEmpty { batchTotal = 0; batchDone = 0 }
         for id in ids {
             if let name = files[id] { try? FileManager.default.removeItem(at: folder.appendingPathComponent(name)) }
             files[id] = nil
@@ -118,23 +145,45 @@ final class DownloadStore: ObservableObject {
         Task { await run() }
     }
 
+    /// Several songs come down at once: one at a time leaves the connection idle between songs, which is what made
+    /// albums crawl on a slow link.
+    private static let parallel = 4
+
     private func run() async {
-        while let id = pending.first {
-            if costly && app?.fx.downloadMobile != true {
-                problem = "Waiting for Wi-Fi. Turn on \"Download on mobile data\" in Settings to download now."
-                working = nil
-                running = false
-                return
+        await withTaskGroup(of: Void.self) { group in
+            var inFlight = 0
+            while true {
+                if costly && app?.fx.downloadMobile != true && inFlight == 0 {
+                    problem = "Waiting for Wi-Fi. Turn on \"Download on mobile data\" in Settings to download now."
+                    break
+                }
+                if inFlight < Self.parallel, !(costly && app?.fx.downloadMobile != true), let id = pending.first(where: { !active.contains($0) }) {
+                    active.insert(id)
+                    working = id
+                    inFlight += 1
+                    group.addTask { @MainActor in await self.fetch(id) }
+                } else if inFlight == 0 {
+                    break
+                } else {
+                    await group.next()
+                    inFlight -= 1
+                }
             }
-            working = id
-            await fetch(id)
-            pending.removeAll { $0 == id }
+            await group.waitForAll()
         }
         working = nil
         running = false
+        if pending.isEmpty { batchTotal = 0; batchDone = 0; progress = [:] }
     }
 
     private func fetch(_ id: String) async {
+        defer {
+            let wanted = pending.contains(id)
+            pending.removeAll { $0 == id }
+            active.remove(id)
+            progress[id] = nil
+            if wanted { batchDone += 1 }
+        }
         guard let api = app?.api else { return }
         var q = app?.fx.downloadQuality ?? "stream"
         if q == "stream" { q = app?.quality ?? "original" }
@@ -142,23 +191,40 @@ final class DownloadStore: ObservableObject {
         var req = URLRequest(url: url)
         req.timeoutInterval = 120
         if let h = api.authHeader { req.setValue(h, forHTTPHeaderField: "Authorization") }
-        do {
-            let result = try await URLSession.shared.download(for: req)
-            guard let http = result.1 as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                problem = "The server wouldn't send one of the songs."
+        // one more try if the connection drops part way (a hotspot does that)
+        for attempt in 0..<2 {
+            do {
+                let last = ProgressGate()
+                let result = try await fetcher.fetch(req) { [weak self] p in
+                    guard last.pass(p) else { return }
+                    Task { @MainActor in
+                        guard let me = self, me.pending.contains(id) else { return }
+                        me.progress[id] = p
+                    }
+                }
+                guard (200..<300).contains(result.1.statusCode) else {
+                    try? FileManager.default.removeItem(at: result.0)
+                    problem = result.1.statusCode == 404
+                        ? "A song isn't on the server any more. Refreshing the library."
+                        : "The server wouldn't send one of the songs."
+                    if result.1.statusCode == 404 { Task { await app?.refresh() } }
+                    return
+                }
+                // asked to stop while it came down
+                if !pending.contains(id) { try? FileManager.default.removeItem(at: result.0); return }
+                let name = id + "." + fileExtension(result.1.value(forHTTPHeaderField: "Content-Type"))
+                var dest = folder.appendingPathComponent(name)
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: result.0, to: dest)
+                var values = URLResourceValues()
+                values.isExcludedFromBackup = true
+                try? dest.setResourceValues(values)
+                files[id] = name
+                save()
                 return
+            } catch {
+                if attempt == 1 { problem = "A download didn't finish. Check the connection and try again." }
             }
-            let name = id + "." + fileExtension(http.value(forHTTPHeaderField: "Content-Type"))
-            var dest = folder.appendingPathComponent(name)
-            try? FileManager.default.removeItem(at: dest)
-            try FileManager.default.moveItem(at: result.0, to: dest)
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try? dest.setResourceValues(values)
-            files[id] = name
-            save()
-        } catch {
-            problem = "A download didn't finish. Check the connection and try again."
         }
     }
 
@@ -180,6 +246,146 @@ func formatBytes(_ n: Int64) -> String {
     return f.string(fromByteCount: n)
 }
 
+/// Moves in small steps, so the progress isn't redrawn for every few bytes.
+final class ProgressGate: @unchecked Sendable {
+    private var last = -1.0
+    func pass(_ p: Double) -> Bool {
+        if p >= 1 || p - last >= 0.03 || last < 0 { last = p; return true }
+        return false
+    }
+}
+
+/// Downloads songs with progress, several at a time.
+final class DownloadFetcher: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private struct Job {
+        var progress: (Double) -> Void
+        var done: CheckedContinuation<(URL, HTTPURLResponse), Error>
+        var file: URL?
+        var response: HTTPURLResponse?
+    }
+
+    private var jobs: [Int: Job] = [:]
+    private let lock = NSLock()
+    private lazy var session: URLSession = {
+        let c = URLSessionConfiguration.default
+        c.httpMaximumConnectionsPerHost = 6
+        c.timeoutIntervalForRequest = 60
+        c.timeoutIntervalForResource = 3600
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: c, delegate: self, delegateQueue: nil)
+    }()
+
+    func fetch(_ req: URLRequest, progress: @escaping (Double) -> Void) async throws -> (URL, HTTPURLResponse) {
+        try await withCheckedThrowingContinuation { cont in
+            let task = session.downloadTask(with: req)
+            lock.lock(); jobs[task.taskIdentifier] = Job(progress: progress, done: cont); lock.unlock()
+            task.resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        lock.lock(); let job = jobs[downloadTask.taskIdentifier]; lock.unlock()
+        job?.progress(min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        // the file is deleted when this returns: move it somewhere first
+        let keep = FileManager.default.temporaryDirectory.appendingPathComponent("dl-" + UUID().uuidString)
+        try? FileManager.default.moveItem(at: location, to: keep)
+        lock.lock()
+        jobs[downloadTask.taskIdentifier]?.file = keep
+        jobs[downloadTask.taskIdentifier]?.response = downloadTask.response as? HTTPURLResponse
+        lock.unlock()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock(); let job = jobs.removeValue(forKey: task.taskIdentifier); lock.unlock()
+        guard let job = job else { return }
+        if let error = error {
+            if let f = job.file { try? FileManager.default.removeItem(at: f) }
+            job.done.resume(throwing: error)
+        } else if let f = job.file, let r = job.response ?? (task.response as? HTTPURLResponse) {
+            job.progress(1)
+            job.done.resume(returning: (f, r))
+        } else {
+            job.done.resume(throwing: ServerError(message: "The server didn't answer."))
+        }
+    }
+}
+
+/// The little icon beside a song that is kept on the phone, coming down (it moves), or waiting.
+struct DownloadMark: View {
+    @EnvironmentObject var downloads: DownloadStore
+    let id: String
+    var size: CGFloat = 14
+
+    var body: some View {
+        if downloads.has(id) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: size * 0.55, weight: .bold)).foregroundColor(.white)
+                .frame(width: size, height: size).background(Circle().fill(Theme.accent))
+                .accessibilityLabel("Downloaded")
+        } else if downloads.isComing(id) {
+            DownloadingGlyph(size: size, progress: downloads.progress[id])
+                .accessibilityLabel("Downloading")
+        }
+    }
+}
+
+/// A ring that fills as the song comes down, with an arrow that keeps moving so it is clear something is happening.
+struct DownloadingGlyph: View {
+    var size: CGFloat = 14
+    var progress: Double?
+    @State private var bounce = false
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Theme.text3.opacity(0.35), lineWidth: max(1.5, size / 8))
+            Circle().trim(from: 0, to: CGFloat(max(0.1, progress ?? 0.1)))
+                .stroke(Theme.accent, style: StrokeStyle(lineWidth: max(1.5, size / 8), lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Image(systemName: "arrow.down").font(.system(size: size * 0.5, weight: .bold)).foregroundColor(Theme.accent)
+                .offset(y: bounce ? size * 0.12 : -size * 0.12)
+        }
+        .frame(width: size, height: size)
+        .animation(.easeInOut(duration: 0.25), value: progress)
+        .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { bounce = true } }
+    }
+}
+
+/// While songs are coming down: what is happening, wherever you are in the app.
+struct DownloadBanner: View {
+    @EnvironmentObject var app: AppModel
+    @EnvironmentObject var downloads: DownloadStore
+
+    var body: some View {
+        if !downloads.pending.isEmpty && downloads.batchTotal > 0 {
+            let total = downloads.batchTotal
+            let n = min(total, downloads.batchDone + 1)
+            let title = downloads.comingNow.first.flatMap { app.track($0)?.title }
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    DownloadingGlyph(size: 20, progress: downloads.overall)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Downloading \(n) of \(total)").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text)
+                        Text(downloads.problem ?? title ?? "Starting…").font(.system(size: 11)).foregroundColor(Theme.text2).lineLimit(1)
+                    }
+                    Spacer()
+                    Text("\(Int((downloads.overall * 100).rounded()))%").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2).monospacedDigit()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                GeometryReader { g in
+                    Rectangle().fill(Theme.accent).frame(width: g.size.width * CGFloat(downloads.overall), height: 2)
+                        .animation(.easeInOut(duration: 0.3), value: downloads.overall)
+                }
+                .frame(height: 2)
+            }
+            .background(Theme.surface2)
+        }
+    }
+}
+
 /// A download button for a group of songs (an album, a playlist): tap to keep them on the phone, tap again to remove them.
 struct DownloadButton: View {
     @EnvironmentObject var downloads: DownloadStore
@@ -194,7 +400,7 @@ struct DownloadButton: View {
             ZStack {
                 Circle().fill(Theme.surface3).frame(width: 44, height: 44)
                 if busy {
-                    ProgressView().tint(Theme.text2)
+                    DownloadingGlyph(size: 24, progress: downloads.fraction(ids))
                 } else {
                     Image(systemName: done ? "checkmark.circle.fill" : "arrow.down.circle")
                         .font(.system(size: 20)).foregroundColor(done ? Theme.accent : Theme.text)

@@ -329,12 +329,14 @@ window.Spin.views = window.Spin.views || {};
   // the server rescans by itself (and when Lidarr imports): tell people when the library changed under them
   (function () {
     const known = Object.keys(S.data.tracks).length;
-    let told = known, toldAlbums = S.data.albums.length;
+    let told = known, toldAlbums = S.data.albums.length, toldRev = '';
     setInterval(function () {
       if (document.hidden) return;
       S.server.json('GET', '/api/status').then(function (s) {
-        if (s.scanning || s.tracks === undefined || (s.tracks === told && s.albums === toldAlbums)) return;
-        told = s.tracks; toldAlbums = s.albums;
+        if (s.scanning || s.tracks === undefined) return;
+        if (!toldRev && s.rev) toldRev = s.rev; // the first look
+        if (s.tracks === told && s.albums === toldAlbums && (!s.rev || s.rev === toldRev)) return;
+        told = s.tracks; toldAlbums = s.albums; if (s.rev) toldRev = s.rev;
         // the server noticed new or removed music: bring it in quietly (no reload, no button)
         S.data.sync().then(function (c) {
           S.toast('Library updated: ' + c.albums + ' albums, ' + c.tracks + ' songs', 'library');

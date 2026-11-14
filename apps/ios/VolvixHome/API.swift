@@ -11,6 +11,8 @@ struct ServerError: LocalizedError {
 /// Talks to your Volvix Home server (the same API the website and the Windows app use).
 final class API {
     var base: String
+    /// the address you signed in with; `base` is the home-network address instead while that one answers
+    private(set) var publicBase: String
     var token: String?
     /// the server answered "use https instead": told to whoever keeps the saved address
     var onMoved: ((String) -> Void)?
@@ -23,6 +25,7 @@ final class API {
         var b = base
         while b.hasSuffix("/") { b.removeLast() }
         self.base = b
+        self.publicBase = b
         self.token = token
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30
@@ -30,8 +33,12 @@ final class API {
         self.session = URLSession(configuration: cfg, delegate: keeper, delegateQueue: nil)
         keeper.moved = { [weak self] newBase in
             guard let self = self else { return }
-            self.base = newBase
-            self.onMoved?(newBase)
+            // only the public address is remembered (a home address is found again each time)
+            if self.base == self.publicBase {
+                self.base = newBase
+                self.publicBase = newBase
+                self.onMoved?(newBase)
+            }
         }
     }
 
@@ -117,6 +124,49 @@ final class API {
         body["trackId"] = trackID ?? NSNull()
         if let r = try? request("/api/me/now", method: "PUT", json: body) { _ = try? await send(r) }
     }
+
+    /// Does the server answer, signed in as us, at this address? (A different machine on the same address says 401.)
+    func reachable(_ address: String) async -> Bool {
+        var a = address
+        while a.hasSuffix("/") { a.removeLast() }
+        guard let u = URL(string: a + "/api/me") else { return false }
+        var r = URLRequest(url: u)
+        r.timeoutInterval = 1.5
+        if let h = authHeader { r.setValue(h, forHTTPHeaderField: "Authorization") }
+        guard let (_, resp) = try? await URLSession.shared.data(for: r), let http = resp as? HTTPURLResponse else { return false }
+        return http.statusCode == 200
+    }
+
+    /// Is this phone on the same network as that address (its own address and netmask line up)? A name is just tried.
+    func phoneShares(_ address: String) -> Bool {
+        guard let host = URL(string: address)?.host else { return false }
+        let parts = host.split(separator: ".").compactMap { UInt32($0) }
+        guard parts.count == 4, host.split(separator: ".").count == 4 else { return true }
+        let target = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0, let first = list else { return true }
+        defer { freeifaddrs(list) }
+        var p: UnsafeMutablePointer<ifaddrs>? = first
+        while let i = p {
+            let f = i.pointee
+            if let a = f.ifa_addr, let m = f.ifa_netmask, a.pointee.sa_family == UInt8(AF_INET), (f.ifa_flags & UInt32(IFF_UP)) != 0 {
+                let ip = a.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+                let mask = m.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+                if ip != 0x7f000001, (ip & mask) == (target & mask) { return true }
+            }
+            p = f.ifa_next
+        }
+        return false
+    }
+
+    /// Use the home-network address (or go back to the public one).
+    func use(_ address: String?) {
+        var a = address ?? publicBase
+        while a.hasSuffix("/") { a.removeLast() }
+        base = a
+    }
+
+    var onHomeNetwork: Bool { base != publicBase }
 
     // MARK: addresses
 

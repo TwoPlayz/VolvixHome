@@ -405,6 +405,14 @@ final class PlayerModel: ObservableObject {
         player.replaceCurrentItem(with: item)
         player.isMuted = silent
         attachEffects(item, id: id)
+        // a stream that never answers: after a while fetch the file in one go instead (and say so, rather than sitting at 0)
+        let started = id
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            if self.currentID == started, self.loading, self.retriedFor != started, self.fetched[started] == nil, self.downloads?.localURL(started) == nil {
+                self.recover(started, wasPlaying: self.isPlaying, original: "This is taking a while to start.")
+            }
+        }
         if autoplay {
             player.play()
             isPlaying = true
@@ -471,7 +479,10 @@ final class PlayerModel: ObservableObject {
                 }
                 guard (200..<300).contains(http.statusCode) else {
                     loading = false; isPlaying = false
-                    problem = "The server answered \(http.statusCode) for this song."
+                    problem = http.statusCode == 404
+                        ? "The server doesn't have this song any more. Refreshing the library: try it again in a moment."
+                        : "The server answered \(http.statusCode) for this song."
+                    if http.statusCode == 404 { Task { await app?.refresh() } }
                     return
                 }
                 let t = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()

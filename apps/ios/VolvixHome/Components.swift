@@ -270,10 +270,13 @@ struct TrackRow: View {
                 Text("\(n)").font(.system(size: 14)).foregroundColor(Theme.text3).frame(width: 26)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(track.title)
-                    .font(.system(size: 16))
-                    .foregroundColor(player.currentID == track.id ? Theme.accent : Theme.text)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(track.title)
+                        .font(.system(size: 16))
+                        .foregroundColor(player.currentID == track.id ? Theme.accent : Theme.text)
+                        .lineLimit(1)
+                    DownloadMark(id: track.id)
+                }
                 Text(track.artist).font(.system(size: 13)).foregroundColor(Theme.text2).lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -288,9 +291,11 @@ struct TrackRow: View {
                 Button { player.playNext(track.id) } label: { Label("Play next", systemImage: "text.insert") }
                 Button { player.addToQueue(track.id) } label: { Label("Add to queue", systemImage: "text.append") }
                 Button {
-                    if downloads.has(track.id) { downloads.remove([track.id]) } else { downloads.add([track.id]) }
+                    if downloads.has(track.id) || downloads.isComing(track.id) { downloads.remove([track.id]) } else { downloads.add([track.id]) }
                 } label: {
-                    Label(downloads.has(track.id) ? "Remove download" : "Download", systemImage: downloads.has(track.id) ? "trash" : "arrow.down.circle")
+                    if downloads.has(track.id) { Label("Remove download", systemImage: "trash") }
+                    else if downloads.isComing(track.id) { Label("Cancel download", systemImage: "xmark.circle") }
+                    else { Label("Download", systemImage: "arrow.down.circle") }
                 }
                 Button { showCredits = true } label: { Label("Credits", systemImage: "book") }
                 if let remove = onRemove {

@@ -359,12 +359,66 @@ struct PhotoBox: Identifiable {
 
 // MARK: - Settings
 
+/// An admin tells the apps where the server is on the home network.
+struct LocalAddressesSheet: View {
+    @EnvironmentObject var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var note: String?
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Home network address").font(.system(size: 22, weight: .bold)).foregroundColor(Theme.text)
+                    Text("Phones on the same network as the server find it by themselves and use it instead of your domain, so songs and downloads stay at home and are much faster. Anywhere else they use your domain. You only need this if that doesn't happen (for example, the server runs in a container that can't see its own address). One address per line, like 192.168.1.20:8080.")
+                        .font(.system(size: 14)).foregroundColor(Theme.text2)
+                    TextEditor(text: $text)
+                        .scrollContentBackground(.hidden)
+                        .font(.system(size: 15)).foregroundColor(Theme.text)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never).keyboardType(.URL)
+                        .frame(height: 110).padding(8)
+                        .background(Theme.surface2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    PillButton(title: busy ? "Saving…" : "Save", icon: "checkmark") { save() }.disabled(busy)
+                    if let n = note { Text(n).font(.system(size: 13)).foregroundColor(Theme.text2) }
+                }
+                .padding(16)
+            }
+            .background(Theme.surface.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task {
+                if let o = try? await app.call("GET", "/api/network"), let list = o["manual"] as? [String] { text = list.joined(separator: "\n") }
+            }
+        }
+    }
+
+    private func save() {
+        let list = text.components(separatedBy: CharacterSet(charactersIn: "\n, ")).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let o = try await app.call("PUT", "/api/network", ["localAddresses": list])
+                let saved = (o["localAddresses"] as? [String]) ?? list
+                text = saved.joined(separator: "\n")
+                app.setLocalAddresses(saved)
+                note = saved.isEmpty ? "Saved. Phones will always use your domain." : "Saved. Phones on your Wi-Fi will use it from now on."
+            } catch {
+                note = error.localizedDescription
+            }
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var downloads: DownloadStore
     @State private var status: [String: Any]?
     @State private var scanning = false
     @State private var note: String?
+    @State private var showAddresses = false
 
     private func toggle(_ title: String, _ detail: String, _ value: Bool, _ set: @escaping (Bool) -> Void) -> some View {
         Toggle(isOn: Binding(get: { value }, set: set)) {
@@ -438,6 +492,7 @@ struct SettingsView: View {
                     }
                     if let n = note { Text(n).font(.system(size: 13)).foregroundColor(Theme.text2) }
                     if app.can("settings") {
+                        Button { showAddresses = true } label: { linkRow("wifi", "Home network address", "Found automatically; set it here only if it isn't") }.buttonStyle(.plain)
                         NavigationLink(value: Route.folder) { linkRow("folder", "Music folder", "Where the server looks for music") }.buttonStyle(.plain)
                         NavigationLink(value: Route.lidarr) { linkRow("arrow.down.circle", "Lidarr", "Get music you don't have yet") }.buttonStyle(.plain)
                     }
@@ -456,6 +511,7 @@ struct SettingsView: View {
                         Text((status?["version"] as? String).map { "Version " + $0 } ?? "").font(.system(size: 13)).foregroundColor(Theme.text2)
                     }
                     Text(app.serverURL).font(.system(size: 13)).foregroundColor(Theme.text2)
+                    if app.onHomeNetwork { Label("Using the home network address", systemImage: "wifi").font(.system(size: 13)).foregroundColor(Theme.text2) }
                     PillButton(title: "Switch server", icon: "arrow.triangle.2.circlepath", primary: false) { app.switchServer() }
                 }
             }
@@ -464,6 +520,7 @@ struct SettingsView: View {
         .background(Theme.surface.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task { status = try? await app.call("GET", "/api/status") }
+        .sheet(isPresented: $showAddresses) { LocalAddressesSheet().environmentObject(app) }
     }
 
     private var statusText: String {

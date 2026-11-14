@@ -549,7 +549,8 @@ pub fn pop_menu<'a>(app: &'a App, m: &'a crate::PopMenu) -> El<'a> {
                 items.push(item("x", "Remove from this playlist", Message::RemoveFromPlaylist(pl.clone(), *index, id.clone()), false));
             }
             let got = app.is_saved("track", id);
-            items.push(item(if got { "check" } else { "download" }, if got { "Remove download" } else { "Download" }, Message::ToggleSaved("track".into(), id.clone()), false));
+            let with_album = !got && app.downloaded.contains(id);
+            items.push(item(if got || with_album { "check" } else { "download" }, if got { "Remove download" } else if with_album { "Downloaded" } else { "Download" }, Message::ToggleSaved("track".into(), id.clone()), false));
             if let Some(t) = app.lib.track(id) {
                 items.push(item("disc", "Go to album", Message::Go(Page::Album(t.album_id.clone())), false));
                 items.push(item("book", "Credits", Message::ShowCredits(id.clone()), false));
