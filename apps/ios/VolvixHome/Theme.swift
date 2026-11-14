@@ -57,6 +57,23 @@ extension View {
     }
 }
 
+extension View {
+    /// A pane of glass behind a title bar that floats over scrolling content: what scrolls under it is blurred and
+    /// lit like the rest of the glass, instead of showing through between the letters.
+    func glassBar() -> some View {
+        self.background {
+            Group {
+                if #available(iOS 26.0, *) {
+                    Color.clear.glassEffect(.regular, in: UnevenRoundedRectangle(bottomLeadingRadius: 22, bottomTrailingRadius: 22, style: .continuous))
+                } else {
+                    Rectangle().fill(.ultraThinMaterial)
+                }
+            }
+            .ignoresSafeArea(edges: .top)
+        }
+    }
+}
+
 func formatTime(_ seconds: Double) -> String {
     if !seconds.isFinite || seconds < 0 { return "0:00" }
     let s = Int(seconds.rounded(.down))

@@ -56,7 +56,7 @@ struct HouseholdView: View {
                 .padding(16)
             }
             .refreshable { await app.pollOnce() }
-            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar().glassBar() }
         }
         .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
@@ -291,7 +291,7 @@ struct RequestsView: View {
                 .padding(16)
             }
             .refreshable { await reload() }
-            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar().glassBar() }
         }
         .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)

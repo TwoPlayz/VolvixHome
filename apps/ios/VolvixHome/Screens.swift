@@ -113,7 +113,7 @@ struct HomeView: View {
                 .padding(.bottom, 24)
             }
             .refreshable { await app.refresh() }
-            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar().glassBar() }
         }
         .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
@@ -232,6 +232,7 @@ struct LibraryView: View {
                 .padding(.horizontal, 16).padding(.bottom, 4)
             }
                 }
+                .glassBar()
             }
         }
         .background(Theme.surface.ignoresSafeArea())
