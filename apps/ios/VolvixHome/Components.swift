@@ -25,14 +25,15 @@ enum Route: Hashable {
 
 /// An album's cover (a rounded square). Without art it shows the title on a tint, like the website.
 struct CoverView: View {
-    @EnvironmentObject var app: AppModel
+    // not observed: an album picture doesn't need to redraw every time anything in the app changes (that made scrolling stutter)
+    private var app: AppModel { AppModel.shared! }
     let albumID: String?
     var corner: CGFloat = 8
     @State private var image: UIImage?
 
     var body: some View {
         ZStack {
-            if let image = image {
+            if let image = image ?? coverURL.flatMap({ ImageLoader.cached($0) }) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 placeholder
@@ -40,7 +41,19 @@ struct CoverView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-        .task(id: albumID) { await load() }
+        .task(id: taskKey) { await load() }
+    }
+
+    /// reload when the album changes, or when the library brings it in / its picture changes
+    private var taskKey: String {
+        guard let id = albumID else { return "" }
+        let a = app.album(id)
+        return id + (a == nil ? "-" : (a!.cover ? "c(a!.coverV)" : "n"))
+    }
+
+    private var coverURL: URL? {
+        guard let id = albumID, let album = app.album(id), album.cover, let api = app.api else { return nil }
+        return api.coverURL(id, version: album.coverV)
     }
 
     private var placeholder: some View {
@@ -54,8 +67,9 @@ struct CoverView: View {
     }
 
     private func load() async {
+        guard let url = coverURL, let api = app.api else { image = nil; return }
+        if let hit = ImageLoader.cached(url) { image = hit; return }
         image = nil
-        guard let id = albumID, let album = app.album(id), album.cover, let api = app.api, let url = api.coverURL(id, version: album.coverV) else { return }
         image = await ImageLoader.shared.image(url, auth: api.authHeader)
     }
 }

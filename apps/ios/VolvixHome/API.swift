@@ -214,23 +214,39 @@ final class RedirectKeeper: NSObject, URLSessionTaskDelegate {
 /// Downloads pictures once and keeps them (in memory) so scrolling stays smooth.
 actor ImageLoader {
     static let shared = ImageLoader()
-    private let cache = NSCache<NSString, UIImage>()
+    /// kept by the picture's path (not the server's address), so switching between the domain and the home address keeps them
+    nonisolated static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.totalCostLimit = 160_000_000
+        return c
+    }()
     private var waiting: [String: Task<UIImage?, Never>] = [:]
 
+    nonisolated static func key(_ url: URL) -> String { url.path + "?" + (url.query ?? "") }
+    /// A picture already loaded, at once (so a row scrolled back into view doesn't blink).
+    nonisolated static func cached(_ url: URL) -> UIImage? { cache.object(forKey: key(url) as NSString) }
+
     func image(_ url: URL, auth: String?) async -> UIImage? {
-        let key = url.absoluteString
-        if let hit = cache.object(forKey: key as NSString) { return hit }
+        let key = Self.key(url)
+        if let hit = Self.cache.object(forKey: key as NSString) { return hit }
         if let t = waiting[key] { return await t.value }
+        let big = (url.query ?? "").contains("s=1200")
         let task = Task<UIImage?, Never> {
             var req = URLRequest(url: url)
             if let a = auth { req.setValue(a, forHTTPHeaderField: "Authorization") }
-            guard let result = try? await URLSession.shared.data(for: req) else { return nil }
-            return UIImage(data: result.0)
+            guard let result = try? await URLSession.shared.data(for: req), let raw = UIImage(data: result.0) else { return nil }
+            // decode now, here, at the size it is shown (otherwise the first draw does it, on the main thread, mid-scroll)
+            let side: CGFloat = big ? 1200 : 420
+            if raw.size.width > side || raw.size.height > side, let small = await raw.byPreparingThumbnail(ofSize: CGSize(width: side, height: side)) { return small }
+            return await raw.byPreparingForDisplay() ?? raw
         }
         waiting[key] = task
         let img = await task.value
         waiting[key] = nil
-        if let img = img { cache.setObject(img, forKey: key as NSString) }
+        if let img = img {
+            let cost = Int(img.size.width * img.size.height * img.scale * img.scale * 4)
+            Self.cache.setObject(img, forKey: key as NSString, cost: cost)
+        }
         return img
     }
 }

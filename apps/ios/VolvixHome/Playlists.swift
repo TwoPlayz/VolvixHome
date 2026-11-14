@@ -41,10 +41,12 @@ extension AppModel {
     /// The playlists several people edit, and invitations to join some.
     func loadShared() async {
         guard let r = try? await call("GET", "/api/shared") else { return }
-        sharedLists = ((r["playlists"] as? [[String: Any]]) ?? []).compactMap { playlistInfo(shared: $0) }
-        invites = ((r["invites"] as? [[String: Any]]) ?? []).map {
+        let lists = ((r["playlists"] as? [[String: Any]]) ?? []).compactMap { playlistInfo(shared: $0) }
+        if sharedLists != lists { sharedLists = lists }
+        let inv = ((r["invites"] as? [[String: Any]]) ?? []).map {
             PlaylistInvite(id: ($0["id"] as? String) ?? "", name: ($0["name"] as? String) ?? "", ownerName: ($0["ownerName"] as? String) ?? "", count: wholeNumber($0["count"]))
         }
+        if invites != inv { invites = inv }
     }
 
     private func applyShared(_ r: [String: Any]) {

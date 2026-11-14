@@ -32,7 +32,7 @@ final class DownloadStore: ObservableObject {
     @Published private(set) var working: String?
     @Published var problem: String?
     /// how far each song that is coming down has got (0...1), for the little animated marks and the progress bar
-    @Published private(set) var progress: [String: Double] = [:]
+    let live = DownloadProgress()
     /// songs asked for in this go, and how many of them are finished (so "3 of 12")
     @Published private(set) var batchTotal = 0
     @Published private(set) var batchDone = 0
@@ -91,14 +91,14 @@ final class DownloadStore: ObservableObject {
     /// How much of a group of songs is on the phone (0...1), counting the ones part way.
     func fraction(_ ids: [String]) -> Double {
         if ids.isEmpty { return 0 }
-        let sum = ids.reduce(0.0) { $0 + (files[$1] != nil ? 1.0 : (progress[$1] ?? 0)) }
+        let sum = ids.reduce(0.0) { $0 + (files[$1] != nil ? 1.0 : (live.values[$1] ?? 0)) }
         return sum / Double(ids.count)
     }
 
     /// Everything in this go, as a fraction.
     var overall: Double {
         guard batchTotal > 0 else { return 0 }
-        let part = progress.values.reduce(0, +)
+        let part = live.values.values.reduce(0, +)
         return min(1, (Double(batchDone) + part) / Double(batchTotal))
     }
 
@@ -121,7 +121,7 @@ final class DownloadStore: ObservableObject {
 
     func remove(_ ids: [String]) {
         pending.removeAll { ids.contains($0) }
-        for id in ids { progress[id] = nil }
+        for id in ids { live.values[id] = nil }
         if pending.isEmpty { batchTotal = 0; batchDone = 0 }
         for id in ids {
             if let name = files[id] { try? FileManager.default.removeItem(at: folder.appendingPathComponent(name)) }
@@ -173,7 +173,7 @@ final class DownloadStore: ObservableObject {
         }
         working = nil
         running = false
-        if pending.isEmpty { batchTotal = 0; batchDone = 0; progress = [:] }
+        if pending.isEmpty { batchTotal = 0; batchDone = 0; live.values = [:] }
     }
 
     private func fetch(_ id: String) async {
@@ -181,7 +181,7 @@ final class DownloadStore: ObservableObject {
             let wanted = pending.contains(id)
             pending.removeAll { $0 == id }
             active.remove(id)
-            progress[id] = nil
+            live.values[id] = nil
             if wanted { batchDone += 1 }
         }
         guard let api = app?.api else { return }
@@ -199,7 +199,7 @@ final class DownloadStore: ObservableObject {
                     guard last.pass(p) else { return }
                     Task { @MainActor in
                         guard let me = self, me.pending.contains(id) else { return }
-                        me.progress[id] = p
+                        me.live.values[id] = p
                     }
                 }
                 guard (200..<300).contains(result.1.statusCode) else {
@@ -244,6 +244,11 @@ func formatBytes(_ n: Int64) -> String {
     let f = ByteCountFormatter()
     f.countStyle = .file
     return f.string(fromByteCount: n)
+}
+
+/// How far each song has got. Separate from the store so a tick of progress redraws only the marks that show it.
+final class DownloadProgress: ObservableObject {
+    @Published var values: [String: Double] = [:]
 }
 
 /// Moves in small steps, so the progress isn't redrawn for every few bytes.
@@ -327,10 +332,25 @@ struct DownloadMark: View {
                 .frame(width: size, height: size).background(Circle().fill(Theme.accent))
                 .accessibilityLabel("Downloaded")
         } else if downloads.isComing(id) {
-            DownloadingGlyph(size: size, progress: downloads.progress[id])
+            ComingMark(live: downloads.live, id: id, size: size)
                 .accessibilityLabel("Downloading")
         }
     }
+}
+
+struct ComingMark: View {
+    @ObservedObject var live: DownloadProgress
+    let id: String
+    let size: CGFloat
+    var body: some View { DownloadingGlyph(size: size, progress: live.values[id]) }
+}
+
+struct OverallGlyph: View {
+    @ObservedObject var live: DownloadProgress
+    @EnvironmentObject var downloads: DownloadStore
+    var ids: [String]? = nil
+    let size: CGFloat
+    var body: some View { DownloadingGlyph(size: size, progress: ids.map { downloads.fraction($0) } ?? downloads.overall) }
 }
 
 /// A ring that fills as the song comes down, with an arrow that keeps moving so it is clear something is happening.
@@ -366,23 +386,39 @@ struct DownloadBanner: View {
             let title = downloads.comingNow.first.flatMap { app.track($0)?.title }
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    DownloadingGlyph(size: 20, progress: downloads.overall)
+                    OverallGlyph(live: downloads.live, size: 20)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Downloading \(n) of \(total)").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text)
                         Text(downloads.problem ?? title ?? "Starting…").font(.system(size: 11)).foregroundColor(Theme.text2).lineLimit(1)
                     }
                     Spacer()
-                    Text("\(Int((downloads.overall * 100).rounded()))%").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2).monospacedDigit()
+                    OverallPercent(live: downloads.live)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
-                GeometryReader { g in
-                    Rectangle().fill(Theme.accent).frame(width: g.size.width * CGFloat(downloads.overall), height: 2)
-                        .animation(.easeInOut(duration: 0.3), value: downloads.overall)
-                }
-                .frame(height: 2)
+                OverallBar(live: downloads.live)
             }
             .background(Theme.surface2)
         }
+    }
+}
+
+struct OverallPercent: View {
+    @ObservedObject var live: DownloadProgress
+    @EnvironmentObject var downloads: DownloadStore
+    var body: some View {
+        Text("\(Int((downloads.overall * 100).rounded()))%").font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.text2).monospacedDigit()
+    }
+}
+
+struct OverallBar: View {
+    @ObservedObject var live: DownloadProgress
+    @EnvironmentObject var downloads: DownloadStore
+    var body: some View {
+        GeometryReader { g in
+            Rectangle().fill(Theme.accent).frame(width: g.size.width * CGFloat(downloads.overall), height: 2)
+                .animation(.easeInOut(duration: 0.3), value: downloads.overall)
+        }
+        .frame(height: 2)
     }
 }
 
@@ -400,7 +436,7 @@ struct DownloadButton: View {
             ZStack {
                 Circle().fill(Theme.surface3).frame(width: 44, height: 44)
                 if busy {
-                    DownloadingGlyph(size: 24, progress: downloads.fraction(ids))
+                    OverallGlyph(live: downloads.live, ids: ids, size: 24)
                 } else {
                     Image(systemName: done ? "checkmark.circle.fill" : "arrow.down.circle")
                         .font(.system(size: 20)).foregroundColor(done ? Theme.accent : Theme.text)

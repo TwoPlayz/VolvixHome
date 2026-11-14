@@ -41,6 +41,8 @@ final class AppModel: ObservableObject {
     /// "system", "dark" or "light"
     @Published var appearance: String = UserDefaults.standard.string(forKey: "volvix.appearance") ?? "system"
 
+    /// the one app model (for views that must not redraw whenever anything in it changes, like album pictures)
+    static weak var shared: AppModel?
     private(set) var api: API?
     private(set) var serverURL: String = ""
     private(set) var trackByID: [String: Track] = [:]
@@ -67,6 +69,7 @@ final class AppModel: ObservableObject {
     private let tokenKey = "volvix.home.token"
 
     init() {
+        AppModel.shared = self
         let d = UserDefaults.standard
         if let s = d.string(forKey: serverKey), !s.isEmpty {
             serverURL = s
@@ -284,9 +287,10 @@ final class AppModel: ObservableObject {
     /// The things that change while the app is open: notifications and what the household is playing.
     func pollOnce() async {
         guard let api = api else { return }
+        // (only what changed is published: every assignment redraws the screens that watch it)
         let n = await api.notifications()
-        notes = n.items
-        unread = n.unread
+        if notes != n.items { notes = n.items }
+        if unread != n.unread { unread = n.unread }
         // new music on the server: bring the library in quietly
         if let data = try? await api.send(try api.request("/api/status")),
            let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], (o["scanning"] as? Bool) != true {
@@ -307,9 +311,11 @@ final class AppModel: ObservableObject {
         if pollRound % 4 == 1 { await syncNetwork() }
         if pollRound % 4 == 3 { await chooseRoute() }
         let h = await api.household()
-        members = h.members
-        householdLists = h.playlists.compactMap { householdInfo($0) }
-        people = await api.people()
+        if members != h.members { members = h.members }
+        let lists = h.playlists.compactMap { householdInfo($0) }
+        if householdLists != lists { householdLists = lists }
+        let ppl = await api.people()
+        if people != ppl { people = ppl }
         await loadShared()
     }
 
