@@ -198,8 +198,11 @@ final class DownloadStore: ObservableObject {
         if q == "stream" { q = app?.quality ?? "original" }
         guard let url = api.streamURL(id, quality: q) else { return }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 120
+        // a converted song is not sent until the server has made it, which can take minutes for a big one
+        req.timeoutInterval = 300
         if let h = api.authHeader { req.setValue(h, forHTTPHeaderField: "Authorization") }
+        // until the first bytes arrive it is "coming, can't say how far": a moving ring, not a stuck one
+        live.values[id] = -1
         // one more try if the connection drops part way (a hotspot does that)
         for attempt in 0..<2 {
             do {
@@ -283,7 +286,7 @@ final class DownloadFetcher: NSObject, URLSessionDownloadDelegate, @unchecked Se
     private lazy var session: URLSession = {
         let c = URLSessionConfiguration.default
         c.httpMaximumConnectionsPerHost = 6
-        c.timeoutIntervalForRequest = 60
+        c.timeoutIntervalForRequest = 300
         c.timeoutIntervalForResource = 3600
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: c, delegate: self, delegateQueue: nil)

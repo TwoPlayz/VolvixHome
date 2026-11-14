@@ -60,6 +60,10 @@ impl Transcoder {
         if std::fs::metadata(&out).map(|m| m.len() > 0).unwrap_or(false) {
             return Ok(out);
         }
+        // two conversions at once (an album asked for all together would otherwise share the processor so thinly that
+        // the big songs take minutes and the app gives up on them)
+        static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+        let _slot = GATE.get_or_init(|| tokio::sync::Semaphore::new(2)).acquire().await;
         std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         let part = self.dir.join(format!("{id}-{quality}.part.m4a"));
         let run = tokio::process::Command::new(ffmpeg)
