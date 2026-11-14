@@ -1542,16 +1542,21 @@ impl App {
 
     /* ---------- downloads ---------- */
 
+    /// The songs one saved album, playlist or song stands for.
+    fn saved_song_ids(&self, kind: &str, id: &str) -> Vec<String> {
+        match kind {
+            "album" => self.lib.album_track_ids(id),
+            // one song, downloaded from its ⋯ menu
+            "track" => vec![id.to_string()],
+            _ => self.playlist(id).map(|p| p.tracks).unwrap_or_default(),
+        }
+    }
+
     /// Every song a saved album or playlist needs.
     fn needed_downloads(&self) -> Vec<String> {
         let mut out = vec![];
         for s in &self.saved {
-            let ids = match s.kind.as_str() {
-                "album" => self.lib.album_track_ids(&s.id),
-                // one song, downloaded from its ⋯ menu
-                "track" => vec![s.id.clone()],
-                _ => self.playlist(&s.id).map(|p| p.tracks).unwrap_or_default(),
-            };
+            let ids = self.saved_song_ids(&s.kind, &s.id);
             for id in ids {
                 if !out.contains(&id) {
                     out.push(id);
@@ -3186,8 +3191,19 @@ impl App {
                     return Task::none();
                 }
                 if self.is_saved(&kind, &id) {
+                    // stopping a download part way: the songs that already arrived stay (as single songs)
+                    let ids = if kind == "track" { vec![] } else { self.saved_song_ids(&kind, &id) };
+                    let here: Vec<String> = ids.iter().filter(|t| self.downloaded.contains(*t)).cloned().collect();
+                    let partial = !here.is_empty() && here.len() < ids.len();
+                    if partial {
+                        for t in here {
+                            if !self.is_saved("track", &t) {
+                                self.saved.push(Saved { kind: "track".into(), id: t });
+                            }
+                        }
+                    }
                     self.saved.retain(|s| !(s.kind == kind && s.id == id));
-                    self.say("Removed from this computer");
+                    self.say(if partial { "Download stopped. The songs already here stay" } else { "Removed from this computer" });
                 } else {
                     self.saved.push(Saved { kind, id });
                     self.say("Downloading for listening offline");
