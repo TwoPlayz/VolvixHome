@@ -91,14 +91,14 @@ final class DownloadStore: ObservableObject {
     /// How much of a group of songs is on the phone (0...1), counting the ones part way.
     func fraction(_ ids: [String]) -> Double {
         if ids.isEmpty { return 0 }
-        let sum = ids.reduce(0.0) { $0 + (files[$1] != nil ? 1.0 : (live.values[$1] ?? 0)) }
+        let sum = ids.reduce(0.0) { $0 + (files[$1] != nil ? 1.0 : max(0, live.values[$1] ?? 0)) }
         return sum / Double(ids.count)
     }
 
     /// Everything in this go, as a fraction.
     var overall: Double {
         guard batchTotal > 0 else { return 0 }
-        let part = live.values.values.reduce(0, +)
+        let part = live.values.values.reduce(0) { $0 + max(0, $1) }
         return min(1, (Double(batchDone) + part) / Double(batchTotal))
     }
 
@@ -128,6 +128,15 @@ final class DownloadStore: ObservableObject {
             files[id] = nil
         }
         save()
+    }
+
+    /// Stop the songs that haven't come down yet. What is already on the phone stays.
+    func cancel(_ ids: [String]) {
+        let stopped = pending.filter { ids.contains($0) }.count
+        pending.removeAll { ids.contains($0) }
+        for id in ids where files[id] == nil { live.values[id] = nil }
+        batchTotal = max(0, batchTotal - stopped)
+        if pending.isEmpty { batchTotal = 0; batchDone = 0 }
     }
 
     func removeAll() {
@@ -289,8 +298,9 @@ final class DownloadFetcher: NSObject, URLSessionDownloadDelegate, @unchecked Se
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard totalBytesExpectedToWrite > 0 else { return }
         lock.lock(); let job = jobs[downloadTask.taskIdentifier]; lock.unlock()
+        // no size from the server (a converted song is sent as it is made): -1 = "coming, can't say how far"
+        guard totalBytesExpectedToWrite > 0 else { job?.progress(-1); return }
         job?.progress(min(1, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
     }
 
@@ -358,19 +368,24 @@ struct DownloadingGlyph: View {
     var size: CGFloat = 14
     var progress: Double?
     @State private var bounce = false
+    @State private var spin = false
 
     var body: some View {
+        let known = (progress ?? 0) >= 0
         ZStack {
             Circle().stroke(Theme.text3.opacity(0.35), lineWidth: max(1.5, size / 8))
-            Circle().trim(from: 0, to: CGFloat(max(0.1, progress ?? 0.1)))
+            Circle().trim(from: 0, to: known ? CGFloat(max(0.1, progress ?? 0.1)) : 0.3)
                 .stroke(Theme.accent, style: StrokeStyle(lineWidth: max(1.5, size / 8), lineCap: .round))
-                .rotationEffect(.degrees(-90))
+                .rotationEffect(.degrees(known ? -90 : (spin ? 270 : -90)))
             Image(systemName: "arrow.down").font(.system(size: size * 0.5, weight: .bold)).foregroundColor(Theme.accent)
                 .offset(y: bounce ? size * 0.12 : -size * 0.12)
         }
         .frame(width: size, height: size)
         .animation(.easeInOut(duration: 0.25), value: progress)
-        .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { bounce = true } }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { bounce = true }
+            withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) { spin = true }
+        }
     }
 }
 
@@ -431,7 +446,7 @@ struct DownloadButton: View {
         let done = downloads.hasAll(ids)
         let busy = downloads.isBusy(ids)
         Button {
-            if done || busy { downloads.remove(ids) } else { downloads.add(ids) }
+            if done { downloads.remove(ids) } else if busy { downloads.cancel(ids) } else { downloads.add(ids) }
         } label: {
             ZStack {
                 Circle().fill(Theme.surface3).frame(width: 44, height: 44)

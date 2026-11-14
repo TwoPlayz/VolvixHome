@@ -59,6 +59,8 @@ final class PlayerModel: ObservableObject {
     private var partySilent = false
     /// a new party song is loaded paused and started when it is ready, at the spot the party is at by then
     private var partyStartTogether = false
+    /// the song whose end was already dealt with (so it isn't dealt with twice)
+    private var endHandledFor: String?
     private var xfading = false
     private var fadingOut: AVPlayer?
     private var currentProc: EQProcessor?
@@ -331,6 +333,7 @@ final class PlayerModel: ObservableObject {
 
     private func seekLocal(_ seconds: Double) {
         defer { hub?.report(force: true) }
+        endHandledFor = nil
         let t = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
         player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
         position = max(0, seconds)
@@ -370,6 +373,7 @@ final class PlayerModel: ObservableObject {
         }
         problem = nil
         loading = true
+        endHandledFor = nil
         position = 0
         let t = app.track(id)
         duration = Double(t?.duration ?? 0)
@@ -528,6 +532,7 @@ final class PlayerModel: ObservableObject {
     }
 
     private func finished() {
+        endHandledFor = currentID
         if inParty {
             // the shared queue moves on; a device that is making sound tells the party its song ended
             if party?.output == "own" { party?.fire("ended", ["index": index]) }
@@ -557,6 +562,13 @@ final class PlayerModel: ObservableObject {
         if let at = sleepAt, Date() >= at {
             sleepAt = nil
             quiet()
+        }
+        // the song is over by the library's length but the player carries on (a file that runs longer than it says, or an end
+        // it never reported): treat it as ended, so the last song of the queue stops instead of the clock running on
+        if isPlaying, !inParty, !inRemote, s.isFinite, endHandledFor != currentID, let id = currentID, let t = app?.track(id),
+           t.duration > 5, s > Double(t.duration) + 1.5, !xfading {
+            finished()
+            return
         }
         if isPlaying, let app = app, let id = currentID, let t = app.track(id) {
             recorder.tick(track: t, dt: 0.5, app: app)

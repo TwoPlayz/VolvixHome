@@ -102,7 +102,9 @@ struct NowPlayingView: View {
     private var quality: AlbumQuality? {
         player.currentID.flatMap { app.track($0) }.flatMap { app.album($0.albumId)?.quality }
     }
-    @State private var dragY: CGFloat = 0
+    /// how far the header or cover is being dragged down. A gesture state: if the touch is interrupted (another tap, a call)
+    /// it goes back to 0 by itself, instead of leaving the player stuck half way.
+    @GestureState private var dragY: CGFloat = 0
     /// The player opens as clear glass over the app and turns into a solid "privacy screen" as it settles; closing
     /// (or dragging it down) turns it back into glass. 1 = glass, 0 = solid.
     @State private var glassy = true
@@ -116,13 +118,9 @@ struct NowPlayingView: View {
     /// Drag the header or the cover down to close the player, like the website.
     private var swipeDown: some Gesture {
         DragGesture(minimumDistance: 6, coordinateSpace: .global)
-            .onChanged { v in dragY = max(0, v.translation.height) }
+            .updating($dragY) { v, state, _ in state = max(0, v.translation.height) }
             .onEnded { v in
-                if v.translation.height > 140 || v.predictedEndTranslation.height > 420 {
-                    close()
-                } else {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { dragY = 0 }
-                }
+                if v.translation.height > 140 || v.predictedEndTranslation.height > 420 { close() }
             }
     }
 
@@ -291,6 +289,7 @@ struct NowPlayingView: View {
             .blur(radius: glassAmount * 18)
         }
         .offset(y: dragY)
+        .animation(dragY == 0 ? .spring(response: 0.3, dampingFraction: 0.85) : nil, value: dragY)
         .onAppear { withAnimation(.easeOut(duration: 0.55)) { glassy = false } }
         .alert(quality?.label ?? "Quality", isPresented: $showQuality) {
             Button("OK", role: .cancel) {}
